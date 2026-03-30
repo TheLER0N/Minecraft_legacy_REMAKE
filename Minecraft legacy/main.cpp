@@ -90,7 +90,7 @@ static int g_SelectedMenuItem = 0;
 static int g_LastActivatedMenuItem = -1;
 static uint64_t g_LastActivatedMenuTime = 0;
 
-struct PanoramaTextureSlot
+struct TextureSlot
 {
     ImTextureData* Texture = nullptr;
     int Width = 0;
@@ -103,22 +103,24 @@ enum class PanoramaVariant
     Night,
 };
 
-static PanoramaTextureSlot g_PanoramaTexture = {};
+static TextureSlot g_PanoramaTexture = {};
+static TextureSlot g_MenuLogoTexture = {};
 static bool g_PanoramaTexturesLoaded = false;
 static bool g_PanoramaLoadAttempted = false;
+static bool g_MenuLogoLoadAttempted = false;
 static PanoramaVariant g_SelectedPanoramaVariant = PanoramaVariant::Day;
 
 static constexpr const char* g_PanoramaDayFile = "assets\\panorama\\panorama_tu69_day.png";
 static constexpr const char* g_PanoramaNightFile = "assets\\panorama\\panorama_tu69_night.png";
+static constexpr const char* g_MenuLogoFile = "assets\\ui\\logo\\legacy_edition_logo.png";
 
-static constexpr std::array<const char*, 6> g_MenuItems =
+static constexpr std::array<const char*, 5> g_MenuItems =
 {
     "Play Game",
     "Mini Games",
     "Leaderboards",
     "Help & Options",
     "Minecraft Store",
-    "Launch New Minecraft",
 };
 
 static constexpr const char* g_SplashText = "What DOES the fox say?";
@@ -687,19 +689,29 @@ static ImU32 ScaleColor(ImU32 color, float factor)
     return ImGui::ColorConvertFloat4ToU32(rgba);
 }
 
-static void ResetPanoramaTextures()
+static void ResetTextureSlot(TextureSlot& slot)
 {
-    if (g_PanoramaTexture.Texture != nullptr)
+    if (slot.Texture != nullptr)
     {
-        ImGui::UnregisterUserTexture(g_PanoramaTexture.Texture);
-        IM_DELETE(g_PanoramaTexture.Texture);
-        g_PanoramaTexture.Texture = nullptr;
+        ImGui::UnregisterUserTexture(slot.Texture);
+        IM_DELETE(slot.Texture);
+        slot.Texture = nullptr;
     }
 
-    g_PanoramaTexture.Width = 0;
-    g_PanoramaTexture.Height = 0;
+    slot.Width = 0;
+    slot.Height = 0;
+}
+
+static void ResetPanoramaTextures()
+{
+    ResetTextureSlot(g_PanoramaTexture);
 
     g_PanoramaTexturesLoaded = false;
+}
+
+static void ResetMenuLogoTexture()
+{
+    ResetTextureSlot(g_MenuLogoTexture);
 }
 
 static PanoramaVariant ChoosePanoramaVariant()
@@ -717,7 +729,7 @@ static const char* GetPanoramaFileForVariant(PanoramaVariant variant)
 
 static void DrawPanoramaLayer(
     ImDrawList* draw_list,
-    const PanoramaTextureSlot& slot,
+    const TextureSlot& slot,
     const ImVec2& viewport_pos,
     const ImVec2& viewport_size,
     float time,
@@ -756,7 +768,7 @@ static void DrawPanoramaLayer(
     );
 }
 
-static bool LoadPanoramaTextureSlot(PanoramaTextureSlot& slot, const char* relative_path)
+static bool LoadTextureSlot(TextureSlot& slot, const char* relative_path)
 {
     const std::string path = GetProjectAssetPath(relative_path);
     SDL_Surface* source_surface = SDL_LoadSurface(path.c_str());
@@ -818,13 +830,35 @@ static bool EnsurePanoramaTexturesLoaded()
     g_PanoramaLoadAttempted = true;
     g_SelectedPanoramaVariant = ChoosePanoramaVariant();
 
-    if (!LoadPanoramaTextureSlot(g_PanoramaTexture, GetPanoramaFileForVariant(g_SelectedPanoramaVariant)))
+    if (!LoadTextureSlot(g_PanoramaTexture, GetPanoramaFileForVariant(g_SelectedPanoramaVariant)))
     {
         ResetPanoramaTextures();
         return false;
     }
 
     g_PanoramaTexturesLoaded = true;
+    return true;
+}
+
+static bool EnsureMenuLogoTextureLoaded()
+{
+    if (g_MenuLogoTexture.Texture != nullptr)
+    {
+        return true;
+    }
+
+    if (g_MenuLogoLoadAttempted)
+    {
+        return false;
+    }
+
+    g_MenuLogoLoadAttempted = true;
+    if (!LoadTextureSlot(g_MenuLogoTexture, g_MenuLogoFile))
+    {
+        ResetMenuLogoTexture();
+        return false;
+    }
+
     return true;
 }
 
@@ -1144,42 +1178,31 @@ static void DrawBlurredBackground(const ImVec2& viewport_pos, const ImVec2& view
 static void DrawMinecraftLogo(const ImVec2& viewport_pos, const ImVec2& viewport_size)
 {
     ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+    if (!EnsureMenuLogoTextureLoaded())
+    {
+        return;
+    }
+
     const float scale = std::min(viewport_size.x / 1280.0f, viewport_size.y / 720.0f);
-    const ImVec2 logo_size = ImVec2(620.0f * scale, 140.0f * scale);
-    const ImVec2 logo_pos = ImVec2(viewport_pos.x + viewport_size.x * 0.5f - logo_size.x * 0.5f, viewport_pos.y + 36.0f * scale);
-    const ImVec2 shadow_offset = ImVec2(8.0f * scale, 11.0f * scale);
+    const float max_logo_width = std::clamp(viewport_size.x * 0.78f, 420.0f * scale, 760.0f * scale);
+    const float logo_aspect = static_cast<float>(g_MenuLogoTexture.Width) / static_cast<float>(g_MenuLogoTexture.Height);
+    const ImVec2 logo_size = ImVec2(max_logo_width, max_logo_width / logo_aspect);
+    const ImVec2 logo_pos = ImVec2(viewport_pos.x + viewport_size.x * 0.5f - logo_size.x * 0.5f, viewport_pos.y + 26.0f * scale);
 
     draw_list->AddRectFilled(
-        ImVec2(logo_pos.x + shadow_offset.x, logo_pos.y + shadow_offset.y + logo_size.y * 0.12f),
-        ImVec2(logo_pos.x + logo_size.x + shadow_offset.x, logo_pos.y + logo_size.y + shadow_offset.y),
-        IM_COL32(20, 23, 30, 235),
-        10.0f * scale
+        ImVec2(logo_pos.x + 12.0f * scale, logo_pos.y + logo_size.y * 0.55f),
+        ImVec2(logo_pos.x + logo_size.x - 12.0f * scale, logo_pos.y + logo_size.y + 12.0f * scale),
+        IM_COL32(12, 14, 18, 170),
+        14.0f * scale
     );
-
-    draw_list->AddRectFilledMultiColor(
+    draw_list->AddImage(
+        g_MenuLogoTexture.Texture->GetTexRef(),
         logo_pos,
-        ImVec2(logo_pos.x + logo_size.x, logo_pos.y + logo_size.y),
-        IM_COL32(242, 236, 236, 255),
-        IM_COL32(222, 214, 214, 255),
-        IM_COL32(132, 124, 126, 255),
-        IM_COL32(164, 160, 162, 255)
+        ImVec2(logo_pos.x + logo_size.x, logo_pos.y + logo_size.y)
     );
-    draw_list->AddRect(logo_pos, ImVec2(logo_pos.x + logo_size.x, logo_pos.y + logo_size.y), IM_COL32(18, 18, 18, 255), 10.0f * scale, 0, 6.0f * scale);
-
-    const float title_size = 112.0f * scale;
-    const ImVec2 title_text_size = MeasureText(g_FontTitle, "MINECRAFT", title_size);
-    const ImVec2 title_pos = ImVec2(logo_pos.x + logo_size.x * 0.5f - title_text_size.x * 0.5f, logo_pos.y - 3.0f * scale);
-    DrawTextOutlined(draw_list, g_FontTitle, title_size, ImVec2(title_pos.x + 5.0f * scale, title_pos.y + 7.0f * scale), IM_COL32(36, 40, 44, 255), IM_COL32(0, 0, 0, 255), 2.0f * scale, "MINECRAFT");
-    DrawTextOutlined(draw_list, g_FontTitle, title_size, title_pos, IM_COL32(244, 239, 239, 255), IM_COL32(18, 18, 18, 255), 2.0f * scale, "MINECRAFT");
-
-    const char* subtitle = "PLAYSTATION 4 EDITION";
-    const float subtitle_size = 29.0f * scale;
-    const ImVec2 subtitle_text_size = MeasureText(g_FontSubtitle, subtitle, subtitle_size);
-    const ImVec2 subtitle_pos = ImVec2(logo_pos.x + logo_size.x * 0.5f - subtitle_text_size.x * 0.5f, logo_pos.y + logo_size.y * 0.71f);
-    DrawTextOutlined(draw_list, g_FontSubtitle, subtitle_size, subtitle_pos, IM_COL32(228, 228, 228, 255), IM_COL32(26, 26, 26, 255), 1.6f * scale, subtitle);
 
     const float splash_size = 42.0f * scale;
-    const ImVec2 splash_pos = ImVec2(logo_pos.x + logo_size.x * 0.66f, logo_pos.y + 18.0f * scale);
+    const ImVec2 splash_pos = ImVec2(logo_pos.x + logo_size.x * 0.70f, logo_pos.y + 18.0f * scale);
     DrawSlantedText(draw_list, g_FontSplash, splash_size, splash_pos, IM_COL32(255, 242, 76, 255), IM_COL32(82, 70, 0, 255), 1.6f * scale, -0.18f, g_SplashText);
 }
 
@@ -1507,6 +1530,7 @@ int main(int, char**)
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ResetPanoramaTextures();
+    ResetMenuLogoTexture();
     ImGui::DestroyContext();
 
     CleanupVulkanWindow(&g_MainWindowData);
