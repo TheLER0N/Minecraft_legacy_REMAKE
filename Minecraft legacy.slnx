@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Minecraft legacy/Minecraft legacy.vcxproj" Id="7c5f30cc-6d8f-44d4-b742-cd9d816c19e8" />
+</Solution>

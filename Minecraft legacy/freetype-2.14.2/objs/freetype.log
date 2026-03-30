@@ -1,0 +1,55 @@
+﻿  autofit.c
+  ftbase.c
+  ftbbox.c
+  ftbdf.c
+  ftbitmap.c
+  ftcid.c
+  ftfstype.c
+  ftgasp.c
+  ftglyph.c
+  ftgxval.c
+  ftinit.c
+  ftmm.c
+  ftotval.c
+  ftpatent.c
+  ftpfr.c
+  ftstroke.c
+  ftsynth.c
+  fttype1.c
+  ftwinfnt.c
+  bdf.c
+  ftcache.c
+  cff.c
+  type1cid.c
+  dlgwrap.c
+  ftgzip.c
+  ftlzw.c
+  pcf.c
+  pfr.c
+  psaux.c
+  pshinter.c
+  psmodule.c
+  raster.c
+  sfnt.c
+  smooth.c
+  sdf.c
+  svg.c
+  truetype.c
+  type1.c
+  type42.c
+  winfnt.c
+C:\Users\Пользователь\Desktop\Minecraft legacy\Minecraft legacy\freetype-2.14.2\src\sfnt\sfdriver.c(1036,36): warning C4244: функция: преобразование "__int64" в "const unsigned int", возможна потеря данных
+  (компиляция исходного файла "../../../src/sfnt/sfnt.c")
+  
+C:\Users\Пользователь\Desktop\Minecraft legacy\Minecraft legacy\freetype-2.14.2\src\type1\t1load.c(1780,64): warning C4244: =: преобразование "__int64" в "FT_Int", возможна потеря данных
+  (компиляция исходного файла "../../../src/type1/type1.c")
+  
+C:\Users\Пользователь\Desktop\Minecraft legacy\Minecraft legacy\freetype-2.14.2\src\type1\t1load.c(1953,36): warning C4244: =: преобразование "__int64" в "FT_Int", возможна потеря данных
+  (компиляция исходного файла "../../../src/type1/type1.c")
+  
+C:\Users\Пользователь\Desktop\Minecraft legacy\Minecraft legacy\freetype-2.14.2\src\type42\t42parse.c(878,62): warning C4244: =: преобразование "__int64" в "FT_Int", возможна потеря данных
+  (компиляция исходного файла "../../../src/type42/type42.c")
+  
+  ftdebug.c
+  ftsystem.c
+  freetype.vcxproj -> C:\Users\Пользователь\Desktop\Minecraft legacy\Minecraft legacy\freetype-2.14.2\objs\x64\Release Static\freetype.lib
