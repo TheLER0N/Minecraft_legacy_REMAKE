@@ -1,0 +1,55 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "progress_save_4jd_dx",
+  
+  /*//// Screen ////*/
+
+  "main_screen_content": {
+    "layer": 5,
+    "type": "stack_panel",
+    "size": [ "100%", "100%" ],
+    "orientation": "vertical",
+    "controls": [
+      {
+        "top_padding": {
+          "type": "panel",
+          "size": [ "100%", "28.9%" ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "$splash_text_visible": false } }
+          ]
+        }
+      },
+      {
+        "center_panel": {
+          "type": "panel",
+          "size": [ "100%", "fill" ],
+          "controls": [
+            { "title_text_panel@progress_world_4jd_dx.title_text_panel": { } }
+          ]
+        }
+      },
+      {
+        "padding_fill": {
+          "type": "panel",
+          "size": [ "100%", "28.9%" ],
+          "controls": [
+          ]
+        }
+      }
+    ]
+  },
+
+  "center_screen": {
+    "type": "panel",
+    "controls": [
+    ]
+  },
+
+  "full_screen": {
+    "type": "panel",
+    "controls": [
+      { "main_screen_content@progress_save_4jd_dx.main_screen_content": { } }
+    ]
+  }
+}

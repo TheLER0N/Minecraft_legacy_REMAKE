@@ -1,0 +1,589 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "controls_4jd_dx",
+  
+  /*//// Assets ////*/
+  
+  "header_text_panel": {
+    "type": "panel",
+    "size": [ "100%", 30 ],
+    "controls": [
+      {
+        "title_panel@label_dx.global_label": {
+          "color": "$4jd_title_text_color",
+          "text": "$header_text",
+          "layer": 2,
+          "offset": [ 1, -2 ],
+          "size": [ "default", 10 ],
+          "anchor_from": "bottom_left",
+          "anchor_to": "bottom_left",
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", "100%" ],
+                "ignored": "(not $has_title_text_shadow)",
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "$header_text",
+                "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "keymapping_item": {
+    "type": "panel",
+    "layer": 1,
+    "size": [ "100%", 21.66666666666666666666 ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left",
+    "controls": [
+      {
+        "keymapping_button_0@button_4jd_dx.main_button": {
+          "size": [ "100%", 20 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "$pressed_button_name": "button.binding_button",
+          "$button_content": "controls_4jd_dx.image_binding_button_content",
+          "bindings": [
+            {
+              "binding_type": "collection_details",
+              "binding_collection_name": "$keymapping_collection"
+            }
+          ]
+        }
+      }
+    ]
+  }, 
+  
+  "image_binding_button_content": {
+    "type": "panel",
+    "layer": 2,
+    "controls": [
+      {
+        "keymapping_label_control@label_dx.global_label": {
+          "color": "$text_color",
+          "text": "#keymapping_name",
+          "layer": 4,
+          "offset": [ 8, 5.5 ],
+          "size": [ "default", 10 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "bindings": [
+            {
+              "binding_name": "#keymapping_name",
+              "binding_type": "collection",
+              "binding_collection_name": "$keymapping_collection"
+            }
+          ],
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", "100%" ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "#keymapping_name",
+                "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ],
+                "bindings": [
+                  {
+                    "binding_name": "#keymapping_name",
+                    "binding_type": "collection",
+                    "binding_collection_name": "$keymapping_collection"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "keymapping_label_control@label_dx.global_label": {
+          "color": "$text_color",
+          "text": "#binding_button_text",
+          "layer": 4,
+          "size": [ "default", 10 ],
+          "offset": [ -7, 5.5 ],
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "bindings": [
+            {
+              "binding_name": "#binding_button_text",
+              "binding_type": "collection",
+              "binding_collection_name": "$keymapping_collection"
+            }
+          ],
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", "100%" ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "#text",
+                "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ],
+                "bindings": [
+                  {
+                    "binding_name": "#binding_button_text",
+                    "binding_type": "collection",
+                    "binding_collection_name": "$keymapping_collection"
+                  },
+                  {
+                    "binding_type": "view",
+                    "source_property_name": "('§r' + (#binding_button_text) - '§1' - '§2' - '§3' - '§4' - '§5' - '§6' - '§7' - '§8' - '§9' - '§a' - '§b' - '§c' - '§d' - '§e' - '§f' - '§g')",
+                    "target_property_name": "#text"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "none_panel": {
+          "type": "panel",
+          "ignored": "$ignore_none_text",
+          "bindings": [
+            {
+              "binding_name": "#binding_button_text",
+              "binding_type": "collection",
+              "binding_collection_name": "$keymapping_collection"
+            },
+            {
+              "binding_type": "view",
+              "source_property_name": "(not (#binding_button_text = '>   <'))",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            {
+              "none_label@label_dx.global_label": {
+                "color": "$text_color",
+                "text": "gui.none",
+                "layer": 4,
+                "size": [ "default", 10 ],
+                "offset": [ -7, 5.5 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_right",
+                "bindings": [
+                  {
+                    "binding_name": "#binding_icon_sprite",
+                    "binding_type": "collection",
+                    "binding_collection_name": "$keymapping_collection"
+                  },
+                  {
+                    "binding_type": "view",
+                    "source_property_name": "(#binding_icon_sprite = '')",
+                    "target_property_name": "#visible"
+                  }
+                ],
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "gui.none",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "base_icon_image": {
+          "type": "image",
+          "size": [ 26, 26 ],
+          "offset": [ -6, -3.5 ],
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "layer": 6,
+          "$gameplay_key_icon|default": "#binding_icon_sprite",
+          "bindings": [
+            {
+              "binding_name": "$gameplay_key_icon",
+              "binding_name_override": "#texture",
+              "binding_type": "collection",
+              "binding_collection_name": "$keymapping_collection"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  "unmodified_keymapping_panel@common.button": {
+    "$pressed_button_name": "unset",
+    "sound_name": "ui.press",
+    "size": [ "100%", 21.5 ],
+    "$keymapping_text": "",
+    "$keymapping_value_text": "",
+    "$keymapping_icon": "common.empty_panel",
+    "controls": [
+      {
+        "default": {
+          "type": "panel",
+          "controls": [
+            {
+              "title_panel@label_dx.global_label": {
+                "color": "$4jd_title_text_color",
+                "text": "$keymapping_text",
+                "layer": 4,
+                "offset": [ 8, 5.5 ],
+                "size": [ "default", 10 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "$keymapping_text",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "key_label@label_dx.global_label": {
+                "color": "$4jd_title_text_color",
+                "text": "$keymapping_value_text",
+                "layer": 4,
+                "size": [ "default", 10 ],
+                "offset": [ -7, 5.5 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_right",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "$keymapping_value_text",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hover": {
+          "type": "panel",
+          "controls": [
+            {
+              "title_panel@label_dx.global_label": {
+                "color": "$main_button_hover_color",
+                "text": "$keymapping_text",
+                "layer": 4,
+                "offset": [ 7.5, 5 ],
+                "size": [ "default", 10 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", 10 ],
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "$keymapping_text",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "key_label@label_dx.global_label": {
+                "color": "$main_button_hover_color",
+                "text": "$keymapping_value_text",
+                "layer": 4,
+                "size": [ "default", 10 ],
+                "offset": [ -7.5, 5 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_right",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", 10 ],
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "$keymapping_value_text",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "pressed": {
+          "type": "panel",
+          "controls": [
+            {
+              "title_panel@label_dx.global_label": {
+                "color": "$4jd_title_text_color",
+                "text": "$keymapping_text",
+                "layer": 4,
+                "offset": [ 8, 5.5 ],
+                "size": [ "default", 10 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "$keymapping_text",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "key_label@label_dx.global_label": {
+                "color": "$4jd_title_text_color",
+                "text": "$keymapping_value_text",
+                "layer": 4,
+                "size": [ "default", 10 ],
+                "offset": [ -7, 5.5 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_right",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "$keymapping_value_text",
+                      "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "panel_content@dialog_4jd_textures_dx.panel_content_alt": {
+          "size": [ "100%", 20 ],
+          "layer": 2,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "icon@$keymapping_icon": {
+          "size": [ 26, 26 ],
+          "layer": 3,
+          "offset": [ -6, -3.5 ],
+          "anchor_from": "top_right",
+          "anchor_to": "top_right"
+        }
+      }
+    ]
+  },
+  
+  /*//// Screen ////*/
+
+  "keyboard_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "keyboard@keyboard_and_mouse_4jd_dx.keyboard_stack_panel_content": { } }
+    ]
+  },
+
+  "controller_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "controller@controller_4jd_dx.controller_stack_panel_content": { } }
+    ]
+  },
+
+  "touch_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "touch@touch_4jd_dx.touch_stack_panel_content": { } }
+    ]
+  },
+
+  "main_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 253.3333333333333, 283.333333333333333 ],
+    "offset": [ 0, 0.333333333333333 ],
+    "$scrolling_content": "controls_4jd_dx.all_controls_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ "100%-12px", "100%-23px" ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 7.3, 8.33333333333333 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "touch_panel@controls_4jd_dx.main_panel": {
+    "size": [ 250, 150 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 21 ],
+    "$scrolling_content": "controls_4jd_dx.touch_panel_content"
+  },
+  
+  /*//// Main Panel ////*/
+
+  "main_buttons": {
+    "type": "stack_panel",
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 35 ],
+    "size": [ 225, "100%c" ],
+    "controls": [
+      {
+        "button_0@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "keyboard_and_mouse_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_keyboard_and_mouse_toggle",
+                "$button_text": "options.keyboardAndMouse",
+                "$toggle_group_forced_index": 231,
+                "$toggle_name": "4jd_controls_section"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_1@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "controller_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_controller_toggle",
+                "$button_text": "options.controller",
+                "$toggle_group_forced_index": 232,
+                "$toggle_name": "4jd_controls_section"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_2@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "touch_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_touch_toggle",
+                "$button_text": "options.touch",
+                "$toggle_group_forced_index": 233,
+                "$toggle_name": "4jd_controls_section"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "controls_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "main@options_bindings_4jd_dx.controls_panel_bindings": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "controls_4jd_dx.main_buttons" } }
+          ]
+        }
+      },
+      {
+        "keyboard_and_mouse": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "bindings": [
+            { 
+              "binding_type": "view",
+              "source_control_name": "4jd_keyboard_and_mouse_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "main_panel@controls_4jd_dx.main_panel": { "$scrolling_content": "controls_4jd_dx.keyboard_panel_content" } }
+          ]
+        }
+      },
+      {
+        "controller": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_controller_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "main_panel@controls_4jd_dx.main_panel": { "$scrolling_content": "controls_4jd_dx.controller_panel_content" } }
+          ]
+        }
+      },
+      {
+        "touch": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_touch_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "controls_4jd_dx.touch_panel" } }
+          ]
+        }
+      }
+    ]
+  }
+}

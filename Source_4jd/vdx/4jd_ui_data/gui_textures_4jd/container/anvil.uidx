@@ -1,0 +1,83 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "anvil_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "hammer": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 15, 7.333333333333333333333333 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/hammer",
+          "size": [ 45, 45 ]
+        }
+      },
+      {
+        "plus": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 53, 60.333333333333333333333333 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/plus",
+          "size": [ 19.333333333333333333333333, 19.333333333333333333333333 ]
+        }
+      },
+      {
+        "arrow": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 121.666666666666666666666666, 59.333333333333333333333333 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/arrow",
+          "size": [ 33.333333333333333333333333, 22.666666666666666666666666 ]
+        }
+      }
+    ]
+  },
+
+  "error": {
+    "type": "panel",
+    "size": [ 22.333333333333333333333333, 22.333333333333333333333333 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/error",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "slot_grid": {
+    "type": "panel",
+    "size": [ 29.333333333333333333333333, 29.333333333333333333333333 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/slot_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  }
+}

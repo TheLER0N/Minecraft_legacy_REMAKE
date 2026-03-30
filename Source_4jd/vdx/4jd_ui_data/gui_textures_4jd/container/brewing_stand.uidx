@@ -1,0 +1,161 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "brewing_stand_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "brew_background": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 123.3333333333333, 23 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/brew_background",
+          "size": [ 12, 41.33333333333333 ]
+        }
+      },
+      {
+        "bubbles_background": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 75.66666666666667, 20.33333333333333 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/bubbles_background",
+          "size": [ 16, 42.66666666666667 ]
+        }
+      },
+      {
+        "brewing_pipes": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 59.66666666666667, 24.33333333333333 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/brewing_pipes",
+          "size": [ 96, 96 ]
+        }
+      },
+      {
+        "fuel_slot": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 17.66666666666667, 24 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/anvil/slot_grid",
+          "size": [ 27, 27 ]
+        }
+      },
+      {
+        "brewing_fuel_pipes": {
+          "layer": 3,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 43.33333333333333, 44 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/brewing_fuel_pipes",
+          "size": [ 26.66666666666667, 26.66666666666667 ]
+        }
+      },
+      {
+        "fuel_background": {
+          "layer": 4,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 70, 64 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/fuel_background",
+          "size": [ 26.66666666666667, 8 ]
+        }
+      }
+    ]
+  },
+
+  "slot_grid": {
+    "type": "panel",
+    "size": [ 27, 27 ],
+    "controls": [
+    ]
+  },
+
+  "brew_progress": {
+    "type": "panel",
+    "size": [ 12, 41.33333333333333 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/brew_progress",
+          "size": [ "100%", "100%" ],
+          "clip_direction": "up",
+          "bindings": [
+            {
+              "binding_name": "#brewing_arrow_ratio",
+              "binding_name_override": "#clip_ratio",
+              "binding_condition": "always"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "bubbles": {
+    "type": "panel",
+    "size": [ 16, 42.66666666666667 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/bubbles",
+          "size": [ "100%", "100%" ],
+          "clip_direction": "down",
+          "bindings": [
+            {
+              "binding_name": "#brewing_bubbles_ratio",
+              "binding_name_override": "#clip_ratio",
+              "binding_condition": "always"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "fuel_length": {
+    "type": "panel",
+    "size": [ 26.66666666666667, 8 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/brewing_stand/fuel_length",
+          "size": [ "100%", "100%" ],
+          "clip_direction": "left",
+          "bindings": [
+            {
+              "binding_name": "#brewing_fuel_ratio",
+              "binding_name_override": "#clip_ratio",
+              "binding_condition": "always"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

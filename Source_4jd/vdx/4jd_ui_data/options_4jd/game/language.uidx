@@ -1,0 +1,83 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "language_4jd_dx",
+  
+  "button_label@label_dx.global_label": {
+    "color": "$text_color",
+    "text": "$radio_label_text",
+    "bindings": "$radio_label_bindings",
+    "controls": [
+      {
+        "shadow@label_dx.global_label": {
+          "size": [ "100%", 10 ],
+          "layer": -1,
+          "color": "$4jd_text_shadow_color",
+          "text": "#text",
+          "offset": [ 0.5, 0.5 ],
+          "bindings": [
+            {
+              "binding_name": "#language_description",
+              "binding_type": "collection",
+              "binding_condition": "once",
+              "binding_collection_name": "languages"
+            },
+            {
+              "binding_type": "view",
+              "source_property_name": "('§r' + (#language_description) - '§1' - '§2' - '§3' - '§4' - '§5' - '§6' - '§7' - '§8' - '§9' - '§a' - '§b' - '§c' - '§d' - '§e' - '§f' - '§g')",
+              "target_property_name": "#text"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "language_grid_item@general_section.language_grid_item": {
+    "size": [  "100%", 25 ],
+    "controls": [
+      { 
+        "lang_button_core@settings_common.radio_with_label_core": {
+          "sound_name": "ui.press",
+          "size": [  "100%", 20 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "$button_content": "language_4jd_dx.button_label",
+
+          "$unchecked_control": "button_dx.main_button_default_base",
+          "$unchecked_hover_control": "button_dx.main_button_hover_base",
+          "$checked_control": "button_dx.main_button_hover_base",
+          "$checked_hover_control": "button_dx.main_button_hover_base",
+          
+          "$unchecked_locked_control": "button_dx.main_button_locked_base",
+          "$checked_locked_control": "button_dx.main_button_locked_base",
+          "$unchecked_locked_hover_control": "button_dx.main_button_locked_base",
+          "$checked_locked_hover_control": "button_dx.main_button_locked_base"
+        }
+      }
+    ]
+  },
+
+  "language_stack_panel_content": {
+    "type": "stack_panel",
+    "orientation": "vertical",
+    "size": [ "100%-1px", "100%c" ],
+    "controls": [
+      {
+        "language_list_grid": {
+          "type": "grid",
+          "size": [ "100%", "100%c" ],
+          "grid_item_template": "language_4jd_dx.language_grid_item",
+          "grid_dimension_binding": "#language_grid_dimension",
+          "collection_name": "languages",
+          "bindings": [
+            {
+              "binding_name": "#language_grid_dimension",
+              "binding_condition": "visible"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

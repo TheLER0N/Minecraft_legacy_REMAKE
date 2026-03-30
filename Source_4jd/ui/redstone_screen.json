@@ -1,0 +1,61 @@
+{
+  "hopper_screen": {
+    "variables": [
+      {
+        "requires": "$desktop_screen",
+        "$screen_content": "hopper_4jd_dx.center_screen",
+        "$screen_bg_content": "hopper_4jd_dx.full_screen",
+        "$4jd_full_screen_content": "hopper_4jd_dx.main_screen_content"
+      },
+      {
+        "requires": "$pocket_screen",
+        "$screen_content": "pocket_containers.hopper_panel"
+      }
+    ]
+  },
+
+  "dispenser_screen": {
+    "variables": [
+      {
+        "requires": "$desktop_screen",
+        "$screen_content": "dispenser_4jd_dx.center_screen",
+        "$screen_bg_content": "dispenser_4jd_dx.full_screen",
+        "$4jd_full_screen_content": "dispenser_4jd_dx.main_screen_content"
+      },
+      {
+        "requires": "$pocket_screen",
+        "$screen_content": "pocket_containers.dispenser_panel"
+      }
+    ]
+  },
+
+  "crafter_screen": {
+    "variables": [
+      {
+        "requires": "$desktop_screen",
+        "$screen_content": "crafter_4jd_dx.center_screen",
+        "$screen_bg_content": "crafter_4jd_dx.full_screen",
+        "$4jd_full_screen_content": "crafter_4jd_dx.main_screen_content"
+      },
+      {
+        "requires": "$pocket_screen",
+        "$screen_content": "crafter_pocket.crafter"
+      }
+    ]
+  },
+
+  "dropper_screen": {
+    "variables": [
+      {
+        "requires": "$desktop_screen",
+        "$screen_content": "dropper_4jd_dx.center_screen",
+        "$screen_bg_content": "dropper_4jd_dx.full_screen",
+        "$4jd_full_screen_content": "dropper_4jd_dx.main_screen_content"
+      },
+      {
+        "requires": "$pocket_screen",
+        "$screen_content": "pocket_containers.dropper_panel"
+      }
+    ]
+  }
+}

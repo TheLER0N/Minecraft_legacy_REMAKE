@@ -1,0 +1,133 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "toggle_4jd_dx",
+
+  /*//// Option Toggle ////*/
+
+  "option_toggle@settings_common.option_generic_core": {
+    "type": "panel",
+    "size": [ "100%", 15 ],
+    "$enabled|default": true,
+    "$option_enabled_binding_name|default": "",
+    "$toggle_off_text": "options.off",
+    "$toggle_on_text": "options.on",
+    "controls": [
+      {
+        "option_toggle_control@settings_common.option_toggle_control": {
+          "sound_name": "ui.press",
+          "size": [ "100%", "100%" ],
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "consume_hover_events": false,
+
+          "$unchecked_control": "toggle_4jd_dx.toggle_unchecked",
+          "$checked_control": "toggle_4jd_dx.toggle_checked",
+          "$unchecked_hover_control": "toggle_4jd_dx.toggle_unchecked_hover",
+          "$checked_hover_control": "toggle_4jd_dx.toggle_checked_hover",
+          
+          "$unchecked_locked_control": "toggle_4jd_dx.toggle_unchecked_locked",
+          "$unchecked_locked_hover_control": "toggle_4jd_dx.toggle_unchecked_locked",
+          "$checked_locked_control": "toggle_4jd_dx.toggle_checked_locked",
+          "$checked_locked_hover_control": "toggle_4jd_dx.toggle_checked_locked"
+        }
+      }
+    ]
+  },
+  
+  "toggle_unchecked": {
+    "type": "panel",
+    "$toggle_alpha": 1.0,
+    "$toggle_texture": "widget_4jd_textures_dx.toggle_off",
+    "controls": [
+      { 
+        "texture@$toggle_texture": {
+          "layer": 4,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "option_label@label_dx.global_label": {
+          "alpha": "$toggle_alpha",
+          "color": "$4jd_title_text_color",
+          "text": "$option_label",
+          "size": [ "default", 10 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 13.5, 2 ],
+          "layer": 5,
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", "100%" ],
+                "alpha": "$toggle_alpha",
+                "ignored": "(not $has_title_text_shadow)",
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "$option_label",
+                "offset": [ 0.5, 0.5 ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  "toggle_unchecked_hover@toggle_4jd_dx.toggle_unchecked": {
+    "$toggle_alpha": 1.0,
+    "$toggle_texture": "widget_4jd_textures_dx.toggle_off_highlighted",
+    "controls": [
+      //{ "hover_content@$hover_content": { } },
+      { 
+        "texture@$toggle_texture": {
+          "layer": 4,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "option_label@label_dx.global_label": {
+          "alpha": "$toggle_alpha",
+          "color": "$4jd_main_menu_toggle_hover_color",
+          "text": "$option_label",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 13, 1.5 ],
+          "shadow": false,
+          "layer": 6,
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", 10 ],
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "$option_label",
+                "offset": [ 0.33333333333333333333333333333333333, 0.33333333333333333333333333333333333 ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  "toggle_checked@toggle_4jd_dx.toggle_unchecked": {
+    "$toggle_texture": "widget_4jd_textures_dx.toggle_on"
+  },
+  
+  "toggle_checked_hover@toggle_4jd_dx.toggle_unchecked_hover": {
+    "$toggle_texture": "widget_4jd_textures_dx.toggle_on_highlighted"
+  },
+  
+  "toggle_unchecked_locked@toggle_4jd_dx.toggle_unchecked": {
+    "$toggle_alpha": 0.5,
+    "$toggle_texture": "widget_4jd_textures_dx.toggle_off"
+  },
+  
+  "toggle_checked_locked@toggle_4jd_dx.toggle_unchecked": {
+    "$toggle_alpha": 0.5,
+    "$toggle_texture": "widget_4jd_textures_dx.toggle_on"
+  }
+}

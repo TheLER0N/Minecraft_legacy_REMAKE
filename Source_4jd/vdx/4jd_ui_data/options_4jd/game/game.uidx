@@ -1,0 +1,813 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "game_4jd_dx",
+
+  "game_advance_options_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 250, 160 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 21 ],
+    "$scrolling_content": "game_advance_options_4jd_dx.game_advance_options_stack_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ "100%-12px", "100%-23px" ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 7.3, 8.33333333333333 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "split_screen_dropdown_content@settings_common.option_radio_dropdown_group": {
+    "$texture_button_color_checked": [ 1.0, 1.0, 1.0 ],
+    "size": [ "100%", "100%c" ],
+    "offset": [ 0, 0 ],
+    "$radio_buttons": [
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#split_screen_radio_horizontal",
+          "$radio_label_text": "options.splitscreen.horizontal"
+        }
+      },
+      {
+        "@sdropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#split_screen_radio_vertical",
+          "$radio_label_text": "options.splitscreen.vertical"
+        }
+      }
+    ]
+  },
+
+  "world_difficulty_dropdown_content@settings_common.option_radio_dropdown_group": {
+    "$texture_button_color_checked": [ 1.0, 1.0, 1.0 ],
+    "size": [ "100%", "100%c" ],
+    "offset": [ 0, 0 ],
+    "$radio_buttons": [
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#world_difficulty_radio_peaceful",
+          "$radio_label_text": "options.difficulty.peaceful"
+        }
+      },
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#world_difficulty_radio_easy",
+          "$radio_label_text": "options.difficulty.easy"
+        }
+      },
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#world_difficulty_radio_normal",
+          "$radio_label_text": "options.difficulty.normal"
+        }
+      },
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#world_difficulty_radio_hard",
+          "$radio_label_text": "options.difficulty.hard"
+        }
+      }
+    ]
+  },
+
+  "game_stack_panel_content": {
+    "type": "stack_panel",
+    "orientation": "vertical",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      {
+        "name_controls": {
+          "type": "stack_panel",
+          "orientation": "vertical",
+          "size": [ "100%", "100%c" ],
+          "ignored": "(not $is_pregame or not $is_xboxlive_enabled)",
+          "controls": [
+            {
+              "option_text_field@text_field_4jd_dx.option_text_field": {
+                "$option_label": "options.name",
+                "$option_place_holder_text": "options.defaultName",
+                "$max_text_edit_length": 16,
+                "$option_binding_name": "#player_name",
+                "$text_box_name": "player_name_text_box",
+                "$option_enabled_binding_name": "#player_name_enabled"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "binding_name": "#can_change_name",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "signin_controls": {
+          "type": "panel",
+          "size": [ "100%", 22 ],
+          "ignored": "(not $is_pregame or not $is_xboxlive_enabled)",
+          "controls": [
+            {
+              "action_button@button_4jd_dx.main_button": {
+                "size": [ "100%", 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$pressed_button_name": "sign_in_button",
+                "$button_text": "xbox.signInLong"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "binding_name": "#not_logged_in",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "gamertag_controls": {
+          "type": "stack_panel",
+          "orientation": "vertical",
+          "size": [ "100%", "100%c" ],
+          "controls": [
+            {
+              "gamertag_panel": {
+                "type": "panel",
+                "size": [ "100%", 29 ],
+                "controls": [
+                  {
+                    "option_label@label_dx.global_label": {
+                      "color": "$4jd_title_text_color",
+                      "text": "options.gamertag",
+                      "size": [ "default", 10 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "offset": [ 1, 0 ],
+                      "layer": 5,
+                      "controls": [
+                        {
+                          "shadow@label_dx.global_label": {
+                            "size": [ "100%", "100%" ],
+                            "ignored": "(not $has_title_text_shadow)",
+                            "layer": -1,
+                            "color": "$4jd_text_shadow_color",
+                            "text": "options.gamertag",
+                            "offset": [ 0.5, 0.5 ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "gamerpic": {
+                      "type": "panel",
+                      "size": [ 16, 16 ],
+                      "offset": [ 1, -1 ],
+                      "layer": 5,
+                      "anchor_from": "bottom_left",
+                      "anchor_to": "bottom_left",
+                      "controls": [
+                        {
+                          "gamerpic": {
+                            "type": "custom",
+                            "renderer": "profile_image_renderer",
+                            "anchor_from": "top_left",
+                            "anchor_to": "top_left",
+                            "size": [ 16, 16 ],
+                            "bindings": [
+                              {
+                                "binding_name": "#profile_image_options"
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "name@label_dx.global_label": {
+                            "color": "$4jd_title_text_color",
+                            "text": "#gamertag_label",
+                            "size": [ "default", 10 ],
+                            "anchor_from": "top_left",
+                            "anchor_to": "top_left",
+                            "offset": [ 20, 3 ],
+                            "layer": 5,
+                            "bindings": [
+                              {
+                                "binding_name": "#gamertag_label"
+                              }
+                            ],
+                            "controls": [
+                              {
+                                "shadow@label_dx.global_label": {
+                                  "size": [ "100%", "100%" ],
+                                  "ignored": "(not $has_title_text_shadow)",
+                                  "layer": -1,
+                                  "color": "$4jd_text_shadow_color",
+                                  "text": "#gamertag_label",
+                                  "offset": [ 0.5, 0.5 ],
+                                  "bindings": [
+                                    {
+                                      "binding_name": "#gamertag_label"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "binding_name": "#logged_in",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "xboxlive_deep_link_buttons": {
+          "ignored": "($device_must_be_removed_for_xbl_signin or $fire_tv or not $is_pregame or $disable_gamertag_controls)",
+          "type": "stack_panel",
+          "size": [ "100%", "100%c" ],
+          "bindings": [
+            {
+              "binding_name": "#logged_in",
+              "binding_name_override": "#visible"
+            }
+          ],
+          "controls": [
+            {
+              "change_gamertag": {
+                "type": "panel",
+                "size": [ "100%", 22 ],
+                "controls": [
+                  {
+                    "action_button@button_4jd_dx.main_button": {
+                      "size": [ "100%", 20 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "$pressed_button_name": "change_gamertag_button",
+                      "$button_text": "options.changeGamertag"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "manage_account": {
+                "type": "panel",
+                "size": [ "100%", 22 ],
+                "controls": [
+                  {
+                    "action_button@button_4jd_dx.main_button": {
+                      "size": [ "100%", 20 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "$pressed_button_name": "manage_account_button",
+                      "$button_text": "options.manageAccount"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "privacy_button": {
+                "type": "panel",
+                "ignored": "($is_holographic or $fire_tv or $education_edition or $nx_os)",
+                "size": [ "100%", 22 ],
+                "controls": [
+                  {
+                    "action_button@button_4jd_dx.main_button": {
+                      "size": [ "100%", 20 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "property_bag": {
+                        "#hyperlink": "https://account.xbox.com/Settings"
+                      },
+                      "$pressed_button_name": "button.menu_open_uri",
+                      "$button_text": "options.xboxLive.privacyControl"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "sign_out": {
+                "type": "panel",
+                "ignored": "($build_platform_UWP or not $is_pregame or $requires_xbl_signin_to_play)",
+                "size": [ "100%", 22 ],
+                "controls": [
+                  {
+                    "action_button@button_4jd_dx.main_button": {
+                      "size": [ "100%", 20 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "$pressed_button_name": "sign_out_button",
+                      "$button_text": "xbox.signOutLong"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "split_screen_dropdown@dropdown_4jd_dx.option_dropdown": {
+          "ignored": "(not $can_splitscreen)",
+          "$option_label": "options.splitscreen",
+          "$dropdown_content": "game_4jd_dx.split_screen_dropdown_content",
+          "$option_dropdown_type": "dropdown_dx.dropdown_no_scrollpanel",
+          "$dropdown_area": "content_area",
+          "$dropdown_name": "split_screen_dropdown",
+          "$option_enabled_binding_name": "#split_screen_dropdown_enabled",
+          "$options_dropdown_toggle_label_binding": "#split_screen_dropdown_toggle_label",
+          "$dropdown_scroll_content_size": [ "100%", "145%" ]
+        }
+      },
+      {
+        "auto_jump_panel": {
+          "type": "panel",
+          "size": [ "100%", 15 ],
+          "ignored": "$touch",
+          "controls": [
+            {
+              "option_toggle_0@toggle_4jd_dx.option_toggle": {
+                "$option_label": "options.autojump",
+                "$option_binding_name": "#keyboard_mouse_autojump",
+                "$option_enabled_binding_name": "#keyboard_mouse_autojump_enabled",
+                "$toggle_name": "keyboard_mouse_autojump",
+                "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+                "bindings": [
+                  {
+                    "binding_name": "#close_button_visible",
+                    "binding_name_override": "#visible"
+                  }
+                ]
+              }
+            },
+            {
+              "option_toggle_0_alt_0@toggle_4jd_dx.option_toggle": {
+                "$option_label": "options.autojump",
+                "$option_binding_name": "#controller_autojump",
+                "$option_enabled_binding_name": "#controller_autojump_enabled",
+                "$toggle_name": "controller_autojump",
+                "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+                "bindings": [
+                  {
+                    "binding_name": "(not #close_button_visible)",
+                    "binding_name_override": "#visible"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "option_toggle_0_touch@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.autojump",
+          "$option_binding_name": "#touch_autojump",
+          "$option_enabled_binding_name": "#touch_autojump_enabled",
+          "$toggle_name": "touch_autojump",
+          "ignored": "(not $touch)"
+        }
+      },
+      {
+        "view_bobbing_toggle@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.viewBobbing",
+          "$option_binding_name": "#view_bobbing",
+          "$option_enabled_binding_name": "#view_bobbing_enabled",
+          "$toggle_name": "view_bobbing"
+        }
+      },
+      {
+        "player_names_toggle@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.ingamePlayerNames",
+          "$option_binding_name": "#ingame_player_names",
+          "$option_enabled_binding_name": "#ingame_player_names_enabled",
+          "$toggle_name": "ingame_player_names"
+        }
+      },
+      {
+        "splitscreen_player_names_toggle@toggle_4jd_dx.option_toggle": {
+          "ignored": "(not $can_splitscreen)",
+          "$option_label": "options.splitscreenIngamePlayerNames",
+          "$option_binding_name": "#splitscreen_ingame_player_names",
+          "$option_enabled_binding_name": "#splitscreen_ingame_player_names_enabled",
+          "$toggle_name": "splitscreen_ingame_player_names"
+        }
+      },
+      {
+        "languages_panel": {
+          "type": "panel",
+          "size": [ "100%", 22 ],
+          "ignored": "(not $is_pregame)",
+          "controls": [
+            {
+              "languages_button@options_4jd_dx.toggle_button_base": {
+                "size": [ "100%", 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$tab_view_binding_name": "4jd_language_toggle",
+                "$button_text": "options.language",
+                "$toggle_group_forced_index": 241,
+                "$toggle_name": "4jd_game_section"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "game_sensitivity_panel": {
+          "type": "panel",
+          "size": [ "100%", 18 ],
+          "ignored": "$touch",
+          "controls": [
+            {
+              "option_slider_0@slider_4jd_dx.option_slider": {
+                "$option_label": "#keyboard_mouse_sensitivity_slider_label",
+                "$slider_name": "keyboard_mouse_sensitivity",
+                "$slider_value_binding_name": "#keyboard_mouse_sensitivity",
+                "$slider_tts_text_value": "#keyboard_mouse_sensitivity_text_value",
+                "$option_enabled_binding_name": "#keyboard_mouse_sensitivity_enabled",
+                "$label_bindings": [ { "binding_name": "$option_label" } ],
+                "bindings": [
+                  {
+                    "binding_name": "#close_button_visible",
+                    "binding_name_override": "#visible"
+                  }
+                ]
+              }
+            },
+            {
+              "option_slider_0_alt_0@slider_4jd_dx.option_slider": {
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$option_label": "#controller_sensitivity_slider_label",
+                "$slider_name": "controller_sensitivity",
+                "$slider_value_binding_name": "#controller_sensitivity",
+                "$slider_tts_text_value": "#controller_sensitivity_text_value",
+                "$option_enabled_binding_name": "#controller_sensitivity_enabled",
+                "$label_bindings": [ { "binding_name": "$option_label" } ],
+                "bindings": [
+                  {
+                    "binding_name": "(not #close_button_visible)",
+                    "binding_name_override": "#visible"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "option_slider_0_touch@slider_4jd_dx.option_slider": {
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "$option_label": "#touch_sensitivity_slider_label",
+          "$slider_name": "touch_sensitivity",
+          "$slider_value_binding_name": "#touch_sensitivity",
+          "$option_enabled_binding_name": "#touch_sensitivity_enabled",
+          "$label_bindings": [ { "binding_name": "#touch_sensitivity_slider_label" } ],
+          "ignored": "(not $touch)"
+        }
+      },
+      {
+        "spygrass_sensitivity_panel": {
+          "type": "panel",
+          "size": [ "100%", 18 ],
+          "ignored": "$touch",
+          "controls": [
+            {
+              "option_slider_damen@slider_4jd_dx.option_slider": {
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$option_label": "#spyglass_mouse_dampening_slider_label",
+                "$slider_name": "spyglass_mouse_dampening",
+                "$slider_value_binding_name": "#spyglass_mouse_dampening",
+                "$slider_tts_text_value": "#spyglass_mouse_dampening_text_value",
+                "$option_enabled_binding_name": "#keyboard_mouse_sensitivity_enabled",
+                "$label_bindings": [ { "binding_name": "$option_label" } ],
+                "bindings": [
+                  {
+                    "binding_name": "(#close_button_visible)",
+                    "binding_name_override": "#visible"
+                  }
+                ]
+              }
+            },
+            {
+              "option_slider_damen_alt_0@slider_4jd_dx.option_slider": {
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$option_label": "#spyglass_gamepad_dampening_slider_label",
+                "$slider_name": "spyglass_gamepad_dampening",
+                "$slider_value_binding_name": "#spyglass_gamepad_dampening",
+                "$slider_tts_text_value": "#spyglass_gamepad_dampening_text_value",
+                "$option_enabled_binding_name": "#keyboard_mouse_sensitivity_enabled",
+                "$label_bindings": [ { "binding_name": "$option_label" } ],
+                "bindings": [
+                  {
+                    "binding_name": "(not #close_button_visible)",
+                    "binding_name_override": "#visible"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "option_slider_damen_touch@slider_4jd_dx.option_slider": {
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "$option_label": "#spyglass_touch_dampening_slider_label",
+          "$slider_name": "spyglass_touch_dampening",
+          "$slider_value_binding_name": "#spyglass_touch_dampening",
+          "$slider_tts_text_value": "#spyglass_touch_dampening_text_value",
+          "$option_enabled_binding_name": "#touch_sensitivity_enabled",
+          "$label_bindings": [ { "binding_name": "$option_label" } ],
+          "ignored": "(not $touch)"
+        }
+      },
+      {
+        "difficulty_panel": {
+          "type": "panel",
+          "size": [ "100%", 22 ],
+          "ignored": "($is_pregame)",
+          "controls": [
+            {
+              "option_dropdown_2@dropdown_4jd_dx.option_dropdown": {
+                "size": [ "100%", 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$option_label": "options.difficulty",
+                "$dropdown_content": "game_4jd_dx.world_difficulty_dropdown_content",
+                "$option_dropdown_type": "dropdown_dx.dropdown_no_scrollpanel",
+                "$dropdown_area": "content_area",
+                "$dropdown_name": "world_difficulty_dropdown",
+                "$options_dropdown_toggle_label_binding": "#world_difficulty_dropdown_toggle_label",
+                "$option_enabled_binding_name": "#world_difficulty_dropdown_enabled",
+                "$selection_highlight_offset": [ -2, 1 ],
+                "$selection_highlight_size": [ "100%", "100% + 1px" ],
+                "$dropdown_scroll_content_size": [ "100%", "260%" ],
+                "$focus_override_left": "FOCUS_OVERRIDE_STOP",
+                "$focus_override_right": "FOCUS_OVERRIDE_STOP"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "pvp_toggle@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_pregame)",
+          "$tts_section_header": "createWorldScreen.worldSettings",
+          "$option_label": "createWorldScreen.pvp",
+          "$option_binding_name": "#pvp",
+          "$option_enabled_binding_name": "#pvp_enabled",
+          "$toggle_name": "pvp",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$toggle_binding_condition": "always_when_visible"
+        }
+      },
+      {
+        "show_coordinates_toggle@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_pregame)",
+          "$tts_section_header": "createWorldScreen.worldSettings",
+          "$option_label": "createWorldScreen.showCoordinates",
+          "$option_binding_name": "#show_coordinates",
+          "$option_enabled_binding_name": "#show_coordinates_enabled",
+          "$toggle_name": "show_coordinates",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$toggle_binding_condition": "always_when_visible"
+        }
+      },
+      {
+        "show_days_played_toggle@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_pregame)",
+          "$tts_section_header": "createWorldScreen.worldSettings",
+          "$option_label": "createWorldScreen.showDaysPlayed",
+          "$option_binding_name": "#show_days_played",
+          "$option_enabled_binding_name": "#show_days_played_enabled",
+          "$toggle_name": "show_days_played",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$toggle_binding_condition": "always_when_visible"
+        }
+      },
+      {
+        "allow_cheats_toggle@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_pregame)",
+          "$tts_section_header": "createWorldScreen.cheatSettings",
+          "$option_label": "selectWorld.cheats",
+          "$option_binding_name": "#allow_cheats",
+          "$option_enabled_binding_name": "#allow_cheats_enabled",
+          "$toggle_name": "allow_cheats",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$toggle_binding_condition": "always_when_visible"
+        }
+      },
+      {
+        "world_options_panel": {
+          "type": "panel",
+          "size": [ "100%", 22 ],
+          "ignored": "($is_pregame)",
+          "controls": [
+            {
+              "world_options_button@options_4jd_dx.toggle_button_base": {
+                "size": [ "100%", 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$tab_view_binding_name": "4jd_world_options_toggle",
+                "$button_text": "selectWorld.moreWorldOptions",
+                "$toggle_group_forced_index": 242,
+                "$toggle_name": "4jd_game_section"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "game_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "game@game_4jd_dx.game_stack_panel_content": { } }
+    ]
+  },
+
+  "language_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "language@language_4jd_dx.language_stack_panel_content": { } }
+    ]
+  },
+
+  "world_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "world@world_4jd_dx.world_stack_panel_content": { } }
+    ]
+  },
+
+  "main_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 250, 153 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 21 ],
+    "$scrolling_content": "game_4jd_dx.game_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ "100%-12px", "100%-23px" ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 7.3, 8.33333333333333 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "language_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 240, 165 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 11 ],
+    "$scrolling_content": "game_4jd_dx.language_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ 225, 150 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 7, 7 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "world_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 280, 200 ],
+    "offset": [ 0, 0 ],
+    "$scrolling_content": "game_4jd_dx.world_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ "100%-16px", 184 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 8, 8 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "game_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "main@options_bindings_4jd_dx.game_panel_bindings": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "game_4jd_dx.main_panel" } }
+          ]
+        }
+      },
+      {
+        "language": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "ignored": "(not $is_pregame)",
+          "bindings": [
+            { 
+              "binding_type": "view",
+              "source_control_name": "4jd_language_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "game_4jd_dx.language_panel" } }
+          ]
+        }
+      },
+      {
+        "world_options": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "ignored": "($is_pregame)",
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_world_options_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "world_panel@game_4jd_dx.world_panel": { } }
+          ]
+        }
+      },
+      {
+        "world_options": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_game_advance_options_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "game_4jd_dx.game_advance_options_panel" } }
+          ]
+        }
+      }
+    ]
+  }
+}

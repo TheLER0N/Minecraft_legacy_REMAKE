@@ -1,0 +1,208 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social and AgentMindStorm | @agentms.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "miscellaneous_4jd_dx",
+
+  /*//// Panorama ////*/
+
+  "panorama_bg_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "panorama_panel@miscellaneous_4jd_dx.panorama_panel": {
+          "ignored": "(not $is_pregame or $is_on_3p_server or $is_console)"
+        }
+      }
+    ]
+  },
+
+  "panorama_scroll": {
+    "anim_type": "offset",
+    "easing": "linear",
+    "duration": 136,
+    "from": "$panorama_start",
+    "to": "$panorama_end",
+    "$panorama_start|default": [ 0, 0 ],
+    "$panorama_end|default": [ "-569.44%y", 0 ],
+    "next": "@miscellaneous_4jd_dx.panorama_scroll"
+  },
+  
+  "panorama_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "clips_children": true,
+    "controls": [
+      {
+        "main_panorama": {
+          "type": "image",
+          "$panorama_texture|default": "assets/vdx/textures/gui/title/background/day",
+          "texture": "$panorama_texture",
+          "size": [ "569.44%y", "100%" ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": "@miscellaneous_4jd_dx.panorama_scroll",
+          "layer": -200,
+          "bilinear": true,
+          "anims": [],
+          "controls": [
+            { 
+              "next_side_panorama": {
+                "type": "image",
+                "texture": "$panorama_texture",
+                "size": [ "100%", "100%" ],
+                "offset": [ 0, 0 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_left",
+                "anims": [],
+                "bilinear": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  /*//// For controller use ////*/
+
+  "controller_close_button@common.button": {
+    "layer": -10,
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.back",
+    "focus_enabled": false,/* 
+    "bindings": [
+      {
+        "binding_name": "(not #close_button_visible)",
+        "binding_name_override": "#visible"
+      }
+    ], */
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_cancel",
+        "to_button_id": "button.menu_exit",
+        "mapping_type": "global"
+      },
+      {
+        "from_button_id": "button.menu_inventory_cancel",
+        "to_button_id": "button.menu_exit",
+        "mapping_type": "global"
+      },
+      {
+        "from_button_id": "button.menu_select",
+        "to_button_id": "button.menu_exit",
+        "mapping_type": "pressed"
+      },
+      {
+        "from_button_id": "button.menu_ok",
+        "to_button_id": "button.menu_exit",
+        "mapping_type": "focused"
+      }
+    ]
+  },
+
+  "controller_lb_button@common.button": {
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.focus",
+    "focus_enabled": false,
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_tab_left",
+        "to_button_id": "button.menu_tab_left",
+        "mapping_type": "global",
+        "scope": "view"
+      }
+    ]
+  },
+
+  "controller_rb_button@common.button": {
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.focus",
+    "focus_enabled": false,
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_tab_right",
+        "to_button_id": "button.menu_tab_right",
+        "mapping_type": "global",
+        "scope": "view"
+      }
+    ]
+  },
+
+  "controller_up_button@common.button": {
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.focus",
+    "focus_enabled": false,
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_up",
+        "to_button_id": "button.menu_up",
+        "mapping_type": "global",
+        "scope": "view"
+      }
+    ]
+  },
+
+  "controller_dp_button@common.button": {
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.focus",
+    "focus_enabled": false,
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_down",
+        "to_button_id": "button.menu_down",
+        "mapping_type": "global",
+        "scope": "view"
+      }
+    ]
+  },
+
+  "controller_lp_button@common.button": {
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.focus",
+    "focus_enabled": false,
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_left",
+        "to_button_id": "button.menu_left",
+        "mapping_type": "global",
+        "scope": "view"
+      }
+    ]
+  },
+
+  "controller_rp_button@common.button": {
+    "size": [ 1, 1 ],
+    "offset": [ 0, 0 ],
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "sound_name": "ui.focus",
+    "focus_enabled": false,
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_right",
+        "to_button_id": "button.menu_right",
+        "mapping_type": "global",
+        "scope": "view"
+      }
+    ]
+  }
+}

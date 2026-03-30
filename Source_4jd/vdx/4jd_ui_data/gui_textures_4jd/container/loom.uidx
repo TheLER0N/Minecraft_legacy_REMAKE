@@ -1,0 +1,210 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "loom_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "arrow": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 101, 42 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/arrow",
+          "size": [ 22.666666666666666666666666, 22.666666666666666666666666 ]
+        }
+      },
+      {
+        "frame_panel": {
+          "layer": 2,
+          "type": "image",
+          "anchor_to": "top_right",
+          "anchor_from": "top_right",
+          "offset": [ -24.5, 29.5 ],
+          "size": [ 24, 48 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/frame_panel"
+        }
+      }
+    ]
+  },
+
+  "patterns_background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/patterns_background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "patterns_panel_content": {
+          "layer": 2,
+          "type": "image",
+          "anchor_to": "top_left",
+          "anchor_from": "top_left",
+          "offset": [ 9, 9 ],
+          "size": [ 129, 184 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/patterns_panel_content"
+        }
+      },
+      {
+        "scroll_track_disabled@loom_4jd_textures_dx.scroll_track": {
+          "layer": 2,
+          "alpha": 0.5,
+          "propagate_alpha": true,
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "size": [ 12, 181 ],
+          "offset": [ -12.5, 10.5 ],
+          "bindings": [
+            {
+              "binding_name": "(#pattern_selector_total_items < 49)",
+              "binding_name_override": "#visible",
+              "binding_type": "collection",
+              "binding_collection_name": "patterns"
+            }
+          ],
+          "controls": [
+            {
+              "point": {
+                "type": "panel",
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ -2, -1 ],
+                "controls": [
+                  {
+                    "scroller_disabled@loom_4jd_textures_dx.scroller": {
+                      "layer": 3,
+                      "size": [ 16, 16 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "offset": [ 0, 0 ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "scroller": {
+    "layer": 2,
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/scroller"
+  },
+
+  "scroll_track": {
+    "layer": 1,
+    "type": "image",
+    "size": [ "100%-4px", "100%-2px" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/scroll_track"
+  },
+
+  "slot_grid": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/slot_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "slot_grid_red": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/slot_grid_red",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "output_grid": {
+    "type": "panel",
+    "size": [ 32, 32 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/output_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "pattern": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/pattern",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "pattern_highlighted": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/pattern_highlighted",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "pattern_selected": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/loom/pattern_selected",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,167 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "button_4jd_dx",
+
+  /*//// Main Button ////*/
+
+  "main_button@button_dx.main_button_base": {
+    "$button_content": "button_4jd_dx.button_label",
+    "sound_name": "ui.press"
+  },
+
+  "button_label@button_dx.button_label": {
+    "shadow": false,
+    "text": "$button_text",
+    "controls": [
+      {
+        "shadow@button_dx.button_label": {
+          "layer": -1,
+          "color": "$4jd_text_shadow_color",
+          "text": "$button_text",
+          "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ],
+          "shadow": false
+        }
+      }
+    ]
+  },
+
+  /*//// Visibility Black Button ////*/
+
+  "visibility_black_button_default": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_default@button_dx.black_button_default": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "visibility_black_button_hover": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_hover@button_dx.black_button_hover": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "visibility_black_button_pressed": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_pressed@button_dx.black_button_pressed": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "visibility_black_button_locked": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_locked@button_dx.black_button_locked": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "visibility_black_button_checked_right_default": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_checked_right_default@button_dx.black_button_checked_right_default": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "visibility_black_button_checked_right_hover": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_checked_right_hover@button_dx.black_button_checked_right_hover": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "visibility_black_button_checked_right_locked": {
+    "type": "panel",
+    "size": [ 24, 24 ],
+    "controls": [
+      {
+        "black_button_checked_right_locked@button_dx.black_button_checked_right_locked": {
+          "size": [ 24, 24 ],
+          "bindings": [
+            {
+              "binding_name": "(#close_button_visible)",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "main_visibility_black_button@common.button": {
+    "locked_control": "locked",
+    "consume_hover_events": false,
+    "controls": [
+      { "default@button_4jd_dx.visibility_black_button_default": { } },
+      { "hover@button_4jd_dx.visibility_black_button_hover": { } },
+      { "pressed@button_4jd_dx.visibility_black_button_pressed": { } },
+      { "locked@button_4jd_dx.visibility_black_button_locked": { } }
+    ]
+  }
+}

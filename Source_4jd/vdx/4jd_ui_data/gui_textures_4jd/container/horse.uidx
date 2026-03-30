@@ -1,0 +1,82 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "horse_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/horse/background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "panel_content_0": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 33.666666666666666666666666, 20 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/horse/panel_content",
+          "size": [ 63, 63 ],
+          "controls": [
+            {
+              "renderer_bg": {
+                "layer": 2,
+                "type": "image",
+                "texture": "assets/vdx/textures/gui/sprites/container_4jd/horse/renderer_bg",
+                "size": [ "100%-2.666666666666666666666666px", "100%-2.666666666666666666666666px" ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "panel_content_1": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 96.666666666666666666666666, 20 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/beacon/panel_content",
+          "size": [ 105, 63 ]
+        }
+      }
+    ]
+  },
+
+  "slot_grid": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/horse/slot_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "chest_grid": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/horse/chest_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,300 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "options_4jd_dx",
+  
+  /*//// SButton Tab Template ////*/
+  
+  "toggle_button_base@toggle_dx.toggle_panel": {
+    "$button_content": "button_4jd_dx.button_label",
+    "$sound_name": "ui.press",
+    "size": [ 225, 20 ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left",
+    "$unchecked_control": "button_dx.main_button_default_base",
+    "$unchecked_hover_control": "button_dx.main_button_hover_base",
+    "$checked_control": "button_dx.main_button_default_base",
+    "$checked_hover_control": "button_dx.main_button_hover_base"
+  },
+  
+  /*//// Settings Panel ////*/
+
+  "settings_buttons": {
+    "type": "stack_panel",
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 35 ],
+    "size": [ 225, "100%c" ],
+    "controls": [
+      {
+        "button_0@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "game_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_game_toggle",
+                "$button_text": "options.category.game",
+                "$toggle_group_forced_index": 260,
+                "$toggle_name": "4jd_options_tab"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_1@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "audio_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_audio_toggle",
+                "$button_text": "options.sounds",
+                "$toggle_group_forced_index": 261,
+                "$toggle_name": "4jd_options_tab"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_2@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "graphics_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_graphics_toggle",
+                "$button_text": "options.category.graphics",
+                "$toggle_group_forced_index": 262,
+                "$toggle_name": "4jd_options_tab"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_3@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "ui_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_ui_toggle",
+                "$button_text": "4jd.options.ui",
+                "$toggle_group_forced_index": 263,
+                "$toggle_name": "4jd_options_tab"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  /*//// Main Panel ////*/
+
+  "main_buttons": {
+    "type": "stack_panel",
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 35 ],
+    "size": [ 225, "100%c" ],
+    "controls": [
+      {
+        "button_0@start_4jd_dx.stacked_row": {
+          "controls": [
+            { 
+              "how_to_play_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "how_to_play_button_toggle",
+                "$button_text": "menu.howToPlay",
+                "$toggle_group_forced_index": "$how_to_play_index",
+                "$toggle_property_bag": {
+                  "#panel_title": "menu.howToPlay"
+                },
+                "$toggle_name": "navigation_tab"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_1@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "controls_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_controls_toggle",
+                "$button_text": "options.category.input",
+                "$toggle_group_forced_index": 205,
+                "$toggle_name": "navigation_tab"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_2@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "settings_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_settings_toggle",
+                "$button_text": "4jd.menu.settings",
+                "$toggle_group_forced_index": 206,
+                "$toggle_name": "navigation_tab"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "button_3@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "settings_button@options_4jd_dx.toggle_button_base": {
+                "$tab_view_binding_name": "4jd_credits_and_attribution_toggle",
+                "$button_text": "options.credits",
+                "$toggle_group_forced_index": "$general_forced_index",
+                "$toggle_name": "navigation_tab"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  /*//// Screen ////*/
+
+  "settings_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "main@options_bindings_4jd_dx.settings_panel_bindings": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "$buttons_panel_control": "options_4jd_dx.settings_buttons" } }
+          ]
+        }
+      },
+      {
+        "game@game_4jd_dx.game_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_game_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "audio@audio_4jd_dx.audio_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_audio_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "graphics@graphics_4jd_dx.graphics_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_graphics_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "user_interface@user_interface_4jd_dx.user_interface_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_ui_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "main_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "main@options_bindings_4jd_dx.help_and_options_panel_bindings": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "$buttons_panel_control": "options_4jd_dx.main_buttons" } }
+          ]
+        }
+      },
+      {
+        "credits_and_attribution@credits_and_attribution_4jd_dx.credits_and_attribution_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_credits_and_attribution_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "controls@controls_4jd_dx.controls_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_controls_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      },
+      {
+        "settings@options_4jd_dx.settings_panel": {
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_settings_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "center_screen": {
+    "type": "panel",
+    "controls": [
+      { "gamepad_helpers@options_gamepad_helper_4jd_dx.gamepad_helpers": { } },
+      { "extra_buttons@options_extra_buttons_4jd_dx.extra_buttons": { } },
+      { "gamertag_pic_and_label@start_4jd_dx.gamertag_pic_and_label": { } }
+    ]
+  },
+
+  "full_screen": {
+    "type": "panel",
+    "controls": [
+      { "controller_close_button@miscellaneous_4jd_dx.controller_close_button": { } },
+      { "controller_up_button@miscellaneous_4jd_dx.controller_up_button": { } },
+      { "controller_dp_button@miscellaneous_4jd_dx.controller_dp_button": { } },
+      { "controller_lp_button@miscellaneous_4jd_dx.controller_lp_button": { } },
+      { "controller_rp_button@miscellaneous_4jd_dx.controller_rp_button": { } },
+      { "main_panel@options_4jd_dx.main_panel": { } },
+      { "inworld_menu_background@menu_background_textures_dx.inworld_menu_background": { "ignored": "($is_pregame)", "layer": -10 } }
+    ]
+  }
+}

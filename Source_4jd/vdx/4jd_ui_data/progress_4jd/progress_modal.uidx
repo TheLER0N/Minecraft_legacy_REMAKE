@@ -1,0 +1,29 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "progress_modal_4jd_dx",
+  
+  /*//// Screen ////*/
+
+  "center_screen": {
+    "type": "panel",
+    "controls": [
+    ]
+  },
+
+  "full_screen": {
+    "type": "panel",
+    "controls": [
+      {
+        "coordinate_text_panel": {
+          "type": "image",
+          "size": [ "100%", "100%" ],
+          "texture": "vdx/ui_textures/global/color_base",
+          "color": [ 0.0, 0.0, 0.0 ],
+          "layer": -10
+        }
+      },
+      { "modern_loading_icon@progress_4jd_textures_dx.modern_loading_icon": { "offset": [ 0, 0 ] } }
+    ]
+  }
+}

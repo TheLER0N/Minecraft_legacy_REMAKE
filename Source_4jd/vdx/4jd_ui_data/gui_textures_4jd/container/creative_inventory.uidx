@@ -1,0 +1,165 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "creative_inventory_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "creative_panel_content": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 18.33333333333333, 28 ],
+          "size": [ 270, 135 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/creative_panel_content"
+        }
+      },
+      {
+        "scroll_track_disabled@creative_inventory_4jd_textures_dx.scroll_track": {
+          "layer": 2,
+          "alpha": 0.5,
+          "propagate_alpha": true,
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "size": [ 12, 135 ],
+          "offset": [ -12.33333333333333, 28 ],
+          "bindings": [
+            {
+              "binding_name": "(#recipe_book_total_items < 51)",
+              "binding_name_override": "#visible",
+              "binding_type": "collection",
+              "binding_collection_name": "recipe_book"
+            }
+          ],
+          "controls": [
+            {
+              "point": {
+                "type": "panel",
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ -2, -1 ],
+                "controls": [
+                  {
+                    "scroller_disabled@creative_inventory_4jd_textures_dx.scroller": {
+                      "layer": 3,
+                      "size": [ 16, 16 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "offset": [ 0, 0 ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "scroller": {
+    "layer": 2,
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/scroller"
+  },
+
+  "scroll_track": {
+    "layer": 1,
+    "type": "image",
+    "size": [ "100%-4px", "100%-2px" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/scroll_track"
+  },
+
+  "creative_grid_default": {
+    "layer": 1,
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/creative_grid_default"
+  },
+
+  "creative_grid_group_collapsed": {
+    "layer": 1,
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/creative_grid_group_collapsed"
+  },
+
+  "creative_grid_group_expanded": {
+    "layer": 1,
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/creative_grid_group_expanded"
+  },
+
+  "creative_grid_selected": {
+    "layer": 1,
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/creative_grid_selected"
+  },
+
+  "hotbar_grid": {
+    "type": "panel",
+    "size": [ 27, 27 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/hotbar_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "tab_left_selected": {
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/tab_left_selected"
+  },
+
+  "tab_left_unselected": {
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/tab_left_unselected"
+  },
+
+  "tab_middle_selected": {
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/tab_middle_selected"
+  },
+
+  "tab_middle_unselected": {
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/tab_middle_unselected"
+  },
+
+  "tab_right_selected": {
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/tab_right_selected"
+  },
+
+  "tab_right_unselected": {
+    "type": "image",
+    "size": [ "100%", "100%" ],
+    "texture": "assets/vdx/textures/gui/sprites/container_4jd/creative_inventory/tab_right_unselected"
+  }
+}

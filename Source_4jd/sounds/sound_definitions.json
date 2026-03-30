@@ -1,0 +1,75 @@
+{
+  "random.enchant": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/block/enchantment_table/enchant1",
+        "volume": 0.75,
+        "load_on_low_memory": true
+      },
+      {
+        "name": "sounds/block/enchantment_table/enchant2",
+        "volume": 0.75
+      },
+      {
+        "name": "sounds/block/enchantment_table/enchant3",
+        "volume": 0.75
+      }
+    ]
+  },
+  
+  "ui.press": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/ui/press",
+        "volume": 0.2
+      }
+    ]
+  },
+  "ui.back": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/ui/back",
+        "volume": 1.0
+      }
+    ]
+  },
+  "ui.focus": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/ui/focus",
+        "volume": 1.0
+      }
+    ]
+  },
+  "ui.scroll": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/ui/scroll",
+        "volume": 1.0
+      }
+    ]
+  },
+  "ui.craft": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/ui/craft",
+        "volume": 1.0
+      }
+    ]
+  },
+  "ui.craft_fail": {
+    "category": "ui",
+    "sounds": [
+      {
+        "name": "sounds/ui/craftfail",
+        "volume": 1.0
+      }
+    ]
+  }
+}

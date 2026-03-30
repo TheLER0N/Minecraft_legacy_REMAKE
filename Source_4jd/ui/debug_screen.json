@@ -1,0 +1,10 @@
+/*File modified by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "debug_screen": { 
+    "screen_draws_last": false,
+    "force_render_below": true,
+    "$screen_content": "miscellaneous_dx.empty_panel",
+    "$screen_bg_content": "miscellaneous_4jd_dx.panorama_bg_panel"
+  }
+}

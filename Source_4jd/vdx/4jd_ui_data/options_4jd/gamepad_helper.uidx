@@ -1,0 +1,265 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "options_gamepad_helper_4jd_dx",
+
+  "gamepad_helpers": {
+    "type": "stack_panel",
+    "orientation": "horizontal",
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "size": [ "100%", 16 ],
+    "controls": [
+      {
+        "gamepad_helper_a@gamepad_helper_4jd_dx.gamepad_helper_a": {
+          "bindings": [
+            {
+              "binding_type": "global",
+              "binding_name": "#gamepad_helper_visible",
+              "binding_name_override": "#visible",
+              "binding_condition": "none"
+            }
+          ]
+        }
+      },
+      { 
+        "gamepad_helper_b@gamepad_helper_4jd_dx.gamepad_helper_b": {
+          "$icon_description_bind": "controller.buttonTip.back",
+          "$has_description_binding": false,
+          "bindings": [
+            {
+              "binding_type": "global",
+              "binding_name": "#gamepad_helper_visible",
+              "binding_name_override": "#visible",
+              "binding_condition": "none"
+            }
+          ]
+        }
+      },
+      {
+        "options": {
+          "type": "panel",
+          "size": [ "100%c", 16 ],
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "4jd_settings_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            {
+              "audio_panel": {
+                "type": "panel",
+                "size": [ "100%c", 16 ],
+                "bindings": [
+                  {
+                    "binding_type": "view",
+                    "source_control_name": "4jd_game_toggle",
+                    "source_property_name": "(#toggle_state)",
+                    "target_property_name": "#visible"
+                  }
+                ],
+                "controls": [
+                  {
+                    "hold": {
+                      "type": "panel",
+                      "size": [ "100%c", 16 ],
+                      "bindings": [
+                        { 
+                          "binding_type": "view",
+                          "source_control_name": "4jd_game_advance_options_toggle",
+                          "source_property_name": "(not #toggle_state)",
+                          "target_property_name": "#visible"
+                        }
+                      ],
+                      "controls": [
+                        {
+                          "advanced": {
+                            "type": "panel",
+                            "size": [ "100%c", 16 ],
+                            "controls": [
+                              { 
+                                "gamepad_helper_y@gamepad_helper_4jd_dx.gamepad_helper_y": {
+                                  "$icon_description_bind": "realmsSettingsScreen.inviteLinkSettingsAdvanced",
+                                  "$has_description_binding": false,
+                                  "bindings": [
+                                    {
+                                      "binding_type": "global",
+                                      "binding_name": "#gamepad_helper_visible",
+                                      "binding_name_override": "#visible",
+                                      "binding_condition": "none"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "audio_panel": {
+                "type": "panel",
+                "size": [ "100%c", 16 ],
+                "bindings": [
+                  {
+                    "binding_type": "view",
+                    "source_control_name": "4jd_audio_toggle",
+                    "source_property_name": "(#toggle_state)",
+                    "target_property_name": "#visible"
+                  }
+                ],
+                "controls": [
+                  {
+                    "hold": {
+                      "type": "panel",
+                      "size": [ "100%c", 16 ],
+                      "bindings": [
+                        { 
+                          "binding_type": "view",
+                          "source_control_name": "4jd_audio_advance_options_toggle",
+                          "source_property_name": "(not #toggle_state)",
+                          "target_property_name": "#visible"
+                        }
+                      ],
+                      "controls": [
+                        {
+                          "advanced": {
+                            "type": "panel",
+                            "size": [ "100%c", 16 ],
+                            "controls": [
+                              { 
+                                "gamepad_helper_y@gamepad_helper_4jd_dx.gamepad_helper_y": {
+                                  "$icon_description_bind": "realmsSettingsScreen.inviteLinkSettingsAdvanced",
+                                  "$has_description_binding": false,
+                                  "bindings": [
+                                    {
+                                      "binding_type": "global",
+                                      "binding_name": "#gamepad_helper_visible",
+                                      "binding_name_override": "#visible",
+                                      "binding_condition": "none"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "graphics_panel": {
+                "type": "panel",
+                "size": [ "100%c", 16 ],
+                "bindings": [
+                  {
+                    "binding_type": "view",
+                    "source_control_name": "4jd_graphics_toggle",
+                    "source_property_name": "(#toggle_state)",
+                    "target_property_name": "#visible"
+                  }
+                ],
+                "controls": [
+                  {
+                    "hold@options_bindings_4jd_dx.graphics_panel_bindings": {
+                      "type": "panel",
+                      "size": [ "100%c", 16 ],
+                      "controls": [
+                        {
+                          "advanced": {
+                            "type": "panel",
+                            "size": [ "100%c", 16 ],
+                            "controls": [
+                              { 
+                                "gamepad_helper_y@gamepad_helper_4jd_dx.gamepad_helper_y": {
+                                  "$icon_description_bind": "realmsSettingsScreen.inviteLinkSettingsAdvanced",
+                                  "$has_description_binding": false,
+                                  "bindings": [
+                                    {
+                                      "binding_type": "global",
+                                      "binding_name": "#gamepad_helper_visible",
+                                      "binding_name_override": "#visible",
+                                      "binding_condition": "none"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "graphics_panel": {
+                "type": "panel",
+                "size": [ "100%c", 16 ],
+                "bindings": [
+                  {
+                    "binding_type": "view",
+                    "source_control_name": "4jd_ui_toggle",
+                    "source_property_name": "(#toggle_state)",
+                    "target_property_name": "#visible"
+                  }
+                ],
+                "controls": [
+                  {
+                    "hold": {
+                      "type": "panel",
+                      "size": [ "100%c", 16 ],
+                      "bindings": [
+                        { 
+                          "binding_type": "view",
+                          "source_control_name": "4jd_ui_advance_options_toggle",
+                          "source_property_name": "(not #toggle_state)",
+                          "target_property_name": "#visible"
+                        }
+                      ],
+                      "controls": [
+                        {
+                          "advanced": {
+                            "type": "panel",
+                            "size": [ "100%c", 16 ],
+                            "controls": [
+                              { 
+                                "gamepad_helper_y@gamepad_helper_4jd_dx.gamepad_helper_y": {
+                                  "$icon_description_bind": "realmsSettingsScreen.inviteLinkSettingsAdvanced",
+                                  "$has_description_binding": false,
+                                  "bindings": [
+                                    {
+                                      "binding_type": "global",
+                                      "binding_name": "#gamepad_helper_visible",
+                                      "binding_name_override": "#visible",
+                                      "binding_condition": "none"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

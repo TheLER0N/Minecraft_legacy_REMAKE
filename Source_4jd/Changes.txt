@@ -1,0 +1,27 @@
+v3.2.8 [30 October 2025]
+
+Note: Initial changes from previous generation. Fork from VDX: Mixed UI v3.
+
+However, it is not a big deal, it is just a small improvement than the previous version
+with the new GUI system.
+
+This is just a new beginning...
+
+[Additions]
+[*] Global:
+	- Chat Screen
+	- Toast
+
+[Temporarily Removed] (Will be added in the next update)
+[*] Options:
+	- Storage Section
+	- Subscription Section
+
+[Changes]
+[*] Global:
+	- Updated to minimum version 1.21.120.
+  - Added PBR capabilities in "manifest.json" in order to use with Vibrant Visuals.
+[*] Options:
+  - Added new essential options.
+[*] Inventory:
+  - An error that prevented the use of the hotbar hotkeys for inventory has been fixed.

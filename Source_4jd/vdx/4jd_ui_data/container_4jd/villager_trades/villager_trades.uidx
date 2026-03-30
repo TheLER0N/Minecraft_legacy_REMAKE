@@ -1,0 +1,345 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "villager_trades_4jd_dx",
+  
+  "input_slot_01": {
+    "type": "panel",
+    "size": [ 26.66666666666667, 26.66666666666667 ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left",
+    "$condition_item_collection_name": "trade2_ingredient1_item",
+    "controls": [
+      {
+        "empty_item": {
+          "type": "panel",
+          "size": [ 26.66666666666667, 26.66666666666667 ],
+          "bindings": [
+            {
+              "binding_name": "(#hover_text = '')",
+              "binding_name_override": "#visible",
+              "binding_type": "collection",
+              "binding_collection_name": "$condition_item_collection_name"
+            }
+          ],
+          "controls": [
+            {
+              "warning@container_4jd_textures_dx.warning": {
+                "layer": 20,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ 1.333333333333333, 1.333333333333333 ]
+              }
+            },
+            {
+              "slot_grid_red@villager_4jd_textures_dx.slot_grid_red": {
+                "layer": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "has_item_panel": {
+          "type": "panel",
+          "size": [ 26.66666666666667, 26.66666666666667 ],
+          "bindings": [
+            {
+              "binding_name": "(not (#hover_text = ''))",
+              "binding_name_override": "#visible",
+              "binding_type": "collection",
+              "binding_collection_name": "$condition_item_collection_name"
+            }
+          ],
+          "controls": [
+            {
+              "warning@container_4jd_textures_dx.warning": {
+                "layer": 20,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ 1.333333333333333, 1.333333333333333 ],
+                "bindings": [
+                  {
+                    "binding_name": "(not #item_valid)",
+                    "binding_name_override": "#visible",
+                    "binding_type": "collection",
+                    "binding_collection_name": "$condition_item_collection_name",
+                    "binding_condition": "none"
+                  }
+                ]
+              }
+            },
+            {
+              "slot_grid_red@villager_4jd_textures_dx.slot_grid_red": {
+                "layer": 1,
+                "bindings": [
+                  {
+                    "binding_name": "(not #item_valid)",
+                    "binding_name_override": "#visible",
+                    "binding_type": "collection",
+                    "binding_collection_name": "$condition_item_collection_name",
+                    "binding_condition": "none"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  "input_slot_02@villager_trades_4jd_dx.input_slot_01": {
+    "ignored": "($second_item_slot_ignored)",
+    "$condition_item_collection_name": "trade2_ingredient2_item",
+    "$desired_item_aux": 0,
+    "bindings": [
+      {
+        "binding_type": "collection_details"
+      },
+      {
+        "binding_name": "(not (#item_id_aux = $desired_item_aux))",
+        "binding_name_override": "#visible",
+        "binding_collection_name": "trade_item_2"
+      }
+    ]
+  },
+
+  "grid_item_for_hotbar@container_item_4jd_dx.container_item": {
+    "$background_images": "villager_4jd_textures_dx.hotbar_grid",
+    "size": [ 16, 16 ],
+    "$cell_image_size": [ 16, 16 ],
+    "$item_renderer_panel_size": [ 14.66666666666667, 14.66666666666667 ],
+
+    "$item_renderer_size": [ 14.66666666666667, 14.66666666666667 ],
+    "$stack_count_font_scale_factor": 0.9047619048,
+    "$stack_count_offset": [ 1, 1.5 ],
+    "$item_collection_name": "hotbar_items"
+  },
+
+  "grid_item_for_invnetory@container_item_4jd_dx.container_item": {
+    "$background_images": "villager_4jd_textures_dx.inventory_grid",
+    "size": [ 16, 16 ],
+    "$cell_image_size": [ 16, 16 ],
+    "$item_renderer_panel_size": [ 14.66666666666667, 14.66666666666667 ],
+
+    "$item_renderer_size": [ 14.66666666666667, 14.66666666666667 ],
+    "$stack_count_font_scale_factor": 0.9047619048,
+    "$stack_count_offset": [ 1, 1.5 ],
+    "$item_collection_name": "inventory_items"
+  },
+
+  "trade_items_content": {
+    "type": "panel",
+    "controls": [
+      /* Title */
+      {
+        "villager_name_label@label_dx.global_label": {
+          "anchor_from": "top_middle",
+          "anchor_to": "top_middle",
+          "offset": [ 0, 10.66666666666667 ],
+          "color": "$vdx_villager_mixed_title_text_color",
+          "text": "#name_label",
+          "bindings": [
+            {
+              "binding_name": "#name_label",
+              "binding_condition": "always_when_visible"
+            }
+          ],
+          "shadow": "$vdx_container_text_shadow",
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", "100%" ],
+                "ignored": "(not $has_title_text_shadow)",
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "#name_label",
+                "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ],
+                "bindings": [
+                  {
+                    "binding_name": "#name_label",
+                    "binding_type": "collection",
+                    "binding_collection_name": "$collection_name"
+                  }
+                ]
+              }
+            },
+            { "text_control@$vdx_villager_mixed_title_text_control": { } }
+          ]
+        }
+      },
+      /* Experience Progress */
+      {
+        "experience_bar": {
+          "type": "panel",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 24.66666666666667, 28.33333333333333 ],
+          "size": [ 242.6666666666667, 6.666666666666667 ],
+          "bindings": [
+            {
+              "binding_name": "#exp_bar_visible",
+              "binding_name_override": "#visible"
+            }
+          ],
+          "controls": [
+            { "experience_bar_background@villager_4jd_textures_dx.experience_bar_background": { "layer": 1 } },
+            { "experience_bar_result@villager_4jd_textures_dx.experience_bar_result": { "layer": 2 } },
+            { "experience_bar_current@villager_4jd_textures_dx.experience_bar_current": { "layer": 3 } }
+          ]
+        }
+      },
+      /* Inventory Panel */
+      {
+        "inventory_panel": {
+          "type": "panel",
+          "size": [ 156, 93 ],
+          "anchor_from": "bottom_right",
+          "anchor_to": "bottom_right",
+          "offset": [ -11.33333333333333, -9.333333333333333 ],
+          "controls": [
+            {
+              "inventory_label@label_dx.global_label": {
+                "text": "container.inventory",
+                "size": [ "default", 10 ],
+                "anchor_from": "top_middle",
+                "anchor_to": "top_middle",
+                "text_alignment": "center",
+                "offset": [ 0, 7.333333333333333 ],
+                "color": "$vdx_recipe_book_items_mixed_title_text_color",
+                "layer": 3,
+                "shadow": "$vdx_container_text_shadow",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "container.inventory",
+                      "offset": [ 0.333333333333333, 0.333333333333333 ]
+                    }
+                  },
+                  { "text_control@$vdx_recipe_book_items_mixed_title_text_control": { } }
+                ]
+              }
+            },
+            {
+              "inventory_grid": {
+                "type": "grid",
+                "size": [ 144, 48 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ 6, 18 ],
+                "grid_dimensions": [ 9, 3 ],
+                "grid_item_template": "villager_trades_4jd_dx.grid_item_for_invnetory",
+                "collection_name": "inventory_items"
+              }
+            },
+            {
+              "hotbar_grid@common.hotbar_grid_template": {
+                "size": [ 144, 16 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ 6, 74 ],
+                "grid_item_template": "villager_trades_4jd_dx.grid_item_for_hotbar",
+                "layer": 2
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  
+  /*//// Main Panel ////*/
+
+  "villager_trades_panel@common.root_panel": {
+    "layer": 1,
+    "size": [ 291, 181.6666666666667 ],
+    "controls": [
+      {
+        "panel_content": {
+          "type": "panel",
+          "layer": 11,
+          "controls": [
+            { "trade_items_content@villager_trades_4jd_dx.trade_items_content": { } },
+            {
+              "trade_selector_panel": {
+                "type": "panel",
+                "size": [ 270, 27 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "offset": [ 11.66666666666667, 42.33333333333333 ],
+                "controls": [
+                  { 
+                    "trade_selector_stack_panel@trade2.trade_selector_stack_panel": {
+                      "size": [ "default", 27 ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left",
+                      "orientation": "horizontal",
+                      "$collection_name": "trade_tiers",
+                      "factory": {
+                        "name": "selected_pack_factory",
+                        "control_name": "villager_trades_4jd_selector_dx.selector_stack_panel"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "trade_details_panel": {
+                "type": "panel",
+                "size": [ 108, 93 ],
+                "anchor_from": "bottom_left",
+                "anchor_to": "bottom_left",
+                "offset": [ 11.66666666666667, -9.333333333333333 ],
+                "controls": [
+                  { 
+                    "trade_details_stack_panel@trade2.trade_selector_stack_panel": {
+                      "anchor_from": "bottom_left",
+                      "anchor_to": "bottom_left",
+                      "orientation": "horizontal",
+                      "$collection_name": "trade_tiers",
+                      "size": [ 0, 0 ],
+                      "factory": {
+                        "name": "selected_pack_factory",
+                        "control_name": "villager_trades_4jd_details_dx.details_stack_panel"
+                      }
+                    }
+                  },
+                  {
+                    "hold": {
+                      "type": "panel",
+                      "bindings": [
+                        {
+                          "binding_name": "(not #is_using_gamepad)",
+                          "binding_name_override": "#visible"
+                        }
+                      ],
+                      "controls": [
+                        {
+                          "trade_item_1_panel@villager_trades_4jd_dx.input_slot_01": {
+                            "offset": [ 3.666666666666667, 33.33333333333333 ]
+                          }
+                        },
+                        {
+                          "trade_item_2_panel@villager_trades_4jd_dx.input_slot_02": {
+                            "offset": [ 3.666666666666667, 63 ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      { "background@villager_4jd_textures_dx.background": { "layer": 1 } }
+    ]
+  }
+}

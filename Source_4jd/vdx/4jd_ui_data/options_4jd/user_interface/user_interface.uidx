@@ -1,0 +1,288 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "user_interface_4jd_dx",
+
+  "ui_profile_dropdown_content@settings_common.option_radio_dropdown_group": {
+    "$radio_buttons": [
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#ui_profile_radio_classic",
+          "$radio_label_text": "options.uiprofile.classic"
+        }
+      },
+      {
+        "@dropdown_dx.dropdown_radio_with_label": {
+          "$toggle_state_binding_name": "#ui_profile_radio_pocket",
+          "$radio_label_text": "options.uiprofile.pocket"
+        }
+      }
+    ]
+  },
+
+  "user_interface_stack_panel_content": {
+    "type": "stack_panel",
+    "orientation": "vertical",
+    "size": [ "100%-1px", "100%c" ],
+    "controls": [
+      {
+        "option_toggle_hidehud@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_holographic)",
+          "$option_label": "options.hidehud",
+          "$option_binding_name": "#hide_hud",
+          "$option_enabled_binding_name": "#hide_hud_enabled",
+          "$toggle_name": "hide_hud"
+        }
+      },
+      {
+        "option_toggle_hidehand@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_holographic)",
+          "$option_label": "options.hidehand",
+          "$option_binding_name": "#hide_hand",
+          "$option_enabled_binding_name": "#hide_hand_enabled",
+          "$toggle_name": "hide_hand"
+        }
+      },
+      {
+        "option_toggle_3@toggle_4jd_dx.option_toggle": {
+          //"ignored": "(not $text_to_speech_supported)",
+          "$option_label": "options.enableOpenChatMessage",
+          "$option_binding_name": "#enable_open_chat_message",
+          "$option_enabled_binding_name": "#enable_open_chat_message_enabled",
+          "$toggle_name": "enable_open_chat_message"
+        }
+      },
+      {
+        "auto_save_icon_toggle@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.showautosaveicon",
+          "$option_binding_name": "#show_auto_save_icon",
+          "$option_enabled_binding_name": "#show_auto_save_icon_enabled",
+          "$toggle_name": "show_auto_save_icon"
+        }
+      },
+      {
+        "hud_opacity_slider@slider_4jd_dx.option_slider": {
+          "$option_label": "#interface_opacity_slider_label",
+          "$slider_name": "interface_opacity",
+          "$slider_value_binding_name": "#interface_opacity",
+          "$slider_tts_text_value": "#interface_opacity_text_value",
+          "$option_enabled_binding_name": "#interface_opacity_enabled",
+          "$label_bindings": [ { "binding_name": "$option_label" } ]
+        }
+      },
+      {
+        "option_toggle9@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.hidetooltips",
+          "$option_binding_name": "#hide_tooltips",
+          "$option_enabled_binding_name": "#hint_toggles_enabled",
+          "$toggle_name": "hide_tooltips"
+        }
+      },
+      {
+        "hide_paperdoll_toggle@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.hidepaperdoll",
+          "$option_binding_name": "#hide_paperdoll",
+          "$option_enabled_binding_name": "#hide_paperdoll_enabled",
+          "$toggle_name": "hide_paperdoll"
+        }
+      },
+      {
+        "gamepad_cursor_sensitivity_option_slider@slider_4jd_dx.option_slider": {
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "$option_label": "#gamepad_cursor_sensitivity_slider_label",
+          "$slider_name": "gamepad_cursor_sensitivity",
+          "$slider_value_binding_name": "#gamepad_cursor_sensitivity",
+          "$slider_tts_text_value": "#gamepad_cursor_sensitivity_text_value",
+          "$option_enabled_binding_name": "#gamepad_cursor_sensitivity_enabled",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$label_bindings": [ { "binding_name": "$option_label" } ]
+        }
+      },
+      {
+        "outline_selection_toggle@toggle_4jd_dx.option_toggle": {
+          "ignored": "($is_holographic)",
+          "$option_label": "options.classic_box_selection",
+          "$option_binding_name": "#classic_box_selection",
+          "$option_enabled_binding_name": "#classic_box_selection_enabled",
+          "$toggle_name": "classic_box_selection"
+        }
+      },
+      {
+        "gui_scale_slider@slider_4jd_dx.option_slider": {
+          "ignored": "($is_holographic)",
+          "$option_label": "#gui_scale_slider_label",
+          "$slider_name": "gui_scale",
+          "$slider_value_binding_name": "#gui_scale",
+          "$slider_tts_text_value": "#gui_scale_text_value",
+          "$option_enabled_binding_name": "#gui_scale_enabled",
+          "$slider_steps_binding_name": "#gui_scale_steps",
+          "$label_bindings": [ { "binding_name": "$option_label" } ],
+          "bindings": [
+            {
+              "binding_name": "#gui_scale_visible",
+              "binding_name_override": "#enabled"
+            }
+          ]
+        }
+      },
+      {
+        "gui_accessibility_scaling_toggle@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.gui.accessibility.scaling",
+          "$option_binding_name": "#gui_accessibility_scaling",
+          "$option_enabled_binding_name": "#gui_accessibility_scaling_enabled",
+          "$toggle_name": "gui_accessibility_scaling",
+          "layer": 1
+        }
+      },
+      {
+        "safe_zone": {
+          "type": "panel",
+          "size": [ "100%", 22 ],
+          "ignored": "(not $supports_user_configured_safezone or (not $is_pregame))",
+          "controls": [
+            {
+              "safe_zone_button@button_4jd_dx.main_button": {
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "size": [ "100%", 20 ],
+                "$pressed_button_name": "setup_safe_zone_button",
+                "$button_text": "options.safeZone.title"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "ui_profile": {
+          "type": "panel",
+          "size": [ "100%", 22 ],
+          "ignored": "($console_edition)",
+          "controls": [
+            {
+              "ui_profile_dropdown@dropdown_4jd_dx.option_dropdown": {
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$option_label": "options.uiprofile",
+                "$dropdown_content": "user_interface_4jd_dx.ui_profile_dropdown_content",
+                "$option_dropdown_type": "dropdown_dx.dropdown_no_scrollpanel",
+                "$dropdown_area": "content_area",
+                "$dropdown_name": "ui_profile_dropdown",
+                "$option_enabled_binding_name": "#ui_profile_dropdown_enabled",
+                "$options_dropdown_toggle_label_binding": "#ui_profile_dropdown_toggle_label",
+                "$dropdown_scroll_content_size": [ "100%", "145%" ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "user_interface_extra_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "user_interface@user_interface_advance_options_4jd_dx.user_interface_advance_options_stack_panel_content": { } }
+    ]
+  },
+
+  "user_interface_extra_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 250, 160 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 21 ],
+    "$scrolling_content": "user_interface_4jd_dx.user_interface_extra_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ "100%-12px", "100%-23px" ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 7.3, 8.33333333333333 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "user_interface_panel_content": {
+    "type": "panel",
+    "size": [ "100%", "100%c" ],
+    "controls": [
+      { "user_interface@user_interface_4jd_dx.user_interface_stack_panel_content": { } }
+    ]
+  },
+
+  "user_interface_main_panel@widget_4jd_textures_dx.options_background": {
+    "size": [ 253.3333333333333, 220 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 10 ],
+    "$scrolling_content": "user_interface_4jd_dx.user_interface_panel_content",
+    "controls": [
+      {
+        "scrolling_panel@scroll_dx.scrolling_panel": {
+          "size": [ 239.66666666666666667, 197 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 7.3, 6.5 ],
+          "$show_background": false,
+          "$scroll_bar_contained": false,
+          "$scroll_size": [ 10, "100%" ],
+          "$scroll_view_port_size": [ "100%-10px", "100%" ],
+          "$scroll_box_image_control": "dialog_4jd_textures_dx.scroller",
+          "$scroll_track_image_control": "dialog_4jd_textures_dx.scroll_track"
+        }
+      }
+    ]
+  },
+
+  "user_interface_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "main@options_bindings_4jd_dx.graphics_panel_bindings": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "bindings": [
+            { 
+              "binding_type": "view",
+              "source_control_name": "4jd_ui_advance_options_toggle",
+              "source_property_name": "(not #toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "user_interface_4jd_dx.user_interface_main_panel" } }
+          ]
+        }
+      },
+      {
+        "user_interface_advance_options": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "bindings": [
+            { 
+              "binding_type": "view",
+              "source_control_name": "4jd_ui_advance_options_toggle",
+              "source_property_name": "(#toggle_state)",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "user_interface_4jd_dx.user_interface_extra_panel" } }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,126 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "keyboard_and_mouse_4jd_dx",
+
+  ////*/ Keyboard and Mouse Sections /*////
+  
+  "keyboard_stack_panel_content": {
+    "type": "stack_panel",
+    "orientation": "vertical",
+    "size": [ "100%-1px", "100%c" ],
+    "$keymapping_collection": "keyboard_standard_collection",
+    "$grid_item_template": "controls_4jd_dx.keymapping_item",
+    "collection_name": "$keymapping_collection",
+    "$ignore_none_text": true,
+    "controls": [
+      {
+        "panel_1": {
+          "type": "panel",
+          "size": [ "100%", 21.66666666666666666666666666666666 ],
+          "controls": [
+            {
+              "reset_button@button_4jd_dx.main_button": {
+                "size": [ "100%", 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$pressed_button_name": "button.reset_keyboard_bindings",
+                "$button_text": "controllerLayoutScreen.resetAllBindings"
+              }
+            }
+          ]
+        }
+      },
+      { "panel_2": { "type": "panel", "size": [ "100%", 8 ] } },
+      {
+        "option_slider_0@slider_4jd_dx.option_slider": {
+          "$option_label": "#keyboard_mouse_sensitivity_slider_label",
+          "$slider_name": "keyboard_mouse_sensitivity",
+          "$slider_value_binding_name": "#keyboard_mouse_sensitivity",
+          "$slider_tts_text_value": "#keyboard_mouse_sensitivity_text_value",
+          "$option_enabled_binding_name": "#keyboard_mouse_sensitivity_enabled",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$label_bindings": [
+            {
+              "binding_name": "$option_label"
+            }
+          ]
+        }
+      },
+      {
+        "option_slider_damen@slider_4jd_dx.option_slider": {
+          "$option_label": "#spyglass_mouse_dampening_slider_label",
+          "$slider_name": "spyglass_mouse_dampening",
+          "$slider_value_binding_name": "#spyglass_mouse_dampening",
+          "$slider_tts_text_value": "#spyglass_mouse_dampening_text_value",
+          "$option_enabled_binding_name": "#keyboard_mouse_sensitivity_enabled",
+          "$label_bindings": [
+            {
+              "binding_name": "$option_label"
+            }
+          ]
+        }
+      },
+      {
+        "option_toggle_1@toggle_4jd_dx.option_toggle": {
+          "$option_label": "options.autojump",
+          "$option_binding_name": "#keyboard_mouse_autojump",
+          "$option_enabled_binding_name": "#keyboard_mouse_autojump_enabled",
+          "$toggle_name": "keyboard_mouse_autojump",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP"
+        }
+      },
+      { "movement_text@controls_4jd_dx.header_text_panel": { "$header_text": "key.categories.movement" } },
+      {
+        "option_toggle_0@toggle_4jd_dx.option_toggle": {
+          "size": [ "100%", 16 ],
+          "$option_label": "options.invertYAxis",
+          "$option_binding_name": "#keyboard_mouse_invert_y_axis",
+          "$option_enabled_binding_name": "#keyboard_mouse_invert_y_axis_enabled",
+          "$toggle_name": "keyboard_mouse_invert_y_axis",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP"
+        }
+      },
+      {
+        "option_toggle_5@toggle_4jd_dx.option_toggle": {
+          "size": [ "100%", 15.5 ],
+          "$option_label": "options.lefthanded",
+          "$option_binding_name": "#left_handed",
+          "$option_enabled_binding_name": "#left_handed_enabled",
+          "$toggle_name": "left_handed"
+        }
+      },
+      { "look_keymapping@controls_4jd_dx.unmodified_keymapping_panel": { "$keymapping_text": "4jd.key.look", "$keymapping_value_text": "4jd.keyName.cursor" } },
+      { "strafe_left_button@controls_4jd_dx.keymapping_item": { "collection_index": 18 } },
+      { "strafe_right_button@controls_4jd_dx.keymapping_item": { "collection_index": 19 } },
+      { "walk_backwards_button@controls_4jd_dx.keymapping_item": { "collection_index": 20 } },
+      { "walk_forwards_button@controls_4jd_dx.keymapping_item": { "collection_index": 21 } },
+      { "standard_text@controls_4jd_dx.header_text_panel": { "size": [ "100%", 28 ], "$header_text": "4jd.key.categories.standard" } },
+      { "attack_destroy_button@controls_4jd_dx.keymapping_item": { "collection_index": 0 } },
+      { "use_place_block_button@controls_4jd_dx.keymapping_item": { "collection_index": 2 } },
+      { "jump_button@controls_4jd_dx.keymapping_item": { "collection_index": 15 } },
+      { "drop_item_button@controls_4jd_dx.keymapping_item": { "collection_index": 3 } },
+      { "inventory_button@controls_4jd_dx.keymapping_item": { "collection_index": 13 } },
+      { "hotbar_slot_1_button@controls_4jd_dx.keymapping_item": { "collection_index": 4 } },
+      { "hotbar_slot_2_button@controls_4jd_dx.keymapping_item": { "collection_index": 5 } },
+      { "hotbar_slot_3_button@controls_4jd_dx.keymapping_item": { "collection_index": 6 } },
+      { "hotbar_slot_4_button@controls_4jd_dx.keymapping_item": { "collection_index": 7 } },
+      { "hotbar_slot_5_button@controls_4jd_dx.keymapping_item": { "collection_index": 8 } },
+      { "hotbar_slot_6_button@controls_4jd_dx.keymapping_item": { "collection_index": 9 } },
+      { "hotbar_slot_7_button@controls_4jd_dx.keymapping_item": { "collection_index": 10 } },
+      { "hotbar_slot_8_button@controls_4jd_dx.keymapping_item": { "collection_index": 11 } },
+      { "hotbar_slot_9_button@controls_4jd_dx.keymapping_item": { "collection_index": 12 } },
+      { "sneak_button@controls_4jd_dx.keymapping_item": { "collection_index": 16 } },
+      { "sprint_button@controls_4jd_dx.keymapping_item": { "collection_index": 17 } },
+      { "pick_block_button@controls_4jd_dx.keymapping_item": { "collection_index": 1 } },
+      { "toggle_perspective_button@controls_4jd_dx.keymapping_item": { "collection_index": 14 } },
+      { "misc_text@controls_4jd_dx.header_text_panel": { "$header_text": "key.categories.misc" } },
+      { "chat_button@controls_4jd_dx.keymapping_item": { "collection_index": 23 } },
+      { "open_command_button@controls_4jd_dx.keymapping_item": { "collection_index": 24 } },
+      { "mob_effect_button@controls_4jd_dx.keymapping_item": { "collection_index": 22 } },
+      { "emote_button@controls_4jd_dx.keymapping_item": { "collection_index": 25 } },
+      { "menu_tab_left_button@controls_4jd_dx.keymapping_item": { "collection_index": 26 } },
+      { "menu_tab_right_button@controls_4jd_dx.keymapping_item": { "collection_index": 27, "size": [ "100%", 35.33333333333333 ] } }
+    ]
+  }
+}

@@ -1,0 +1,249 @@
+##################################################
+##  4JD
+##################################################
+##  Main Menu
+4jd.menu.play=Play Game##3343
+4jd.menu.store=Minecraft Store##1441
+4jd.menu.helpOptions=Help & Options	##1649
+4jd.menu.settings=Settings
+4jd.menu.exit=Exit Game##1535
+4jd.menu.exitGameWarning=Are you sure you want to exit the game?
+
+##  Progress
+4jd.progress.initializingServer=Initializing Server##3480
+
+##  In Game
+4jd.controller.buttonTip.page=Page
+4jd.controller.buttonTip.type=Type
+4jd.controller.buttonTip.group=Group
+
+## Options
+4jd.options.game=Game Options
+4jd.options.graphics=Graphics
+4jd.options.audio=Audio
+4jd.options.ui=User Interface
+
+options.thirdperson=Camera Mode
+options.gamepadcursorsensitivity=Interface Sensitivity
+options.hidepaperdoll=Hide Animated Character
+options.hidetooltips=Hide Controller Tooltips
+options.screenAnimations=Display Screen Animations
+options.showautosaveicon=Display Save Icon
+options.ingamePlayerNames=In-Game Gamertags
+options.splitscreenIngamePlayerNames=Splitscreen Gamertags
+options.interfaceOpacity=Interface Opacity
+options.splitscreenInterfaceOpacity=Splitscreen Interface Opacity
+options.invertYAxis=Invert Look
+options.sound=Sound
+options.swapGamepadAB=Swap A and B
+options.swapGamepadXY=Swap X and Y
+options.resetSettings=Reset to Defaults
+options.achievementsDisabled=Created in Creative Mode
+
+4jd.key.categories.standard=Standard
+
+4jd.key.look=Look
+4jd.key.move=Move
+
+4jd.keyName.cursor=Cursor
+4jd.progressScreen.enteringOverworld=Entering The Overworld
+4jd.progressScreen.enteringNether=Entering The Nether##3475
+4jd.progressScreen.enteringEnd=Entering The END##3474
+controller.buttonTip.removeFuelInput=Remove Fuel/Ingredient
+controller.buttonTip.removeInput=Remove Ingredient
+controllerLayoutScreen.resetAllBindings=Reset to Defaults
+key.attack=Action
+key.cycleItemLeft=Cycle Held Item Left
+key.cycleItemRight=Cycle Held Item Right
+key.drop=Drop
+key.togglePerspective=Change Camera Mode
+key.use=Use
+key.flyDownSlow=Fly Down
+key.flyUpSlow=Fly Up
+key.mobEffects=Status Effects
+
+##  Crafting
+
+4jd.craftingScreen.enableRecipe=Enable Recipe Book
+4jd.craftingScreen.tab.structures=Structures##1640
+4jd.craftingScreen.tab.tools=Tools and Weapons##1641
+4jd.craftingScreen.tab.food=Food##1633
+4jd.craftingScreen.tab.armor=Armor##1630
+4jd.craftingScreen.tab.mechanisms=Mechanisms##1635
+4jd.craftingScreen.tab.transport=Transport##1643
+4jd.craftingScreen.tab.decorations=Decorations##1632
+4jd.creativeScreen.tab.buildingBlocks=Building Blocks##1631
+4jd.creativeScreen.tab.redstone_and_transport=Redstone & Transportation##1639
+4jd.creativeScreen.tab.materials=Materials##1634
+4jd.creativeScreen.tab.toolsWeaponsAndArmor=Tools, Weapons & Armor##1642
+4jd.creativeScreen.tab.brewing=Brewing##1637 or 1638
+4jd.creativeScreen.tab.miscellaneous=Miscellaneous##1636
+
+##################################################
+##  Start
+##################################################
+menu.play=Play Game
+menu.options=Options
+menu.quit=Quit Game
+menu.store=Minecraft Marketplace
+
+##################################################
+##  Options
+##################################################
+##  Main
+options.language=Language
+options.sounds=Audio
+options.sounds.title=Music & Sound Options
+options.account=Account...
+options.general=General...
+options.generalTitle=General Settings
+menu.storageManagement=Storage
+options.keyboardAndMouse=Keyboard & Mouse
+options.controller=Controller
+options.touch=Touch
+##  Toggle OFF/ON
+options.off=OFF
+options.on=ON
+##  Credits and Attribution
+options.credits_and_attribution=Credits & Attribution...
+credits_and_attribution.screen.title=Credits and Attribution
+credits_and_attribution.button.licenses=Licenses
+##  Accessibility Settings
+options.accessibility=Accessibility Settings...
+options.enableChatTextToSpeech=TTS For Chat
+options.enableAutoPlatformTextToSpeech=TTS with Device
+options.enableUITextToSpeech=UI Screen Reader
+options.enableOpenChatMessage=Open Chat Message
+options.darknessEffectModifier=Darkness Pulsing
+options.darknessEffectModifier.message=Controls how much the Darkness effect pulses when a Warden or Sculk Shrieker gives it to you.
+##  Controls Settings
+options.mouse_settings=Mouse Settings...
+options.mouse_settings.title=Mouse Settings
+controls.keybinds=Key Binds...
+controls.keybinds.title=Key Binds
+options.joystick_settings=Joystick Settings...
+options.joystick_settings.title=Joystick Settings
+##  Video Settings
+options.video=Video Settings...
+options.videoTitle=Video Settings
+options.graphics.fancy.tooltip=Fancy graphics balances performance and quality for the majority of machines. Weather, clouds and particles may not appear behind translucent blocks or water.
+options.graphics.fast.tooltip=Fast graphics reduces the amount of visible rain and snow. Transparency effects are disabled for various blocks such as tree-leaves.
+options.vsync=Use VSync
+options.vsync.off=OFF
+options.vsync.on=ON
+options.vsync.adaptive=Adaptive
+options.renderClouds=Clouds
+options.maxFramerate=Max Framerate
+options.fov.toggle=FOV Effects
+options.renderDistance=Render distance
+options.rendchat_messages_dxerDistanceFormat=%s chunks
+options.renderDistanceRecommendedFormat=%s chunks
+options.showautosaveicon=Autosave Indicator
+options.graphicsMode.deferred=Vibrant Visuals
+##  Audio Settings
+soundCategory.main=Master Volume
+soundCategory.ambient=Ambient/Environment
+soundCategory.block=Blocks
+soundCategory.hostile=Hostile Creatures
+soundCategory.master=Master Volume
+soundCategory.music=Music
+soundCategory.neutral=Friendly Creatures
+soundCategory.player=Players
+soundCategory.record=Jukebox/Note Blocks
+soundCategory.weather=Weather
+##  UI Settings
+vdx.options.more=More Settings...
+vdx.options.moreTitle=More Settings
+##  World
+resourcePack.title=Select Resource Packs
+behaviorPack.title=Select Behavior Packs
+selectWorld.resourcePack=Resource
+selectWorld.behaviorPack=Behavior
+selectWorld.experiments.info=Experiments are potential new features. Be careful as things might break. Experiments can't be turned off after world creation.
+
+##################################################
+##  HUD
+##################################################
+##  Player Position
+map.position=Block: %s %s %s
+##  Toast
+recipe.toast.description=Check your recipe book
+recipe.toast.title=New Recipes Unlocked!
+
+##################################################
+##  Block Messages
+##################################################
+##  Input (block.minecraft.bed.)
+tile.bed.noSleep=You can sleep only at night or during thunderstorms
+tile.bed.notSafe=You may not rest now; there are monsters nearby
+tile.bed.obstructed=This bed is obstructed
+tile.bed.occupied=This bed is occupied
+tile.bed.tooFar=You may not rest now; the bed is too far away
+build.tooHigh=Height limit for building is %s
+build.tooLow=Minimum height for building is %s
+##  Output (Based on "Aspects" by AgentMindStorm)
+vdx.block.minecraft.bed.no_sleep=You can sleep only at night or during thunderstorms
+vdx.block.minecraft.bed.not_safe=You may not rest now; there are monsters nearby
+vdx.block.minecraft.bed.obstructed=This bed is obstructed
+vdx.block.minecraft.bed.occupied=This bed is occupied
+vdx.block.minecraft.bed.too_far_away=You may not rest now; the bed is too far away
+
+##  Too High Input (by AgentMindStorm)
+build.tooHigh=Height limit for building is %s
+build.tooLow=Minimum height for building is %s
+##  Output
+build.tooHigh.overworld.aspects=Height limit for building is 319
+build.tooHigh.the_nether.aspects=Height limit for building is 127
+build.tooHigh.the_end.aspects=Height limit for building is 255
+build.tooLow.overworld.aspects=Minimum height for building is -64
+build.tooLow.the_nether.aspects=Minimum height for building is 0
+build.tooLow.the_end.aspects=Minimum height for building is 0
+
+##################################################
+##  Raid Texts
+##################################################
+##  Input
+raid.name=Raid
+raid.progress=Raiders remaining:
+raid.victory=Victory
+raid.defeat=Defeat
+##  Output
+bar.event.raid.name=Raid
+bar.event.raid.remaining.2=Raid - Raiders Remaining: 2
+bar.event.raid.remaining.1=Raid - Raiders Remaining: 1
+bar.event.raid.remaining.0=Raid - Raiders Remaining: 0
+bar.event.raid.victory=Raid - Victory
+bar.event.raid.defeat=Raid - Defeat
+
+##################################################
+##  Recipe Book and Creative
+##################################################
+gui.recipebook.search_hint=§oSearch...
+gui.recipebook.toggleRecipes.all=Showing all
+gui.recipebook.toggleRecipes.craftable=Showing craftable
+gui.recipebook.toggleRecipes.smeltable=Showing smeltable
+gui.recipebook.toggleRecipes.blastable=Showing blastable
+gui.recipebook.toggleRecipes.smokable=Showing smokable
+
+##  Tab Category Input
+craftingScreen.tab.construction=craftingScreen.tab.construction
+craftingScreen.tab.nature=craftingScreen.tab.nature
+craftingScreen.tab.equipment=craftingScreen.tab.equipment
+craftingScreen.tab.items=craftingScreen.tab.items
+
+##  Tab Category Output (Based on "Aspects" by AgentMindStorm)
+vdx.creative.tab.construction=Construction
+vdx.creative.tab.equipment=Equipment
+vdx.creative.tab.items=Items
+vdx.creative.tab.nature=Nature
+
+##################################################
+##  Sign
+##################################################
+hanging_sign.edit=Edit Hanging Sign Message
+
+##################################################
+##  Villager
+##################################################
+merchant.trades=Trades
+merchant.deprecated=Villagers restock up to two times per day.

@@ -1,0 +1,150 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "cartography_table_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/background",
+          "size": [ "100%", "100%" ]
+        }
+      },
+      {
+        "plus": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 14, 88.333333333333333333333333 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/plus",
+          "size": [ 13, 13 ]
+        }
+      },
+      {
+        "arrow_0": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 36.666666666666666666666666, 87.666666666666666666666666 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/arrow",
+          "size": [ 22, 15 ]
+        }
+      },
+      {
+        "arrow_1": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 139.333333333333333333333333, 87.666666666666666666666666 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/arrow",
+          "size": [ 22, 15 ]
+        }
+      },
+      {
+        "empty_map": {
+          "layer": 2,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 70.666666666666666666666666, 61.666666666666666666666666 ],
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/empty",
+          "size": [ 66, 66 ]
+        }
+      }
+    ]
+  },
+
+  "slot_grid": {
+    "type": "panel",
+    "size": [ 23, 23 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/slot_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "output_grid": {
+    "type": "panel",
+    "size": [ 26.666666666666666666666666, 26.666666666666666666666666 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/output_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "map": {
+    "type": "panel",
+    "size": [ 66, 66 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/map",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "duplicated_map": {
+    "type": "panel",
+    "size": [ 66, 66 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/duplicated_map",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "scaled_map": {
+    "type": "panel",
+    "size": [ 66, 66 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/scaled_map",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "locked_map": {
+    "type": "panel",
+    "size": [ 66, 66 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/cartography_table/locked_map",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,119 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "credits_and_attribution_4jd_dx",
+  
+  /*//// Main Panel ////*/
+
+  "main_buttons": {
+    "type": "stack_panel",
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 35 ],
+    "size": [ 225, "100%c" ],
+    "controls": [
+      /* Credits Button */
+      {
+        "button_0@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "credits_button@button_4jd_dx.main_button": {
+                "size": [ 225, 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$pressed_button_name": "button.credits",
+                "$button_text": "options.credits"
+              }
+            }
+          ]
+        }
+      },
+      /* Attribution Button */
+      {
+        "button_1@start_4jd_dx.stacked_row": {
+          "controls": [
+            {
+              "attribution_link_button@button_4jd_dx.main_button": {
+                "size": [ 225, 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "$button_text": "options.attribution",
+                "$pressed_button_name": "button.menu_open_uri",
+                "variables": [
+                  {
+                    "requires": "(not $nx_os)",
+                    "$attribution_button_url": "https://www.minecraft.net/attribution/?hideChrome"
+                  },
+                  {
+                    "requires": "($nx_os)",
+                    "$attribution_button_url": "https://aka.ms/switchattribution"
+                  }
+                ],
+                "property_bag": {
+                  "#hyperlink": "$attribution_button_url"
+                }
+              }
+            }
+          ]
+        }
+      },
+      /* Licenses Button */
+      {
+        "button_2@start_4jd_dx.stacked_row": {
+          "variables": [
+            {
+              "requires": "(not $nx_os)",
+              "$licensed_content_button_url": "https://www.minecraft.net/licensed-content/?hideChrome"
+            },
+            {
+              "requires": "($nx_os)",
+              "$licensed_content_button_url": "https://aka.ms/switchcontent"
+            }
+          ],
+          "controls": [
+            {
+              "licensed_content_popup_button@button_4jd_dx.main_button": {
+                "size": [ 225, 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "ignored": "($is_holographic or $fire_tv or $education_edition)",
+                "$pressed_button_name": "button.menu_open_uri",
+                "$button_text": "credits_and_attribution.button.licenses",
+                "property_bag": {
+                  "#hyperlink": "$licensed_content_button_url"
+                }
+              }
+            },
+            {
+              "licensed_content_popup_button@button_4jd_dx.main_button": {
+                "size": [ 225, 20 ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "ignored": "(not $is_holographic and not $fire_tv)",
+                "$pressed_button_name": "button.licensed_content_popup",
+                "$button_text": "credits_and_attribution.button.licenses"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "credits_and_attribution_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "main@options_bindings_4jd_dx.controls_panel_bindings": {
+          "type": "panel",
+          "size": [ "100%", "100%" ],
+          "controls": [
+            { "title_panel@start_4jd_dx.title_panel": { "layer": 1, "$splash_text_visible": false } },
+            { "main_buttons_stack_panel@start_4jd_dx.main_buttons_stack_panel": { "layer": 2, "$buttons_panel_control": "credits_and_attribution_4jd_dx.main_buttons" } }
+          ]
+        }
+      }
+    ]
+  }
+}

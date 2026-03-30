@@ -1,0 +1,312 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "hud_gamepad_helper_4jd_dx",
+  
+  /*//// Main ////*/
+
+  "label_background": {
+    "type": "image",
+    "size": [ "100% + 5px", 12 ],
+    "offset": [ -0.5, 0 ],
+    "texture": "vdx/ui_textures/global/color_base",
+    "layer": -1,
+    "color": [ 0, 0, 0 ],
+    "alpha": 0.5
+  },
+
+  "base_icon_image": {
+    "type": "panel",
+    "size": [ 16, 16 ],
+    "controls": [
+      {
+        "icon": {
+          "type": "image",
+          "size": [ 26, 26 ],
+          "offset": [ 0, 0 ],
+          "bindings": [
+            {
+              "binding_name": "#gamepad_button_icon",
+              "binding_name_override": "#texture",
+              "binding_type": "collection",
+              "binding_collection_name": "$tooltip_collection_name"
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "tooltip_helper_icon_description@label_dx.global_label": {
+    "color": "$gamepad_description_text_color",
+
+    "$tooltip_helper_description_shadow|default": true,
+    "shadow": "$tooltip_helper_description_shadow",
+
+    "$tooltip_anchor": "left_middle",
+    "anchor_from": "$tooltip_anchor",
+    "anchor_to": "$tooltip_anchor",
+
+    "text": "#helper_description",
+
+    "bindings": [
+      {
+        "binding_name": "#helper_description",
+        "binding_type": "collection",
+        "binding_collection_name": "$tooltip_collection_name",
+        "binding_condition": "always_when_visible"
+      },
+      {
+        "binding_name": "#helper_description",
+        "binding_type": "collection",
+        "binding_collection_name": "$tooltip_collection_name"
+      }
+    ]
+  },
+
+  "gamepad_helper": {
+    "type": "stack_panel",
+    "orientation": "horizontal",
+    "size": [ "100%c", 16 ],
+    "layer": 100,
+    "controls": [
+      {
+        "icon": {
+          "type": "panel",
+          "size": [ 16, 16 ],
+          "controls": [
+            { "icon@$icon_image_ref": { } }
+          ]
+        }
+      },
+      {
+        "icon_separator": {
+          "type": "panel",
+          "size": [ 1, 16 ]
+        }
+      },
+      {
+        "description_panel": {
+          "type": "panel",
+          "size": [ "100%c", 16 ],
+          "controls": [
+            {
+              "desc@hud_gamepad_helper_4jd_dx.tooltip_helper_icon_description": {
+                "layer": 1,
+                "size": [ "default", 10 ],
+                "anchor_from": "bottom_middle",
+                "anchor_to": "bottom_middle",
+                "offset": [ 0, -3 ],
+                "shadow": false,
+                "controls": [
+                  {
+                    "desc_shadow@hud_gamepad_helper_4jd_dx.tooltip_helper_icon_description": {
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "size": [ "default", 10 ],
+                      "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ],
+                      "shadow": false,
+                      "text": "#text",
+
+                      "bindings": [
+                        {
+                          "binding_name": "#helper_description",
+                          "binding_type": "collection",
+                          "binding_collection_name": "$tooltip_collection_name",
+                          "binding_condition": "always_when_visible"
+                        },
+                        {
+                          "binding_name": "#helper_description",
+                          "binding_type": "collection",
+                          "binding_collection_name": "$tooltip_collection_name"
+                        },
+                        {
+                          "binding_type": "view",
+                          "source_property_name": "((#helper_description) - '§1' - '§2' - '§3' - '§4' - '§5' - '§6' - '§7' - '§8' - '§9' - '§a' - '§b' - '§c' - '§d' - '§e' - '§f' - '§g')",
+                          "target_property_name": "#text"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "separator": {
+          "type": "panel",
+          "size": [ 10, 16 ]
+        }
+      }
+    ]
+  },
+
+  "mixed_gamepad_helper": {
+    "type": "panel",
+    "size": [ "100%c", 16 ],
+    "controls": [
+      {
+        "gamepad_tooltip@hud_gamepad_helper_4jd_dx.gamepad_helper": {
+          "$icon_image_ref": "hud_gamepad_helper_4jd_dx.base_icon_image",
+          "anchor_from": "bottom_left",
+          "anchor_to": "bottom_left",
+          "bindings": [
+            {
+              "binding_name": "#is_gamepad_tip",
+              "binding_name_override": "#visible"
+            }
+          ]
+        }
+      }
+    ],
+    "$tooltip_collection_name|default": "",
+    "$tooltip_collection_prefix|default": "",
+    "bindings": [
+      {
+        "binding_name": "#tooltip_visible",
+        "binding_name_override": "#visible",
+        "binding_type": "collection",
+        "binding_collection_name": "$tooltip_collection_name",
+        "binding_condition": "always"
+      },
+      {
+        "binding_name": "#tooltip_visible",
+        "binding_name_override": "#visible",
+        "binding_type": "collection",
+        "binding_collection_name": "$tooltip_collection_name"
+      }
+    ]
+  },
+
+  "mixed_gamepad_helper_for_sides@hud_gamepad_helper_4jd_dx.mixed_gamepad_helper": {
+    "size": [ "100%c", 26 ]
+  },
+  
+  /*//// Emote ////*/
+
+  "emote_tip": {
+    "type": "panel",
+    "size": [ "100%c", 16 ],
+    "controls": [
+      {
+        "emote_gamepad_helper@$gamepad_helper_button_name": {
+          "$icon_description_bind": "$emote_tip_description",
+          "$gamepad_description_max_size": [ 79, 16 ], // 79 To account for the size of the image
+          "anchor_from": "bottom_left",
+          "anchor_to": "bottom_left",
+          "layer": 100
+        }
+      }
+    ]
+  },
+
+  "bottom_emote_helpers": {
+    "type": "stack_panel",
+    "orientation": "horizontal",
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "offset": [ 0, 0 ],
+    "size": [ "100%", 16 ],
+    "bindings": [
+      {
+        "binding_name": "#emote_tips_visible",
+        "binding_name_override": "#visible",
+        "binding_type": "global"
+      }
+    ],
+    "controls": [
+      {
+        "emote_tip_0@hud_gamepad_helper_4jd_dx.emote_tip": {
+          "$keyboard_keyname": "keyboard.keyname.1",
+          "$emote_tip_description": "#button_emote_0_description",
+          "$gamepad_helper_button_name": "gamepad_helper_4jd_dx.gamepad_helper_y"
+        }
+      },
+      {
+        "emote_tip_1@hud_gamepad_helper_4jd_dx.emote_tip": {
+          "$keyboard_keyname": "keyboard.keyname.2",
+          "$emote_tip_description": "#button_emote_1_description",
+          "$gamepad_helper_button_name": "gamepad_helper_4jd_dx.gamepad_helper_b"
+        }
+      },
+      {
+        "emote_tip_2@hud_gamepad_helper_4jd_dx.emote_tip": {
+          "$keyboard_keyname": "keyboard.keyname.3",
+          "$emote_tip_description": "#button_emote_2_description",
+          "$gamepad_helper_button_name": "gamepad_helper_4jd_dx.gamepad_helper_a"
+        }
+      },
+      {
+        "emote_tip_3@hud_gamepad_helper_4jd_dx.emote_tip": {
+          "$keyboard_keyname": "keyboard.keyname.4",
+          "$emote_tip_description": "#button_emote_3_description",
+          "$gamepad_helper_button_name": "gamepad_helper_4jd_dx.gamepad_helper_x"
+        }
+      }
+    ]
+  },
+  
+  /*//// 4JD Bottom Tooltip Helper ////*/
+
+  "bottom_helpers": {
+    "type": "stack_panel",
+    "orientation": "horizontal",
+    "anchor_from": "bottom_left",
+    "anchor_to": "bottom_left",
+    "offset": [ 0, 0 ],
+    "size": [ "100%", 16 ],
+    "bindings": [
+      {
+        "binding_name": "(not #emote_tips_visible)",
+        "binding_name_override": "#visible",
+        "binding_type": "global"
+      }
+    ],
+    "controls": [
+      {
+        "stack_panel_0": {
+          "type": "stack_panel",
+          "size": [ "100%c", 16 ],
+          "orientation": "horizontal",
+
+          "$tooltip_collection_name": "right_helper_collection",
+          "$tooltip_collection_prefix": "right_helpers",
+          "collection_name": "$tooltip_collection_name",
+          "factory": {
+            "name": "right_tooltip_factory",
+            "control_name": "hud_gamepad_helper_4jd_dx.mixed_gamepad_helper"
+          },
+          "bindings": [
+            {
+              "binding_name": "#right_helper_count",
+              "binding_name_override": "#collection_length"
+            }
+          ]
+        }
+      },
+      {
+        "stack_panel_1": {
+          "type": "stack_panel",
+          "size": [ "100%c", 16 ],
+          "orientation": "horizontal",
+
+          "$tooltip_collection_name": "left_helper_collection",
+          "$tooltip_collection_prefix": "left_helpers",
+          "collection_name": "$tooltip_collection_name",
+          "factory": {
+            "name": "left_tooltip_factory",
+            "control_name": "hud_gamepad_helper_4jd_dx.mixed_gamepad_helper"
+          },
+          "bindings": [
+            {
+              "binding_name": "#left_helper_count",
+              "binding_name_override": "#collection_length"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

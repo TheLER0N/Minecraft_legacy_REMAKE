@@ -1,0 +1,36 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "dropper_4jd_textures_dx",
+
+  "background": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "controls": [
+      {
+        "background": {
+          "layer": 1,
+          "type": "image",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/dropper/background",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  },
+
+  "slot_grid": {
+    "type": "panel",
+    "size": [ 21, 21 ],
+    "controls": [
+      {
+        "texture": {
+          "type": "image",
+          "texture": "assets/vdx/textures/gui/sprites/container_4jd/dropper/slot_grid",
+          "size": [ "100%", "100%" ]
+        }
+      }
+    ]
+  }
+}

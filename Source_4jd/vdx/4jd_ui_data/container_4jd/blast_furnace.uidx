@@ -1,0 +1,226 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "blast_furnace_4jd_dx",
+
+  "top_half_panel": {
+    "type": "panel",
+    "controls": [
+      /* Title */
+      {
+        "title@label_dx.global_label": {
+          "offset": [ 13.66666666666667, 11 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "color": "$vdx_blast_furnace_title_text_color",
+          "text": "$container_title",
+          "shadow": "$vdx_container_text_shadow",
+          "controls": [
+            {
+              "shadow@label_dx.global_label": {
+                "size": [ "100%", "100%" ],
+                "ignored": "(not $vdx_container_text_shadow)",
+                "layer": -1,
+                "color": "$4jd_text_shadow_color",
+                "text": "$container_title",
+                "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ]
+              }
+            },
+            { "text_control@$vdx_blast_furnace_title_text_control": { } }
+          ]
+        }
+      },
+      /* Ingredient and Fuel */
+      {
+        "blast_furnace_ingredient_panel": {
+          "type": "panel",
+          "size": [ 21, 21 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 76.33333333333333, 24 ],
+          "controls": [
+            {
+              "ingredient_text@label_dx.global_label": {
+                "size": [ "default", 10 ],
+                "offset": [ -25, 6.666666666666667 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_right",
+                "color": "$vdx_blast_furnace_title_text_color",
+                "text": "furnaceScreen.input",
+                "shadow": "$vdx_container_text_shadow",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "furnaceScreen.input",
+                      "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            },
+            { 
+              "blast_furnace_ingredient_item@container_item_4jd_dx.container_item": {
+                "size": [ 21, 21 ],
+                "anchor_from": "left_middle",
+                "anchor_to": "left_middle",
+                "$item_collection_name": "furnace_ingredient_items",
+                "$focus_id": "furnace_ingredient_item",
+                "$focus_override_left": "FOCUS_OVERRIDE_STOP",
+                "$focus_override_left_binding_type": "none",
+                "$focus_override_up": "FOCUS_OVERRIDE_STOP",
+                "$focus_override_up_binding_type": "none",
+
+                "$background_images": "blast_furnace_4jd_textures_dx.slot_grid",
+                "$container_item_size": [ 21, 21 ],
+                "$cell_image_size": [ 21, 21 ],
+                "$item_renderer_panel_size": [ 21, 21 ],
+                "$item_renderer_size": [ 19, 19 ],
+                "$stack_count_font_scale_factor": 1.1875,
+                "$stack_count_offset": [ 1.5, 2 ]
+              }
+            }
+          ]
+        }
+      },
+      { 
+        "lit_progress@blast_furnace_4jd_textures_dx.lit_progress": {
+          "anchor_to": "top_left",
+          "anchor_from": "top_left",
+          "offset": [ 74, 45 ]
+        }
+      },
+      {
+        "blast_furnace_fuel_panel": {
+          "type": "panel",
+          "size": [ 21, 21 ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 76.33333333333333, 71 ],
+          "controls": [
+            {
+              "ingredient_text@label_dx.global_label": {
+                "size": [ "default", 10 ],
+                "offset": [ -25, 6.666666666666667 ],
+                "anchor_from": "top_right",
+                "anchor_to": "top_right",
+                "color": "$vdx_blast_furnace_title_text_color",
+                "text": "furnaceScreen.fuel",
+                "shadow": "$vdx_container_text_shadow",
+                "controls": [
+                  {
+                    "shadow@label_dx.global_label": {
+                      "size": [ "100%", "100%" ],
+                      "ignored": "(not $has_title_text_shadow)",
+                      "layer": -1,
+                      "color": "$4jd_text_shadow_color",
+                      "text": "furnaceScreen.fuel",
+                      "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ]
+                    }
+                  }
+                ]
+              }
+            },
+            { 
+              "blast_furnace_fuel_item@container_item_4jd_dx.container_item": {
+                "size": [ 21, 21 ],
+                "anchor_from": "left_middle",
+                "anchor_to": "left_middle",
+                "$item_collection_name": "furnace_fuel_items",
+                "$focus_id": "furnace_fuel_item",
+                "$focus_override_right": "furnace_output_item",
+                "$focus_override_right_binding_type": "none",
+                "$focus_override_left": "FOCUS_OVERRIDE_STOP",
+                "$focus_override_left_binding_type": "none",
+
+                "$background_images": "blast_furnace_4jd_textures_dx.slot_grid",
+                "$container_item_size": [ 21, 21 ],
+                "$cell_image_size": [ 21, 21 ],
+                "$item_renderer_panel_size": [ 21, 21 ],
+                "$item_renderer_size": [ 19, 19 ],
+                "$stack_count_font_scale_factor": 1.1875,
+                "$stack_count_offset": [ 1.5, 2 ]
+              }
+            }
+          ]
+        }
+      },
+      /* Output */
+      { 
+        "burn_progress@blast_furnace_4jd_textures_dx.burn_progress": {
+          "anchor_to": "top_left",
+          "anchor_from": "top_left",
+          "offset": [ 109.6666666666667, 46 ]
+        }
+      },
+      { 
+        "blast_furnace_output_item@container_item_4jd_dx.container_item": {
+          "$highlight_control": "slot_highlight_4jd_dx.slot_highlight_output_panel",
+          "$slot_selected_control": "slot_highlight_4jd_dx.slot_selected_output_panel",
+          "size": [ 32, 32 ],
+          "anchor_from": "top_right",
+          "anchor_to": "top_right",
+          "offset": [ -28, 43 ],
+          "$item_collection_name": "furnace_output_items",
+          "$focus_id": "furnace_output_item",
+          "$focus_override_right_binding_type": "none",
+          "$focus_override_right": "FOCUS_OVERRIDE_STOP",
+          "$focus_override_left_binding_type": "none",
+          "$focus_override_left": "furnace_fuel_item",
+
+          "$background_images": "blast_furnace_4jd_textures_dx.output_grid",
+          "$container_item_size": [ 32, 32 ],
+          "$cell_image_size": [ 32, 32 ],
+          "$item_renderer_panel_size": [ 26, 26 ],
+          "$item_renderer_size": [ 26, 26 ],
+          "$highlight_slot_size": [ 28.66666666666667, 28.66666666666667 ],
+          "$stack_count_font_scale_factor": 1.761904761904762,
+          "$stack_count_offset": [ 4.333333333333333, 6 ]
+        }
+      }
+    ]
+  },
+
+  /*//// Main ////*/
+
+  "blast_furnace_panel@container_panel_4jd_dx.container_panel": {
+    "size": [ 214, 215 ],
+    "$container_bg": "blast_furnace_4jd_textures_dx.background",
+    "$container_top_half": "blast_furnace_4jd_dx.top_half_panel",
+    "$container_bottom_half": "blast_furnace_4jd_dx.blast_furnace_panel_bottom_half"
+  },
+
+  "blast_furnace_panel_bottom_half@container_panel_4jd_dx.inventory_panel_bottom_half": {
+    "size": [ 189, 103.66666666666667 ],
+    "$label_offset": [ 1.333333333333333, 0 ],
+    "$inventory_grid_offset": [ 0, -27.33333333333333 ],
+    "offset": [ 12.33333333333333, -14.66666666666667 ]
+  },
+  
+  /*//// Screen ////*/
+
+  "main_screen_content": {
+    "type": "panel",
+    "controls": [
+      { "container_modules@container_panel_4jd_dx.container_modules": {} },
+      { "blast_furnace_panel@blast_furnace_4jd_dx.blast_furnace_panel": { } }
+    ]
+  },
+
+  "center_screen": {
+    "type": "panel",
+    "controls": [
+      { "container_gamepad_helpers@container_panel_4jd_dx.container_gamepad_helpers": {} }
+    ]
+  },
+
+  "full_screen": {
+    "type": "panel",
+    "controls": [
+      { "screen_background@main_textures_dx.screen_background": { "layer": -10 } }
+    ]
+  }
+}

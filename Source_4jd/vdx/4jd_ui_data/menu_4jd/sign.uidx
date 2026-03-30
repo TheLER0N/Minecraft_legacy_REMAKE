@@ -1,0 +1,217 @@
+/*File made by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "namespace": "sign_4jd_dx",
+
+  /* Sign screen!! */
+
+  "sign_edit_label@label_dx.global_label": {
+    "shadow": false,
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "size": [ "default", "default" ],
+    "offset": [ 0, -17.66666666666667 ],
+    "color": "$sign_edit_text_color",
+    "text": "$title_text",
+    "font_scale_factor": 1.333333333333333,
+    "line_padding": 1,
+    "controls": [
+      {
+        "shadow@label_dx.global_label": {
+          "size": [ "100%", "100%" ],
+          "layer": -1,
+          "color": "$4jd_text_shadow_color",
+          "text": "$title_text",
+          "offset": [ 0.333333333333333333333333, 0.333333333333333333333333 ],
+          "font_scale_factor": 1.333333333333333,
+          "line_padding": 1
+        }
+      }
+    ]
+  },
+  
+  "classic_done_button@button_4jd_dx.main_button": {
+    "size": [ 200, 20 ],
+    "anchor_from": "bottom_middle",
+    "anchor_to": "bottom_middle",
+    "offset": [ 0, 30.33333333333333 ],
+    "$button_text": "gui.done",
+    "$pressed_button_name": "button.menu_exit"
+  },
+
+  "sign_text_edit_hover": {
+    "type": "image",
+    "texture": "vdx/ui_textures/global/main_border",
+    "size": [ "100%+2px", "100%+2px" ],
+    "anchor_from": "center",
+    "anchor_to": "center"
+  },
+
+  "base_sign_text_multiline@common.multiline_text_edit_box": {
+    "$font_size": "normal",
+    "$text_edit_box_label_anchor_point": "top_middle",
+    "$text_alignment": "center",
+    "$text_edit_box_label_offset": [ 0, 3.333333333333333 ],
+    
+    "$text_edit_line_padding": 4,
+    "$text_box_line_padding": 6.333333333333333,
+    "$text_edit_box_label_size": [ 85, "100%" ],
+    "$text_edit_box_label_min_size": [ 85, "100%" ],
+
+    "constrain_to_rect": false,
+    "selected": true,
+    "can_be_deselected": false,
+    "focus_enabled": true,
+    "$text_box_name": "#sign_text_multi",
+    "$text_color_binding_type": "global",
+    "$text_edit_box_content_binding_name": "#sign_text",
+    "max_length": 32500,
+    "controls": [
+      { "custom_panel@text_field_dx.custom_text_field_panel": { } }
+    ],
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_cancel",
+        "to_button_id": "button.menu_exit",
+        "handle_select": false,
+        "handle_deselect": true,
+        "mapping_type": "global"
+      }
+    ]
+  },
+
+  "hanging_sign_text_panel": {
+    "type": "panel",
+    "size": [ 96, 96 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "controls": [
+      { 
+        "sign_bg@sign.sign_background": {
+          "size": [ "100%", "100%" ],
+          "layer": 1,
+          "offset": [ 0, 0 ]
+        }
+      },
+      {
+        "sign_text_multiline@sign_4jd_dx.base_sign_text_multiline": {
+          "layer": 4,
+          "size": [ 84, 60 ],
+          "anchor_from": "bottom_middle",
+          "anchor_to": "bottom_middle",
+          "offset": [ 0, 0 ],
+          "$text_background_default": "miscellaneous_dx.empty_panel",
+          "$text_background_hover": "sign_4jd_dx.sign_text_edit_hover",
+
+          "$text_box_font_scale_factor": 1.0,
+          "$text_edit_box_label_offset": [ 0, 3.333333333333333 ],
+          "$text_box_line_padding": 3.333333333333333,
+          "$text_edit_clipping_panel_size": [ "100%", "100%" ],
+          "$text_offset": [ 0, 0 ]
+        }
+      }
+    ]
+  },
+
+  "sign_text_panel": {
+    "type": "panel",
+    "size": [ "100%", "100%" ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "controls": [
+      { 
+        "sign_bg@sign.sign_background": {
+          "size": [ "100%", "100%" ],
+          "layer": 1,
+          "offset": [ 0, 0 ]
+        }
+      },
+      {
+        "sign_text_multiline@sign_4jd_dx.base_sign_text_multiline": {
+          "layer": 4,
+          "size": [ "100%", "100%" ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [ 0, 0 ],
+          "$text_background_default": "miscellaneous_dx.empty_panel",
+          "$text_background_hover": "sign_4jd_dx.sign_text_edit_hover",
+
+          "$text_box_font_scale_factor": 1.0,
+          "$text_edit_clipping_panel_size": [ "100%-4px", "100%" ],
+          "$text_offset": [ 2.5, 0 ]
+        }
+      }
+    ]
+  },
+
+  "regular_sign_panel": {
+    "type": "panel",
+    "size": [ 144, 72 ],
+    "offset": [  0, -5.333333333333333 ],
+    "controls": [
+      { "sign_edit_label@sign_4jd_dx.sign_edit_label": { "$title_text": "sign.edit" } },
+      { "sign_text_panel@sign_4jd_dx.sign_text_panel": {} },
+      { "classic_done_button@sign_4jd_dx.classic_done_button": {} }
+    ]
+  },
+
+  "hanging_sign_panel": {
+    "type": "panel",
+    "size": [ 144, 96 ],
+    "offset": [  0, -5.333333333333333 ],
+    "controls": [
+      { "sign_edit_label@sign_4jd_dx.sign_edit_label": { "$title_text": "hanging_sign.edit" } },
+      { "hanging_sign_text_panel@sign_4jd_dx.hanging_sign_text_panel": { } },
+      { "classic_done_button@sign_4jd_dx.classic_done_button": {} }
+    ]
+  },
+
+  /*//// Screen ////*/
+
+  "sign_screen_content": {
+    "type": "panel",
+    "layer": 10,
+    "$virtual_keyboard_buffer_control": "text_edit",
+    "$sign_panel_control": "(($sign_text_multiline) - 'sign.' - '_text_multiline' + '_panel')",
+    "controls": [
+      { "sign_panel_control@$sign_panel_control": { } }
+    ]
+  },
+
+  "center_screen": {
+    "type": "panel",
+    "controls": [
+    ]
+  },
+
+  "full_screen": {
+    "type": "panel",
+    "controls": [
+      { "sign_screen_content@sign_4jd_dx.sign_screen_content": { } },
+      {
+        "invisible_exit_background": {
+          "ignored": "(not $touch)",
+          "type": "input_panel",
+          "layer": -1,
+          "size": [ "100%", "100%" ],
+          "focus_enabled": true,
+          "anchor_from": "center",
+          "anchor_to": "center",
+          "bindings": [
+            {
+              "binding_name": "#close_button_visible",
+              "binding_name_override": "#visible"
+            }
+          ],
+          "button_mappings": [
+            {
+              "from_button_id": "button.menu_select",
+              "to_button_id": "button.menu_exit",
+              "mapping_type": "pressed"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

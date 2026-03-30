@@ -1,0 +1,18 @@
+/*File modified by X@CrisXolt | @CrisXolt.bsky.social.
+//(c) Don't use any UI data design without permission!*/
+{
+  "brewing_stand_screen": {
+    "variables": [
+      {
+        "requires": "$desktop_screen",
+        "$screen_content": "brewing_stand_4jd_dx.center_screen",
+        "$screen_bg_content": "brewing_stand_4jd_dx.full_screen",
+        "$4jd_full_screen_content": "brewing_stand_4jd_dx.main_screen_content"
+      },
+      {
+        "requires": "$pocket_screen",
+        "$screen_content": "brewing_stand_pocket.brewing_stand_panel"
+      }
+    ]
+  }
+}

@@ -1,0 +1,214 @@
+/*  (c) CrisXolt. Don't use any UI data design without permission!  */
+{
+  /*  Alphabetical order please (in each group) :)  */
+  "ui_defs": [
+    /* 4JD UI Assets */
+    ////////*/ Common /*////////
+    "vdx/4jd_ui_data/_common/button.uidx",
+    "vdx/4jd_ui_data/_common/dropdown.uidx",
+    "vdx/4jd_ui_data/_common/gamepad_helper.uidx",
+    "vdx/4jd_ui_data/_common/item_renderer.uidx",
+    "vdx/4jd_ui_data/_common/miscellaneous.uidx",
+    "vdx/4jd_ui_data/_common/slider.uidx",
+    "vdx/4jd_ui_data/_common/text_field.uidx",
+    "vdx/4jd_ui_data/_common/toggle.uidx",
+    "vdx/4jd_ui_data/_common/tooltip.uidx",
+    ////////*/ Chat 4JD /*////////
+    "vdx/4jd_ui_data/chat_4jd/auto_complete.uidx",
+    "vdx/4jd_ui_data/chat_4jd/chat.uidx",
+    "vdx/4jd_ui_data/chat_4jd/chat_settings.uidx",
+    "vdx/4jd_ui_data/chat_4jd/host_options.uidx",
+    "vdx/4jd_ui_data/chat_4jd/messages.uidx",
+    "vdx/4jd_ui_data/chat_4jd/touch_buttons.uidx",
+    ////////*/ Container 4JD /*////////
+    "vdx/4jd_ui_data/container_4jd/anvil.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/barrel.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/beacon.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/blast_furnace.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/brewing_stand.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/cartography_table.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/chest_ender.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/chest_large.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/chest_small.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/crafter.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/crafting_table.uidx", // Done
+    "vdx/4jd_ui_data/container_4jd/dispenser.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/dropper.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/enchanting_table.uidx",
+    "vdx/4jd_ui_data/container_4jd/furnace.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/grindstone.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/hopper.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/horse.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/inventory.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/loom.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/mob_effect.uidx",
+    "vdx/4jd_ui_data/container_4jd/shulker_box.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/smithing_table.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/smoker.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/stonecutter.uidx",  // Done
+    "vdx/4jd_ui_data/container_4jd/villager.uidx",
+    /* Creative Inventory */
+    "vdx/4jd_ui_data/container_4jd/creative_inventory/creative_inventory.uidx",
+    "vdx/4jd_ui_data/container_4jd/creative_inventory/navigation_tabs.uidx",
+    /* Craft Recipe Book */
+    "vdx/4jd_ui_data/container_4jd/craft_recipe_book/filter.uidx",
+    "vdx/4jd_ui_data/container_4jd/craft_recipe_book/grid_items.uidx",
+    "vdx/4jd_ui_data/container_4jd/craft_recipe_book/navigation_tabs.uidx",
+    "vdx/4jd_ui_data/container_4jd/craft_recipe_book/recipe_book.uidx",
+    /* Villager Trades */
+    "vdx/4jd_ui_data/container_4jd/villager_trades/trade_details.uidx",
+    "vdx/4jd_ui_data/container_4jd/villager_trades/trade_selector.uidx",
+    "vdx/4jd_ui_data/container_4jd/villager_trades/villager_trades.uidx",
+    /* Animations */
+    "vdx/4jd_ui_data/container_4jd/_animations/smithing_armors_overlay.uidx",
+    "vdx/4jd_ui_data/container_4jd/_animations/smithing_armors_and_tools_overlay.uidx",
+    "vdx/4jd_ui_data/container_4jd/_animations/smithing_materials_overlay.uidx",
+    "vdx/4jd_ui_data/container_4jd/_animations/smithing_templates_overlay.uidx",
+    /* Modules */
+    "vdx/4jd_ui_data/container_4jd/_modules/bundle.uidx",
+    "vdx/4jd_ui_data/container_4jd/_modules/container_item.uidx",
+    "vdx/4jd_ui_data/container_4jd/_modules/container_panel.uidx",
+    "vdx/4jd_ui_data/container_4jd/_modules/container_touch_buttons.uidx",
+    "vdx/4jd_ui_data/container_4jd/_modules/selected_item.uidx",
+    "vdx/4jd_ui_data/container_4jd/_modules/slot_highlight.uidx",
+    ////////*/ GUI Textures 4JD /*////////
+    "vdx/4jd_ui_data/gui_textures_4jd/vdx_main_textures_4jd.uidx",
+    /* Container */
+    "vdx/4jd_ui_data/gui_textures_4jd/container/anvil.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/barrel.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/blast_furnace.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/beacon.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/brewing_stand.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/bundle.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/cartography_table.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/chest_ender.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/chest_large.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/chest_small.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/crafter.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/creative_inventory.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/dispenser.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/dropper.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/enchanting_table.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/hopper.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/horse.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/furnace.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/grindstone.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/inventory.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/loom.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/recipe_book.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/shulker_box.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/smithing.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/smoker.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/stonecutter.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/container/villager.uidx",
+    /* Sprites */
+    "vdx/4jd_ui_data/gui_textures_4jd/sprites/container.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/sprites/dialog.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/sprites/leaderboard.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/sprites/progress.uidx",
+    "vdx/4jd_ui_data/gui_textures_4jd/sprites/widget.uidx",
+    ////////*/ HUD 4JD /*////////
+    "vdx/4jd_ui_data/hud_4jd/layout_customization.uidx",
+    "vdx/4jd_ui_data/hud_4jd/bottom_bar_elements.uidx",
+    "vdx/4jd_ui_data/hud_4jd/chat.uidx",
+    "vdx/4jd_ui_data/hud_4jd/gamepad_helper.uidx",
+    "vdx/4jd_ui_data/hud_4jd/main_hud.uidx",
+    "vdx/4jd_ui_data/hud_4jd/miscellaneous.uidx",
+    "vdx/4jd_ui_data/hud_4jd/the_hive_hud.uidx",
+    /* Boss Bar */
+    "vdx/4jd_ui_data/hud_4jd/boss_bar/boss_bar_binding.uidx",
+    "vdx/4jd_ui_data/hud_4jd/boss_bar/boss_bar_collection.uidx",
+    "vdx/4jd_ui_data/hud_4jd/boss_bar/boss_bar_default.uidx",
+    /* Texts */
+    "vdx/4jd_ui_data/hud_4jd/text/block_message_text.uidx",
+    "vdx/4jd_ui_data/hud_4jd/text/item_text.uidx",
+    "vdx/4jd_ui_data/hud_4jd/text/jukebox_text.uidx",
+    "vdx/4jd_ui_data/hud_4jd/text/miscellaneous_text.uidx",
+    "vdx/4jd_ui_data/hud_4jd/text/title_text.uidx",
+    ////////*/ Menu 4JD /*////////
+    "vdx/4jd_ui_data/menu_4jd/book.uidx",
+    "vdx/4jd_ui_data/menu_4jd/dialog.uidx",
+    "vdx/4jd_ui_data/menu_4jd/pause.uidx",
+    "vdx/4jd_ui_data/menu_4jd/player_list.uidx",
+    "vdx/4jd_ui_data/menu_4jd/sign.uidx",
+    "vdx/4jd_ui_data/menu_4jd/start.uidx",
+    "vdx/4jd_ui_data/menu_4jd/toast.uidx",
+    ////////*/ Options 4JD /*////////
+    "vdx/4jd_ui_data/options_4jd/extra_buttons.uidx",
+    "vdx/4jd_ui_data/options_4jd/gamepad_helper.uidx",
+    "vdx/4jd_ui_data/options_4jd/main_options.uidx",
+    "vdx/4jd_ui_data/options_4jd/panel_bindings.uidx",
+    /* Credits and Attribution */
+    "vdx/4jd_ui_data/options_4jd/credits_and_attribution/credits_and_attribution.uidx",
+    /* Controls */
+    "vdx/4jd_ui_data/options_4jd/controls/controller.uidx",
+    "vdx/4jd_ui_data/options_4jd/controls/keyboard_and_mouse.uidx",
+    "vdx/4jd_ui_data/options_4jd/controls/touch.uidx",
+    "vdx/4jd_ui_data/options_4jd/controls/controls.uidx",
+    /* Game */
+    "vdx/4jd_ui_data/options_4jd/game/advance_options.uidx",
+    "vdx/4jd_ui_data/options_4jd/game/game.uidx",
+    "vdx/4jd_ui_data/options_4jd/game/language.uidx",
+    "vdx/4jd_ui_data/options_4jd/game/world_settings.uidx",
+    /* Audio */
+    "vdx/4jd_ui_data/options_4jd/audio/advance_options.uidx",
+    "vdx/4jd_ui_data/options_4jd/audio/audio.uidx",
+    /* Graphics */
+    "vdx/4jd_ui_data/options_4jd/graphics/advance_options.uidx",
+    "vdx/4jd_ui_data/options_4jd/graphics/graphics.uidx",
+    "vdx/4jd_ui_data/options_4jd/graphics/global_resources.uidx",
+    /* User Interface */
+    "vdx/4jd_ui_data/options_4jd/user_interface/advance_options.uidx",
+    "vdx/4jd_ui_data/options_4jd/user_interface/user_interface.uidx",
+    ////////*/ Progress 4JD /*////////
+    "vdx/4jd_ui_data/progress_4jd/progress_dimension.uidx",
+    "vdx/4jd_ui_data/progress_4jd/progress_modal.uidx",
+    "vdx/4jd_ui_data/progress_4jd/progress_popup.uidx",
+    "vdx/4jd_ui_data/progress_4jd/progress_save.uidx",
+    "vdx/4jd_ui_data/progress_4jd/progress_world.uidx",
+
+    /* VDX Assets */
+    ////////*/ Common /*////////
+    "vdx/ui_data/_common/button.uidx",
+    "vdx/ui_data/_common/dropdown.uidx",
+    "vdx/ui_data/_common/durability_bar.uidx",
+    "vdx/ui_data/_common/gamepad_helper.uidx",
+    "vdx/ui_data/_common/grid.uidx",
+    "vdx/ui_data/_common/label.uidx",
+    "vdx/ui_data/_common/menu_scroll_panel_template.uidx",
+    "vdx/ui_data/_common/miscellaneous.uidx",
+    "vdx/ui_data/_common/scroll.uidx",
+    "vdx/ui_data/_common/server_form.uidx",
+    "vdx/ui_data/_common/slider.uidx",
+    "vdx/ui_data/_common/storage_bar.uidx",
+    "vdx/ui_data/_common/text_field.uidx",
+    "vdx/ui_data/_common/toggle.uidx",
+    "vdx/ui_data/_common/tooltip.uidx",
+    ////////*/ Container Pocket /*////////
+    /* Modules */
+    "vdx/ui_data/container_pocket/_modules/bundle.uidx",
+    ////////*/ HUD /*////////
+    "vdx/ui_data/hud/hotbar.uidx",
+    "vdx/ui_data/hud/layout_customization.uidx",
+    "vdx/ui_data/hud/mob_effect.uidx",
+    "vdx/ui_data/hud/player_list.uidx",
+    "vdx/ui_data/hud/renderer_elements.uidx",
+    "vdx/ui_data/hud/scoreboard.uidx",
+    ////////*/ GUI Textures /*////////
+    "vdx/ui_data/gui_textures/empty_item.uidx",
+    "vdx/ui_data/gui_textures/menu_background.uidx",
+    "vdx/ui_data/gui_textures/mob_effect.uidx",
+    "vdx/ui_data/gui_textures/title.uidx",
+    "vdx/ui_data/gui_textures/vdx_main_textures.uidx",
+    /* Sprites */
+    "vdx/ui_data/gui_textures/sprites/boss_bar.uidx",
+    "vdx/ui_data/gui_textures/sprites/hud.uidx",
+    "vdx/ui_data/gui_textures/sprites/toast.uidx",
+    "vdx/ui_data/gui_textures/sprites/widget_button.uidx",
+    "vdx/ui_data/gui_textures/sprites/widget_slider.uidx",
+    "vdx/ui_data/gui_textures/sprites/widget.uidx",
+    ////////*/ GUI Textures Mixed /*////////
+    /* Sprites */
+    "vdx/ui_data/gui_textures_mixed/sprites/book.uidx"
+  ]
+}
