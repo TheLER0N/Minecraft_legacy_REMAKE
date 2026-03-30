@@ -2479,6 +2479,7 @@ void ImTextureData::Create(ImTextureFormat format, int w, int h)
     Height = h;
     BytesPerPixel = ImTextureDataGetFormatBytesPerPixel(format);
     UseColors = false;
+    UseNearestSampling = false;
     Pixels = (unsigned char*)IM_ALLOC(Width * Height * BytesPerPixel);
     IM_ASSERT(Pixels != NULL);
     memset(Pixels, 0, Width * Height * BytesPerPixel);
@@ -2493,6 +2494,7 @@ void ImTextureData::DestroyPixels()
         IM_FREE(Pixels);
     Pixels = NULL;
     UseColors = false;
+    UseNearestSampling = false;
 }
 
 //-----------------------------------------------------------------------------

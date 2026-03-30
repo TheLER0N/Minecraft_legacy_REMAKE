@@ -156,7 +156,15 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="src\game\game.cpp" />
+    <ClCompile Include="src\app\main.cpp" />
+    <ClCompile Include="src\menu\menu_assets.cpp" />
+    <ClCompile Include="src\menu\menu_background.cpp" />
+    <ClCompile Include="src\menu\menu_fonts.cpp" />
+    <ClCompile Include="src\menu\menu_main.cpp" />
+    <ClCompile Include="src\menu\menu_play_game.cpp" />
+    <ClCompile Include="src\menu\menu_state.cpp" />
+    <ClCompile Include="src\menu\menu.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_sdl3.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
@@ -165,6 +173,14 @@
     <ClCompile Include="imgui\imgui_widgets.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\game\game.h" />
+    <ClInclude Include="src\menu\menu_assets.h" />
+    <ClInclude Include="src\menu\menu_background.h" />
+    <ClInclude Include="src\menu\menu_fonts.h" />
+    <ClInclude Include="src\menu\menu.h" />
+    <ClInclude Include="src\menu\menu_main.h" />
+    <ClInclude Include="src\menu\menu_play_game.h" />
+    <ClInclude Include="src\menu\menu_state.h" />
     <ClInclude Include="vulkan\vulkan.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

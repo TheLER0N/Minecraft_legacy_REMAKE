@@ -1,7 +1,0 @@
-Credits
-
--Main project by: @CrisXolt
--Based on the original UI design, by Julie "Danger" Kennedy (from 4J Studios).
--Panorama BG, UI SFX, Tooltips and some resources by: @agentms_ (AgentMindStorm).
--JE project designs by: Wilylcaro (Creator of Legacy4Java Mod).
--Custom item durability by @LukasPAH.

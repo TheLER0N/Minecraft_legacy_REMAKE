@@ -3502,6 +3502,7 @@ struct ImTextureData
     int                 UnusedFrames;           // w    r   // In order to facilitate handling Status==WantDestroy in some backend: this is a count successive frames where the texture was not used. Always >0 when Status==WantDestroy.
     unsigned short      RefCount;               // w    r   // Number of contexts using this texture. Used during backend shutdown.
     bool                UseColors;              // w    r   // Tell whether our texture data is known to use colors (rather than just white + alpha).
+    bool                UseNearestSampling;     // w    r   // Request point/nearest sampling for this texture instead of the backend default.
     bool                WantDestroyNextFrame;   // rw   -   // [Internal] Queued to set ImTextureStatus_WantDestroy next frame. May still be used in the current frame.
 
     // Functions

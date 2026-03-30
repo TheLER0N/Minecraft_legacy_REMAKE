@@ -270,6 +270,7 @@ struct ImGui_ImplVulkan_Data
 
     // Texture management
     VkSampler                   TexSamplerLinear;
+    VkSampler                   TexSamplerNearest;
     VkCommandPool               TexCommandPool;
     VkCommandBuffer             TexCommandBuffer;
 
@@ -746,7 +747,8 @@ void ImGui_ImplVulkan_UpdateTexture(ImTextureData* tex)
         }
 
         // Create the Descriptor Set
-        backend_tex->DescriptorSet = ImGui_ImplVulkan_AddTexture(bd->TexSamplerLinear, backend_tex->ImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        VkSampler sampler = tex->UseNearestSampling ? bd->TexSamplerNearest : bd->TexSamplerLinear;
+        backend_tex->DescriptorSet = ImGui_ImplVulkan_AddTexture(sampler, backend_tex->ImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         // Store identifiers
         tex->SetTexID((ImTextureID)backend_tex->DescriptorSet);
@@ -1063,6 +1065,23 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
         check_vk_result(err);
     }
 
+    if (!bd->TexSamplerNearest)
+    {
+        VkSamplerCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        info.magFilter = VK_FILTER_NEAREST;
+        info.minFilter = VK_FILTER_NEAREST;
+        info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.minLod = -1000;
+        info.maxLod = 1000;
+        info.maxAnisotropy = 1.0f;
+        err = vkCreateSampler(v->Device, &info, v->Allocator, &bd->TexSamplerNearest);
+        check_vk_result(err);
+    }
+
     if (!bd->DescriptorSetLayout)
     {
         VkDescriptorSetLayoutBinding binding[1] = {};
@@ -1183,6 +1202,7 @@ void    ImGui_ImplVulkan_DestroyDeviceObjects()
     if (bd->TexCommandBuffer)     { vkFreeCommandBuffers(v->Device, bd->TexCommandPool, 1, &bd->TexCommandBuffer); bd->TexCommandBuffer = VK_NULL_HANDLE; }
     if (bd->TexCommandPool)       { vkDestroyCommandPool(v->Device, bd->TexCommandPool, v->Allocator); bd->TexCommandPool = VK_NULL_HANDLE; }
     if (bd->TexSamplerLinear)     { vkDestroySampler(v->Device, bd->TexSamplerLinear, v->Allocator); bd->TexSamplerLinear = VK_NULL_HANDLE; }
+    if (bd->TexSamplerNearest)    { vkDestroySampler(v->Device, bd->TexSamplerNearest, v->Allocator); bd->TexSamplerNearest = VK_NULL_HANDLE; }
     if (bd->ShaderModuleVert)     { vkDestroyShaderModule(v->Device, bd->ShaderModuleVert, v->Allocator); bd->ShaderModuleVert = VK_NULL_HANDLE; }
     if (bd->ShaderModuleFrag)     { vkDestroyShaderModule(v->Device, bd->ShaderModuleFrag, v->Allocator); bd->ShaderModuleFrag = VK_NULL_HANDLE; }
     if (bd->DescriptorSetLayout)  { vkDestroyDescriptorSetLayout(v->Device, bd->DescriptorSetLayout, v->Allocator); bd->DescriptorSetLayout = VK_NULL_HANDLE; }
