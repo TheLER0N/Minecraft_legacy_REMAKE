@@ -14,6 +14,9 @@
     <Filter Include="Исходные файлы\Menu">
       <UniqueIdentifier>{32ACFC38-3F5A-4D7F-9B5D-418D2C6A20FD}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Исходные файлы\World">
+      <UniqueIdentifier>{0C74FC68-FA0B-4E6D-98A9-E86371B0BE4C}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Исходные файлы\ThirdParty">
       <UniqueIdentifier>{1A2F1949-87EB-44CD-AB77-F8C99B62CDBF}</UniqueIdentifier>
     </Filter>
@@ -29,6 +32,9 @@
     </Filter>
     <Filter Include="Файлы заголовков\Menu">
       <UniqueIdentifier>{FA6D824D-535E-4762-9B6D-8186A9D5AD07}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\World">
+      <UniqueIdentifier>{B2E32C93-8D9E-47F3-B667-E5D2B6250958}</UniqueIdentifier>
     </Filter>
     <Filter Include="Файлы заголовков\ThirdParty">
       <UniqueIdentifier>{1C848091-E0FC-4CA9-824C-8B01B2F0AFA0}</UniqueIdentifier>
@@ -65,6 +71,9 @@
     </ClCompile>
     <ClCompile Include="src\menu\menu_state.cpp">
       <Filter>Исходные файлы\Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="src\world\world.cpp">
+      <Filter>Исходные файлы\World</Filter>
     </ClCompile>
     <ClCompile Include="imgui\backends\imgui_impl_sdl3.cpp">
       <Filter>Исходные файлы\ThirdParty\ImGui</Filter>
@@ -109,6 +118,9 @@
     </ClInclude>
     <ClInclude Include="src\menu\menu_state.h">
       <Filter>Файлы заголовков\Menu</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\world.h">
+      <Filter>Файлы заголовков\World</Filter>
     </ClInclude>
     <ClInclude Include="vulkan\vulkan.h">
       <Filter>Файлы заголовков\ThirdParty</Filter>

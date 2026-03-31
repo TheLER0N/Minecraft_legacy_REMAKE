@@ -2479,6 +2479,8 @@ void ImTextureData::Create(ImTextureFormat format, int w, int h)
     Height = h;
     BytesPerPixel = ImTextureDataGetFormatBytesPerPixel(format);
     UseColors = false;
+    // По умолчанию любая новая текстура использует стандартный sampler backend'а.
+    // Меню может потом явно включить nearest sampling для логотипов, кнопок и панорамы.
     UseNearestSampling = false;
     Pixels = (unsigned char*)IM_ALLOC(Width * Height * BytesPerPixel);
     IM_ASSERT(Pixels != NULL);
@@ -2494,6 +2496,7 @@ void ImTextureData::DestroyPixels()
         IM_FREE(Pixels);
     Pixels = NULL;
     UseColors = false;
+    // При полном сбросе пикселей также сбрасываем выбор sampler'а.
     UseNearestSampling = false;
 }
 

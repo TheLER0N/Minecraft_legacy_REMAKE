@@ -9,6 +9,7 @@ namespace MenuInternal
 {
 namespace
 {
+// Этот файл рисует стартовый экран меню: стек кнопок, hover/selection и нижнюю подсказку Select.
 // Эти коэффициенты позволяют подгонять экран под референс, не меняя базовые размеры текстур.
 constexpr float kMainMenuBaseScale = 0.8f;
 constexpr float kButtonScaleAdjust = 0.95f;
@@ -34,6 +35,8 @@ void DrawButtonTexture(ImDrawList* draw_list, const TextureSlot& texture_slot, c
 }
 }
 
+// Главный экран меню intentionally не использует стандартные ImGui::Button для внешнего вида.
+// Мы используем только input-логику ImGui, а картинку и текст рисуем вручную в стиле Legacy Console.
 void DrawMenuButtons(const ImVec2& viewport_pos, const ImVec2& viewport_size)
 {
     const bool has_button_textures = EnsureButtonTexturesLoaded();
@@ -64,6 +67,7 @@ void DrawMenuButtons(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     ImGui::PushFont(ResolveFont(g_FontMenu));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, spacing));
 
+    // Навигация клавиатурой и геймпадом работает через один и тот же selected index.
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, false))
         g_SelectedMenuItem = (g_SelectedMenuItem + 1) % static_cast<int>(g_MenuItems.size());
     if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp, false))
@@ -101,6 +105,7 @@ void DrawMenuButtons(const ImVec2& viewport_pos, const ImVec2& viewport_size)
         }
         else
         {
+            // Если ассеты кнопок не загрузились, всё равно оставляем рабочий fallback через простые прямоугольники.
             draw_list->AddRectFilled(item_min, item_max, is_emphasized ? kButtonHoverTint : IM_COL32(176, 176, 176, 218));
             draw_list->AddRect(item_min, item_max, IM_COL32(28, 28, 28, 255), 0.0f, 0, 2.0f * layout_scale);
             draw_list->AddLine(item_min, ImVec2(item_max.x, item_min.y), IM_COL32(230, 230, 230, 86), 1.0f);
@@ -127,6 +132,7 @@ void DrawMenuButtons(const ImVec2& viewport_pos, const ImVec2& viewport_size)
         ImGui::PopID();
     }
 
+    // Enter/кнопка подтверждения активирует уже выделенный элемент без обязательного hover мышью.
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false))
         ActivateStartMenuItem(g_SelectedMenuItem);
 

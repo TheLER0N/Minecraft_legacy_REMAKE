@@ -208,6 +208,9 @@ struct ImGui_ImplVulkanH_Frame
     VkFence             Fence;
     VkImage             Backbuffer;
     VkImageView         BackbufferView;
+    VkImage             DepthImage;
+    VkDeviceMemory      DepthMemory;
+    VkImageView         DepthImageView;
     VkFramebuffer       Framebuffer;
 };
 

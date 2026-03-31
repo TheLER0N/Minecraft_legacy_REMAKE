@@ -15,6 +15,7 @@
 
 namespace MenuInternal
 {
+// Этот модуль отвечает за мост между файлами на диске и текстурами, которыми пользуется UI.
 // Билд запускается из x64/Debug или x64/Release, поэтому assets ищем относительно exe.
 std::string GetProjectAssetPath(const char* relative_path)
 {
@@ -87,6 +88,7 @@ const char* GetPanoramaFileForVariant(PanoramaVariant variant)
     return variant == PanoramaVariant::Night ? g_PanoramaNightFile : g_PanoramaDayFile;
 }
 
+// Логотип меняется на праздничный вариант в конце декабря и начале января.
 const char* GetMenuLogoFile()
 {
     const time_t now = time(nullptr);
@@ -103,6 +105,7 @@ const char* GetMenuLogoFile()
 // Загружает изображение через SDL и превращает его в пользовательскую ImGui/Vulkan texture.
 bool LoadTextureSlot(TextureSlot& slot, const char* relative_path, bool use_nearest_sampling)
 {
+    // SDL читает PNG/JPG с диска в обычный surface в памяти CPU.
     const std::string path = GetProjectAssetPath(relative_path);
     SDL_Surface* source_surface = SDL_LoadSurface(path.c_str());
     if (source_surface == nullptr)
@@ -117,12 +120,14 @@ bool LoadTextureSlot(TextureSlot& slot, const char* relative_path, bool use_near
         return false;
     }
 
+    // Затем создаём ImGui texture container, который позже backend загрузит в Vulkan image.
     ImTextureData* texture = IM_NEW(ImTextureData)();
     texture->Create(ImTextureFormat_RGBA32, rgba_surface->w, rgba_surface->h);
     texture->UseColors = true;
     // Для панорамы и pixel-art UI оставляем nearest, чтобы не размывать картинку.
     texture->UseNearestSampling = use_nearest_sampling;
 
+    // Копируем пиксели построчно в буфер ImGui texture data.
     for (int y = 0; y < rgba_surface->h; ++y)
     {
         const unsigned char* src_row = static_cast<const unsigned char*>(rgba_surface->pixels) + y * rgba_surface->pitch;
@@ -132,6 +137,8 @@ bool LoadTextureSlot(TextureSlot& slot, const char* relative_path, bool use_near
 
     texture->UsedRect = { 0, 0, static_cast<unsigned short>(texture->Width), static_cast<unsigned short>(texture->Height) };
     texture->UpdateRect = texture->UsedRect;
+
+    // После регистрации texture становится видимой для backend'а, а UpdateTexture создаёт/обновляет GPU-ресурс.
     ImGui::RegisterUserTexture(texture);
     ImGui_ImplVulkan_UpdateTexture(texture);
 
@@ -245,6 +252,7 @@ bool EnsureIntroPhotoTexturesLoaded()
             continue;
         }
 
+        // Если файл уже не загрузился один раз, второй раз в этом запуске не пробуем.
         if (g_IntroPhotoLoadAttempted[i])
         {
             continue;
@@ -257,6 +265,7 @@ bool EnsureIntroPhotoTexturesLoaded()
         }
         else
         {
+            // Отсутствующий экран не должен ломать весь старт приложения.
             ResetTextureSlot(g_IntroPhotoTextures[i]);
         }
     }

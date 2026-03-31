@@ -1,17 +1,107 @@
-#include "menu_play_game.h"
+  #include "menu_play_game.h"
 
 #include "imgui.h"
 #include "menu_state.h"
 
 #include <SDL3/SDL.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+namespace fs = std::filesystem;
 
 namespace MenuInternal
 {
+namespace
+{
+std::string ReadMetaValue(const fs::path& meta_path, const char* key)
+{
+    std::ifstream input(meta_path, std::ios::binary);
+    if (!input)
+    {
+        return {};
+    }
+
+    std::string line;
+    const std::string prefix = std::string(key) + "=";
+    while (std::getline(input, line))
+    {
+        if (line.rfind(prefix, 0) == 0)
+        {
+            return line.substr(prefix.size());
+        }
+    }
+
+    return {};
+}
+}
+
+void RefreshPlayGameWorldEntries()
+{
+    g_PlayGameWorlds.clear();
+    try
+    {
+        const fs::path saves_root = fs::path(GetProjectAssetPath("saves"));
+        if (!fs::exists(saves_root))
+        {
+            fs::create_directories(saves_root);
+        }
+
+        for (const fs::directory_entry& entry : fs::directory_iterator(saves_root))
+        {
+            if (!entry.is_directory())
+            {
+                continue;
+            }
+
+            const fs::path meta_path = entry.path() / "world.meta";
+            if (!fs::exists(meta_path))
+            {
+                continue;
+            }
+
+            PlayGameWorld world = {};
+            world.DirectoryName = entry.path().filename().string();
+            world.Name = ReadMetaValue(meta_path, "name");
+            world.GameMode = ReadMetaValue(meta_path, "game_mode");
+            world.LastPlayed = ReadMetaValue(meta_path, "last_played");
+            world.Description = ReadMetaValue(meta_path, "description");
+            if (world.Name.empty()) world.Name = world.DirectoryName;
+            if (world.GameMode.empty()) world.GameMode = "Survival";
+            if (world.LastPlayed.empty()) world.LastPlayed = "Today";
+            if (world.Description.empty()) world.Description = "A generated world stored on disk.";
+            g_PlayGameWorlds.push_back(std::move(world));
+        }
+    }
+    catch (...)
+    {
+    }
+
+    if (g_PlayGameWorlds.empty())
+    {
+        g_SelectedPlayGameWorld = 0;
+        g_PlayGameScrollOffset = 0;
+        return;
+    }
+
+    g_SelectedPlayGameWorld = std::clamp(g_SelectedPlayGameWorld, 0, static_cast<int>(g_PlayGameWorlds.size()) - 1);
+    g_PlayGameScrollOffset = std::clamp(g_PlayGameScrollOffset, 0, std::max(0, static_cast<int>(g_PlayGameWorlds.size()) - 5));
+}
+
+// Этот файл рисует подменю Play Game и показывает, как может выглядеть отдельный экран поверх общего фона.
 // При входе в Play Game всегда начинаем с вкладки Load и верхнего элемента списка.
 void OpenPlayGameMenu()
 {
+    RefreshPlayGameWorldEntries();
     g_CurrentMenuScreen = MenuScreen::PlayGame;
     g_SelectedPlayGameTab = static_cast<int>(PlayGameTab::Load);
     g_SelectedPlayGameWorld = 0;
@@ -81,6 +171,7 @@ void DrawPlayGameMenu(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     const ImVec2 panel_pos = ImVec2(viewport_pos.x + viewport_size.x * 0.5f - panel_size.x * 0.5f, viewport_pos.y + viewport_size.y * 0.52f - panel_size.y * 0.5f);
     const ImVec2 viewport_max = ImVec2(viewport_pos.x + viewport_size.x, viewport_pos.y + viewport_size.y);
 
+    // Лёгкое затемнение помогает визуально отделить Play Game от основного меню, не скрывая панораму полностью.
     ImGui::GetForegroundDrawList()->AddRectFilled(viewport_pos, viewport_max, IM_COL32(0, 0, 0, 18));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -102,6 +193,9 @@ void DrawPlayGameMenu(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     const ImVec2 inner_max = ImVec2(body_max.x - frame_padding, body_max.y - 10.0f * scale);
     const ImVec2 list_min = ImVec2(inner_min.x + 8.0f * scale, inner_min.y + 8.0f * scale);
     const ImVec2 list_max = ImVec2(inner_max.x - 8.0f * scale, inner_max.y - 8.0f * scale);
+
+    // Ниже идёт "ручная" отрисовка интерфейса через ImDrawList.
+    // Это сделано специально: стандартные виджеты ImGui не похожи на Legacy Console по форме и светотени.
 
     // Простейший helper для рамок в стиле Legacy Console: светлая кромка сверху и тёмная снизу.
     auto draw_bevel_box = [&](const ImVec2& min, const ImVec2& max, ImU32 top_fill, ImU32 bottom_fill, ImU32 light_edge, ImU32 dark_edge, ImU32 outline)
@@ -177,6 +271,7 @@ void DrawPlayGameMenu(const ImVec2& viewport_pos, const ImVec2& viewport_size)
 
     if (g_SelectedPlayGameTab == static_cast<int>(PlayGameTab::Load))
     {
+        // Вкладка Load показывает список миров и вертикальный scrollbar.
         const float row_spacing = 4.0f * scale;
         const int visible_world_count = std::min(world_count, 5);
         const int max_scroll_offset = std::max(0, world_count - visible_world_count);
@@ -196,7 +291,11 @@ void DrawPlayGameMenu(const ImVec2& viewport_pos, const ImVec2& viewport_size)
             ImGui::SetCursorScreenPos(row_min);
             ImGui::PushID(world_index);
             if (ImGui::InvisibleButton("##world_row", ImVec2(row_max.x - row_min.x, row_height)))
+            {
                 g_SelectedPlayGameWorld = world_index;
+                g_PendingWorldAction = PendingWorldAction::Load;
+                g_PendingWorldDirectory = world.DirectoryName;
+            }
             if (ImGui::IsItemHovered())
                 g_SelectedPlayGameWorld = world_index;
             ImGui::PopID();
@@ -208,8 +307,9 @@ void DrawPlayGameMenu(const ImVec2& viewport_pos, const ImVec2& viewport_size)
             draw_thumbnail(preview_min, preview_max, world_index % 3);
 
             const float text_size = 19.0f * scale;
-            const ImVec2 text_metrics = MeasureText(g_FontMenu, world.Name, text_size);
-            DrawTextOutlined(draw_list, g_FontMenu, text_size, ImVec2(preview_max.x + 9.0f * scale, row_min.y + (row_height - text_metrics.y) * 0.5f - 1.0f * scale), is_selected ? IM_COL32(255, 240, 94, 255) : IM_COL32(244, 244, 244, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, world.Name);
+            const ImVec2 text_metrics = MeasureText(g_FontMenu, world.Name.c_str(), text_size);
+            DrawTextOutlined(draw_list, g_FontMenu, text_size, ImVec2(preview_max.x + 9.0f * scale, row_min.y + 3.0f * scale), is_selected ? IM_COL32(255, 240, 94, 255) : IM_COL32(244, 244, 244, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, world.Name.c_str());
+            DrawTextOutlined(draw_list, g_FontSubtitle, 13.0f * scale, ImVec2(preview_max.x + 9.0f * scale, row_min.y + row_height - 16.0f * scale), IM_COL32(224, 224, 224, 255), IM_COL32(32, 34, 38, 255), 0.8f * scale, world.Description.c_str());
         }
 
         draw_bevel_box(scroll_track_min, scroll_track_max, IM_COL32(212, 214, 218, 255), IM_COL32(184, 186, 190, 255), IM_COL32(255, 255, 255, 255), IM_COL32(98, 102, 108, 255), IM_COL32(54, 56, 62, 255));
@@ -229,36 +329,38 @@ void DrawPlayGameMenu(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     }
     else
     {
-        const char* const* items = nullptr;
-        int item_count = 0;
-        static constexpr const char* create_items[] = { "Create New World", "Play Tutorial", "More Options" };
-        static constexpr const char* join_items[] = { "Join Game", "Friends", "Local Network" };
-
         if (g_SelectedPlayGameTab == static_cast<int>(PlayGameTab::Create))
         {
-            items = create_items;
-            item_count = static_cast<int>(IM_ARRAYSIZE(create_items));
+            const float label_size = 18.0f * scale;
+            DrawTextOutlined(draw_list, g_FontSubtitle, label_size, ImVec2(rows_left + 10.0f * scale, rows_top + 10.0f * scale), IM_COL32(244, 244, 244, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, "World Name");
+            ImGui::SetCursorScreenPos(ImVec2(rows_left + 10.0f * scale, rows_top + 34.0f * scale));
+            ImGui::SetNextItemWidth(rows_right - rows_left - 20.0f * scale);
+            ImGui::InputText("##create_world_name", g_CreateWorldNameBuffer.data(), g_CreateWorldNameBuffer.size());
+
+            DrawTextOutlined(draw_list, g_FontSubtitle, label_size, ImVec2(rows_left + 10.0f * scale, rows_top + 76.0f * scale), IM_COL32(244, 244, 244, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, "Seed (optional)");
+            ImGui::SetCursorScreenPos(ImVec2(rows_left + 10.0f * scale, rows_top + 100.0f * scale));
+            ImGui::SetNextItemWidth(rows_right - rows_left - 20.0f * scale);
+            ImGui::InputText("##create_world_seed", g_CreateWorldSeedBuffer.data(), g_CreateWorldSeedBuffer.size());
+
+            const ImVec2 button_min = ImVec2(rows_left + 10.0f * scale, rows_top + 152.0f * scale);
+            const ImVec2 button_max = ImVec2(rows_right - 10.0f * scale, rows_top + 190.0f * scale);
+            ImGui::SetCursorScreenPos(button_min);
+            if (ImGui::InvisibleButton("##create_world_button", ImVec2(button_max.x - button_min.x, button_max.y - button_min.y)))
+            {
+                g_PendingWorldAction = PendingWorldAction::Create;
+            }
+            draw_bevel_box(button_min, button_max, IM_COL32(198, 202, 242, 255), IM_COL32(156, 162, 214, 255), IM_COL32(242, 242, 246, 255), IM_COL32(92, 96, 104, 255), IM_COL32(54, 56, 62, 255));
+            const ImVec2 button_text = MeasureText(g_FontMenu, "Create World", 20.0f * scale);
+            DrawTextOutlined(draw_list, g_FontMenu, 20.0f * scale, ImVec2(button_min.x + ((button_max.x - button_min.x) - button_text.x) * 0.5f, button_min.y + ((button_max.y - button_min.y) - button_text.y) * 0.5f - 1.0f * scale), IM_COL32(255, 240, 94, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, "Create World");
         }
         else
         {
-            items = join_items;
-            item_count = static_cast<int>(IM_ARRAYSIZE(join_items));
+            DrawTextOutlined(draw_list, g_FontMenu, 22.0f * scale, ImVec2(rows_left + 10.0f * scale, rows_top + 24.0f * scale), IM_COL32(244, 244, 244, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, "Join is not implemented yet.");
         }
 
-        const float row_spacing = 6.0f * scale;
-        const float row_height = 38.0f * scale;
-        for (int i = 0; i < item_count; ++i)
+        if (!g_MenuStatusMessage.empty() && SDL_GetTicks() - g_MenuStatusTime < 3000)
         {
-            const float row_y = rows_top + static_cast<float>(i) * (row_height + row_spacing) + 18.0f * scale;
-            const ImVec2 row_min = ImVec2(rows_left + 10.0f * scale, row_y);
-            const ImVec2 row_max = ImVec2(rows_right - 10.0f * scale, row_y + row_height);
-            const bool is_primary = i == 0;
-
-            draw_bevel_box(row_min, row_max, is_primary ? IM_COL32(198, 202, 242, 255) : IM_COL32(182, 184, 188, 255), is_primary ? IM_COL32(156, 162, 214, 255) : IM_COL32(148, 150, 154, 255), IM_COL32(242, 242, 246, 255), IM_COL32(92, 96, 104, 255), IM_COL32(54, 56, 62, 255));
-
-            const float text_size = 20.0f * scale;
-            const ImVec2 text_metrics = MeasureText(g_FontMenu, items[i], text_size);
-            DrawTextOutlined(draw_list, g_FontMenu, text_size, ImVec2(row_min.x + 14.0f * scale, row_min.y + (row_height - text_metrics.y) * 0.5f - 1.0f * scale), is_primary ? IM_COL32(255, 240, 94, 255) : IM_COL32(244, 244, 244, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, items[i]);
+            DrawTextOutlined(draw_list, g_FontSubtitle, 16.0f * scale, ImVec2(rows_left + 10.0f * scale, rows_bottom - 22.0f * scale), IM_COL32(255, 240, 94, 255), IM_COL32(46, 48, 54, 255), 1.0f * scale, g_MenuStatusMessage.c_str());
         }
     }
 

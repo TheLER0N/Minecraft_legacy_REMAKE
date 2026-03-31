@@ -11,8 +11,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstring>
+
 namespace MenuInternal
 {
+// Этот файл выступает "дирижёром" меню и решает, какой экран должен рисоваться в текущий момент.
 // Главный экран рисуется слоями: сначала интро, затем фон, затем активный экран меню.
 void DrawStartMenu()
 {
@@ -39,6 +42,8 @@ void DrawStartMenu()
 }
 }
 
+// Создаёт полностью предсказуемое стартовое состояние меню.
+// Это важно и при первом запуске, и при возможной повторной инициализации в будущем.
 void InitializeMenu(float main_scale)
 {
     using namespace MenuInternal;
@@ -60,17 +65,28 @@ void InitializeMenu(float main_scale)
     g_SelectedPlayGameTab = static_cast<int>(PlayGameTab::Load);
     g_SelectedPlayGameWorld = 0;
     g_PlayGameScrollOffset = 0;
+    g_PendingWorldAction = PendingWorldAction::None;
+    g_PendingWorldDirectory.clear();
+    g_CreateWorldNameBuffer.fill('\0');
+    g_CreateWorldSeedBuffer.fill('\0');
+    constexpr char kDefaultWorldName[] = "New World";
+    std::memcpy(g_CreateWorldNameBuffer.data(), kDefaultWorldName, sizeof(kDefaultWorldName));
+    g_MenuStatusMessage.clear();
+    g_MenuStatusTime = 0;
     // Панорама должна стартовать только после завершения всей интро-последовательности.
     g_IntroStartTime = SDL_GetTicks();
     g_PanoramaAnimationStartTime = 0;
     g_IntroFinished = false;
 }
 
+// Внешнему коду не нужно знать, какие именно подэкраны есть у меню.
+// Он просто вызывает RenderMenu один раз за кадр.
 void RenderMenu()
 {
     MenuInternal::DrawStartMenu();
 }
 
+// Освобождает все ресурсы меню и обнуляет ссылки на шрифты.
 void ShutdownMenu()
 {
     using namespace MenuInternal;

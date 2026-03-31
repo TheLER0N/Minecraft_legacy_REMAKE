@@ -1,0 +1,8 @@
+name=New World
+seed=15714
+spawn_x=8
+spawn_y=27.02
+spawn_z=8
+game_mode=Survival
+last_played=Today
+description=A blocky world generated from a saved seed.

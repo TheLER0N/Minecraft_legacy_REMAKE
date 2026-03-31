@@ -197,6 +197,7 @@ static bool g_FunctionsLoaded = true;
     IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetImageMemoryRequirements) \
     IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceProperties) \
     IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceMemoryProperties) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceFormatProperties) \
     IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceQueueFamilyProperties) \
     IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
     IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceSurfaceFormatsKHR) \
@@ -416,6 +417,38 @@ static uint32_t ImGui_ImplVulkan_MemoryType(VkMemoryPropertyFlags properties, ui
         if ((prop.memoryTypes[i].propertyFlags & properties) == properties && type_bits & (1 << i))
             return i;
     return 0xFFFFFFFF; // Unable to find memoryType
+}
+
+static uint32_t ImGui_ImplVulkanH_MemoryType(VkPhysicalDevice physical_device, VkMemoryPropertyFlags properties, uint32_t type_bits)
+{
+    VkPhysicalDeviceMemoryProperties prop = {};
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &prop);
+    for (uint32_t i = 0; i < prop.memoryTypeCount; i++)
+        if ((prop.memoryTypes[i].propertyFlags & properties) == properties && type_bits & (1 << i))
+            return i;
+    return 0xFFFFFFFF;
+}
+
+static VkFormat ImGui_ImplVulkanH_SelectDepthFormat(VkPhysicalDevice physical_device)
+{
+    const VkFormat depth_formats[] =
+    {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+    };
+
+    for (VkFormat format : depth_formats)
+    {
+        VkFormatProperties properties = {};
+        vkGetPhysicalDeviceFormatProperties(physical_device, format, &properties);
+        if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0)
+        {
+            return format;
+        }
+    }
+
+    return VK_FORMAT_D32_SFLOAT;
 }
 
 static void check_vk_result(VkResult err)
@@ -746,6 +779,9 @@ void ImGui_ImplVulkan_UpdateTexture(ImTextureData* tex)
             check_vk_result(err);
         }
 
+        // Кастомная доработка проекта: часть UI-текстур должна оставаться "пиксельной".
+        // Если в ImTextureData включён UseNearestSampling, привязываем nearest sampler вместо standard linear.
+        // Это особенно важно для панорамы, логотипов и кнопок в стиле Legacy Console.
         // Create the Descriptor Set
         VkSampler sampler = tex->UseNearestSampling ? bd->TexSamplerNearest : bd->TexSamplerLinear;
         backend_tex->DescriptorSet = ImGui_ImplVulkan_AddTexture(sampler, backend_tex->ImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1067,6 +1103,8 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
 
     if (!bd->TexSamplerNearest)
     {
+        // Дополнительный sampler введён проектом специально для pixel-art текстур.
+        // В отличие от linear sampler, nearest не размывает изображение между соседними пикселями.
         VkSamplerCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         info.magFilter = VK_FILTER_NEAREST;
@@ -1202,6 +1240,7 @@ void    ImGui_ImplVulkan_DestroyDeviceObjects()
     if (bd->TexCommandBuffer)     { vkFreeCommandBuffers(v->Device, bd->TexCommandPool, 1, &bd->TexCommandBuffer); bd->TexCommandBuffer = VK_NULL_HANDLE; }
     if (bd->TexCommandPool)       { vkDestroyCommandPool(v->Device, bd->TexCommandPool, v->Allocator); bd->TexCommandPool = VK_NULL_HANDLE; }
     if (bd->TexSamplerLinear)     { vkDestroySampler(v->Device, bd->TexSamplerLinear, v->Allocator); bd->TexSamplerLinear = VK_NULL_HANDLE; }
+    // Не забываем освободить и кастомный nearest sampler, добавленный поверх стандартного backend'а.
     if (bd->TexSamplerNearest)    { vkDestroySampler(v->Device, bd->TexSamplerNearest, v->Allocator); bd->TexSamplerNearest = VK_NULL_HANDLE; }
     if (bd->ShaderModuleVert)     { vkDestroyShaderModule(v->Device, bd->ShaderModuleVert, v->Allocator); bd->ShaderModuleVert = VK_NULL_HANDLE; }
     if (bd->ShaderModuleFrag)     { vkDestroyShaderModule(v->Device, bd->ShaderModuleFrag, v->Allocator); bd->ShaderModuleFrag = VK_NULL_HANDLE; }
@@ -1710,24 +1749,40 @@ void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, V
         VkAttachmentDescription attachment = wd->AttachmentDesc;
         if (attachment.format == VK_FORMAT_UNDEFINED)
             attachment.format = wd->SurfaceFormat.format;
+        const VkFormat depth_format = ImGui_ImplVulkanH_SelectDepthFormat(physical_device);
+        VkAttachmentDescription attachments[2] = {};
+        attachments[0] = attachment;
+        attachments[1].format = depth_format;
+        attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
         VkAttachmentReference color_attachment = {};
         color_attachment.attachment = 0;
         color_attachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference depth_attachment = {};
+        depth_attachment.attachment = 1;
+        depth_attachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         VkSubpassDescription subpass = {};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &color_attachment;
+        subpass.pDepthStencilAttachment = &depth_attachment;
         VkSubpassDependency dependency = {};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.srcAccessMask = 0;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         VkRenderPassCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        info.attachmentCount = 1;
-        info.pAttachments = &attachment;
+        info.attachmentCount = 2;
+        info.pAttachments = attachments;
         info.subpassCount = 1;
         info.pSubpasses = &subpass;
         info.dependencyCount = 1;
@@ -1761,14 +1816,61 @@ void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, V
         }
     }
 
+    {
+        const VkFormat depth_format = ImGui_ImplVulkanH_SelectDepthFormat(physical_device);
+        for (uint32_t i = 0; i < wd->ImageCount; i++)
+        {
+            ImGui_ImplVulkanH_Frame* fd = &wd->Frames[i];
+
+            VkImageCreateInfo image_info = {};
+            image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            image_info.imageType = VK_IMAGE_TYPE_2D;
+            image_info.format = depth_format;
+            image_info.extent.width = wd->Width;
+            image_info.extent.height = wd->Height;
+            image_info.extent.depth = 1;
+            image_info.mipLevels = 1;
+            image_info.arrayLayers = 1;
+            image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+            image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+            image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            err = vkCreateImage(device, &image_info, allocator, &fd->DepthImage);
+            check_vk_result(err);
+
+            VkMemoryRequirements req = {};
+            vkGetImageMemoryRequirements(device, fd->DepthImage, &req);
+            VkMemoryAllocateInfo alloc_info = {};
+            alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            alloc_info.allocationSize = req.size;
+            alloc_info.memoryTypeIndex = ImGui_ImplVulkanH_MemoryType(physical_device, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, req.memoryTypeBits);
+            err = vkAllocateMemory(device, &alloc_info, allocator, &fd->DepthMemory);
+            check_vk_result(err);
+            err = vkBindImageMemory(device, fd->DepthImage, fd->DepthMemory, 0);
+            check_vk_result(err);
+
+            VkImageViewCreateInfo view_info = {};
+            view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            view_info.image = fd->DepthImage;
+            view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            view_info.format = depth_format;
+            view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            view_info.subresourceRange.levelCount = 1;
+            view_info.subresourceRange.layerCount = 1;
+            err = vkCreateImageView(device, &view_info, allocator, &fd->DepthImageView);
+            check_vk_result(err);
+        }
+    }
+
     // Create Framebuffer
     if (wd->UseDynamicRendering == false)
     {
-        VkImageView attachment[1];
+        VkImageView attachment[2];
         VkFramebufferCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         info.renderPass = wd->RenderPass;
-        info.attachmentCount = 1;
+        info.attachmentCount = 2;
         info.pAttachments = attachment;
         info.width = wd->Width;
         info.height = wd->Height;
@@ -1777,6 +1879,7 @@ void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, V
         {
             ImGui_ImplVulkanH_Frame* fd = &wd->Frames[i];
             attachment[0] = fd->BackbufferView;
+            attachment[1] = fd->DepthImageView;
             err = vkCreateFramebuffer(device, &info, allocator, &fd->Framebuffer);
             check_vk_result(err);
         }
@@ -1903,6 +2006,9 @@ void ImGui_ImplVulkanH_DestroyFrame(VkDevice device, ImGui_ImplVulkanH_Frame* fd
     fd->CommandPool = VK_NULL_HANDLE;
 
     vkDestroyImageView(device, fd->BackbufferView, allocator);
+    vkDestroyImageView(device, fd->DepthImageView, allocator);
+    vkDestroyImage(device, fd->DepthImage, allocator);
+    vkFreeMemory(device, fd->DepthMemory, allocator);
     vkDestroyFramebuffer(device, fd->Framebuffer, allocator);
 }
 

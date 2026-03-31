@@ -9,6 +9,7 @@ namespace MenuInternal
 {
 namespace
 {
+// Весь текст меню старается использовать Mojangles, а SpaceMace подмешивается только как кириллический fallback.
 constexpr const char* kPrimaryMenuFontFile = "assets\\fonts\\Mojangles.ttf";
 constexpr const char* kRussianMenuFallbackFontFile = "assets\\fonts\\RU\\SpaceMace.ttf";
 
@@ -68,6 +69,7 @@ ImFont* LoadFontWithFallback(const char* primary_path, const char* fallback_path
     return nullptr;
 }
 
+// Загружает весь набор шрифтов, который используется меню на разных слоях.
 void LoadMenuFonts(float main_scale)
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -99,11 +101,13 @@ void LoadMenuFonts(float main_scale)
     }
 }
 
+// Если конкретный указатель на шрифт пустой, безопасно возвращаем текущий шрифт ImGui.
 ImFont* ResolveFont(ImFont* font)
 {
     return font != nullptr ? font : ImGui::GetFont();
 }
 
+// Часто layout сначала считает размер текста, а потом уже рисует кнопки и рамки вокруг него.
 ImVec2 MeasureText(ImFont* font, const char* text, float size)
 {
     font = ResolveFont(font);

@@ -12,6 +12,7 @@ namespace MenuInternal
 {
 namespace
 {
+// Эти коэффициенты задают базовую плотность фоновых элементов относительно окна.
 constexpr float kMainMenuBaseScale = 0.8f;
 constexpr float kLogoScaleAdjust = 0.924f;
 
@@ -38,6 +39,9 @@ void DrawCoverTexture(ImDrawList* draw_list, const TextureSlot& slot, const ImVe
 }
 }
 
+// Этот файл отвечает за всё, что рисуется "под" или "вокруг" меню:
+// стартовые заставки, панораму, логотип и жёлтый splash.
+
 // Панорама не просто растягивается на экран, а медленно "дышит" и плавает по горизонтали.
 void DrawPanoramaLayer(ImDrawList* draw_list, const TextureSlot& slot, const ImVec2& viewport_pos, const ImVec2& viewport_size, float time, float zoom, float pan_speed, float phase, float vertical_sway, ImU32 tint)
 {
@@ -54,8 +58,10 @@ void DrawPanoramaLayer(ImDrawList* draw_list, const TextureSlot& slot, const ImV
     const float draw_height = texture_height * scale;
     const float x_range = std::max(0.0f, draw_width - viewport_size.x);
     const float y_range = std::max(0.0f, draw_height - viewport_size.y);
+    // pan_phase двигает изображение слева направо и обратно без резкого скачка в конце цикла.
     const float pan_cycle = std::fmod(time * pan_speed, 2.0f);
     const float pan_phase = pan_cycle <= 1.0f ? pan_cycle : 2.0f - pan_cycle;
+    // Дополнительный небольшой sway нужен, чтобы фон не выглядел как строго линейный скролл.
     const float sway_phase = std::sin(time * (pan_speed * 0.55f) + phase * 1.7f);
     const float sway_range = std::min(viewport_size.y * vertical_sway, y_range * 0.5f);
     const float draw_x = viewport_pos.x - x_range * pan_phase;
@@ -103,6 +109,7 @@ bool DrawStartupIntro(const ImVec2& viewport_pos, const ImVec2& viewport_size)
         return false;
     }
 
+    // Если ни один экран интро не загрузился, не зависаем на чёрном фоне, а сразу идём в меню.
     if (!EnsureIntroPhotoTexturesLoaded())
     {
         g_IntroFinished = true;
@@ -131,6 +138,7 @@ bool DrawStartupIntro(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     const uint64_t intro_total_duration_ms = g_IntroSceneDurationMs * static_cast<uint64_t>(active_intro_count);
     if (elapsed_ms >= intro_total_duration_ms)
     {
+        // Как только вся последовательность отыграла, начиная со следующего кадра рендерится обычное меню.
         g_IntroFinished = true;
         return false;
     }
@@ -144,6 +152,7 @@ bool DrawStartupIntro(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     const uint64_t scene_elapsed_ms = elapsed_ms % g_IntroSceneDurationMs;
     const float alpha = std::clamp(GetIntroPhotoAlpha(scene_elapsed_ms), 0.0f, 1.0f);
     const int alpha_u8 = static_cast<int>(std::round(alpha * 255.0f));
+    // Рисуем текущий экран интро поверх чёрного фона с вычисленной прозрачностью.
     DrawCoverTexture(draw_list, *active_intro_textures[scene_index], viewport_pos, viewport_size, IM_COL32(255, 255, 255, alpha_u8));
 
     return true;
@@ -168,6 +177,7 @@ void DrawPanoramaBackground(const ImVec2& viewport_pos, const ImVec2& viewport_s
     const float time = static_cast<float>(SDL_GetTicks() - g_PanoramaAnimationStartTime) * 0.001f;
     const bool is_night = g_SelectedPanoramaVariant == PanoramaVariant::Night;
 
+    // PushClipRect не даёт случайно вылезти изображению за пределы окна при cover-отрисовке.
     draw_list->PushClipRect(viewport_pos, bottom_right, false);
     DrawPanoramaLayer(draw_list, g_PanoramaTexture, viewport_pos, viewport_size, time, 1.0f, is_night ? 0.010f : 0.012f, is_night ? 0.95f : 0.45f, 0.004f, IM_COL32(255, 255, 255, 255));
     draw_list->PopClipRect();
@@ -186,10 +196,12 @@ void DrawMinecraftLogo(const ImVec2& viewport_pos, const ImVec2& viewport_size)
     const float max_logo_width = std::clamp(viewport_size.x * 0.78f * kMainMenuBaseScale, 420.0f * scale, 760.0f * scale) * kLogoScaleAdjust;
     const float logo_aspect = static_cast<float>(g_MenuLogoTexture.Width) / static_cast<float>(g_MenuLogoTexture.Height);
     const ImVec2 logo_size = ImVec2(max_logo_width, max_logo_width / logo_aspect);
+    // Позиция логотипа вручную подгоняется под референс меню Legacy Console.
     const ImVec2 logo_pos = ImVec2(viewport_pos.x + viewport_size.x * 0.5f - logo_size.x * 0.5f, viewport_pos.y + 85.8f * scale);
 
     draw_list->AddImage(g_MenuLogoTexture.Texture->GetTexRef(), logo_pos, ImVec2(logo_pos.x + logo_size.x, logo_pos.y + logo_size.y));
 
+    // Splash жёстко привязан к логотипу, чтобы при смене масштаба не "уплывать" отдельно.
     const float splash_size = 42.0f * scale * kLogoScaleAdjust;
     const ImVec2 splash_pos = ImVec2(logo_pos.x + logo_size.x * 0.74f, logo_pos.y + 12.0f * scale * kLogoScaleAdjust);
     DrawSlantedText(draw_list, g_FontSplash, splash_size, splash_pos, IM_COL32(255, 242, 76, 255), IM_COL32(82, 70, 0, 255), 1.6f * scale, -0.18f, g_SplashText);
