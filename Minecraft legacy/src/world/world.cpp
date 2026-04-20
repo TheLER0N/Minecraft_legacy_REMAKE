@@ -26,6 +26,10 @@
 #include <string>
 #include <vector>
 
+#include "../../stb/stb_image.h"
+
+
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -471,6 +475,89 @@ bool CreateBufferResource(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryP
 
     out_buffer.Size = size;
     return true;
+}
+
+bool CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = g_WorldRenderer.UploadCommandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    if (g_WorldRenderer.Context.AllocateCommandBuffers(g_WorldRenderer.Context.Device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    g_WorldRenderer.Context.BeginCommandBuffer(commandBuffer, &beginInfo);
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    g_WorldRenderer.Context.CmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    g_WorldRenderer.Context.EndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    g_WorldRenderer.Context.QueueSubmit(g_WorldRenderer.Context.Queue, 1, &submitInfo, VK_NULL_HANDLE);
+    g_WorldRenderer.Context.QueueWaitIdle(g_WorldRenderer.Context.Queue);
+
+    g_WorldRenderer.Context.FreeCommandBuffers(g_WorldRenderer.Context.Device, g_WorldRenderer.UploadCommandPool, 1, &commandBuffer);
+
+    return true;
+}
+
+void UploadWorldMeshData()
+{
+    if (!g_WorldRenderer.PendingMeshUpload || g_WorldRenderer.CpuVertices.empty() || g_WorldRenderer.CpuIndices.empty()) {
+        return;
+    }
+
+    VkDeviceSize vertexBufferSize = sizeof(g_WorldRenderer.CpuVertices[0]) * g_WorldRenderer.CpuVertices.size();
+    VkDeviceSize indexBufferSize = sizeof(g_WorldRenderer.CpuIndices[0]) * g_WorldRenderer.CpuIndices.size();
+
+    GpuBuffer stagingVertexBuffer;
+    if (!CreateBufferResource(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingVertexBuffer)) {
+        return;
+    }
+
+    void* data;
+    g_WorldRenderer.Context.MapMemory(g_WorldRenderer.Context.Device, stagingVertexBuffer.Memory, 0, vertexBufferSize, 0, &data);
+    memcpy(data, g_WorldRenderer.CpuVertices.data(), (size_t)vertexBufferSize);
+    g_WorldRenderer.Context.UnmapMemory(g_WorldRenderer.Context.Device, stagingVertexBuffer.Memory);
+
+    if (!CreateBufferResource(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, g_WorldRenderer.VertexBuffer)) {
+        return;
+    }
+    CopyBuffer(stagingVertexBuffer.Buffer, g_WorldRenderer.VertexBuffer.Buffer, vertexBufferSize);
+    DestroyGpuBuffer(stagingVertexBuffer);
+
+    GpuBuffer stagingIndexBuffer;
+    if (!CreateBufferResource(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingIndexBuffer)) {
+        return;
+    }
+
+    g_WorldRenderer.Context.MapMemory(g_WorldRenderer.Context.Device, stagingIndexBuffer.Memory, 0, indexBufferSize, 0, &data);
+    memcpy(data, g_WorldRenderer.CpuIndices.data(), (size_t)indexBufferSize);
+    g_WorldRenderer.Context.UnmapMemory(g_WorldRenderer.Context.Device, stagingIndexBuffer.Memory);
+
+    if (!CreateBufferResource(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, g_WorldRenderer.IndexBuffer)) {
+        return;
+    }
+    CopyBuffer(stagingIndexBuffer.Buffer, g_WorldRenderer.IndexBuffer.Buffer, indexBufferSize);
+    DestroyGpuBuffer(stagingIndexBuffer);
+
+    g_WorldRenderer.PendingMeshUpload = false;
+    g_WorldRenderer.GpuReady = true;
 }
 
 size_t GetBlockIndex(int x, int y, int z)
@@ -1255,6 +1342,8 @@ void DrawWorldSky(const ImVec2& viewport_pos, const ImVec2& viewport_size)
 
 void RenderWorldGeometry(const ImVec2& viewport_pos, const ImVec2& viewport_size)
 {
+    return; // CPU rendering disabled
+
     if (g_WorldState.MeshFaces.empty() || viewport_size.x <= 0.0f || viewport_size.y <= 0.0f)
     {
         return;
@@ -1373,6 +1462,236 @@ void DrawWorldHud(const ImVec2& viewport_pos, const ImVec2& viewport_size)
 }
 }
 
+
+void UploadWorldTexturesVulkan()
+{
+    if (!g_WorldRenderer.PendingTextureUpload) return;
+    
+    int texWidth = 0, texHeight = 0, texChannels = 0;
+    std::vector<unsigned char> allPixels;
+    
+    for (uint32_t i = 0; i < kWorldTextureLayerCount; ++i) {
+        std::string path = GetRuntimePath(kWorldTextureFiles[i]);
+        int w, h, channels;
+        unsigned char* pixels = stbi_load(path.c_str(), &w, &h, &channels, 4);
+        if (!pixels) {
+            std::fprintf(stderr, "Failed to load texture: %s\n", path.c_str());
+            return;
+        }
+        if (i == 0) {
+            texWidth = w;
+            texHeight = h;
+            texChannels = 4;
+        } else if (w != texWidth || h != texHeight) {
+            std::fprintf(stderr, "Texture size mismatch: %s\n", path.c_str());
+            stbi_image_free(pixels);
+            return;
+        }
+        
+        allPixels.insert(allPixels.end(), pixels, pixels + (w * h * 4));
+        stbi_image_free(pixels);
+    }
+    
+    VkDeviceSize imageSize = static_cast<VkDeviceSize>(texWidth) * static_cast<VkDeviceSize>(texHeight) * 4 * kWorldTextureLayerCount;
+    
+    GpuBuffer stagingBuffer;
+    if (!CreateBufferResource(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer)) {
+        return;
+    }
+    
+    void* data;
+    g_WorldRenderer.Context.MapMemory(g_WorldRenderer.Context.Device, stagingBuffer.Memory, 0, imageSize, 0, &data);
+    memcpy(data, allPixels.data(), static_cast<size_t>(imageSize));
+    g_WorldRenderer.Context.UnmapMemory(g_WorldRenderer.Context.Device, stagingBuffer.Memory);
+    
+    // Destroy old image/view/sampler if they exist
+    if (g_WorldRenderer.TextureArray.Sampler != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroySampler(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Sampler, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.TextureArray.View != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyImageView(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.View, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.TextureArray.Image != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyImage(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Image, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.TextureArray.Memory != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.FreeMemory(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Memory, g_WorldRenderer.Context.Allocator);
+    }
+    g_WorldRenderer.TextureArray = {};
+    
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = static_cast<uint32_t>(texWidth);
+    imageInfo.extent.height = static_cast<uint32_t>(texHeight);
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = kWorldTextureLayerCount;
+    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    
+    if (g_WorldRenderer.Context.CreateImage(g_WorldRenderer.Context.Device, &imageInfo, g_WorldRenderer.Context.Allocator, &g_WorldRenderer.TextureArray.Image) != VK_SUCCESS) {
+        DestroyGpuBuffer(stagingBuffer);
+        return;
+    }
+    
+    VkMemoryRequirements memReqs;
+    g_WorldRenderer.Context.GetImageMemoryRequirements(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Image, &memReqs);
+    
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex = FindMemoryTypeIndex(g_WorldRenderer.Context, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    
+    if (g_WorldRenderer.Context.AllocateMemory(g_WorldRenderer.Context.Device, &allocInfo, g_WorldRenderer.Context.Allocator, &g_WorldRenderer.TextureArray.Memory) != VK_SUCCESS) {
+        DestroyGpuBuffer(stagingBuffer);
+        return;
+    }
+    
+    g_WorldRenderer.Context.BindImageMemory(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Image, g_WorldRenderer.TextureArray.Memory, 0);
+    
+    // Copy buffer to image
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandPool = g_WorldRenderer.UploadCommandPool;
+    cmdAllocInfo.commandBufferCount = 1;
+    
+    VkCommandBuffer commandBuffer;
+    g_WorldRenderer.Context.AllocateCommandBuffers(g_WorldRenderer.Context.Device, &cmdAllocInfo, &commandBuffer);
+    
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    g_WorldRenderer.Context.BeginCommandBuffer(commandBuffer, &beginInfo);
+    
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = g_WorldRenderer.TextureArray.Image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = kWorldTextureLayerCount;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    
+    g_WorldRenderer.Context.CmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier
+    );
+    
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = kWorldTextureLayerCount;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {
+        static_cast<uint32_t>(texWidth),
+        static_cast<uint32_t>(texHeight),
+        1
+    };
+    
+    g_WorldRenderer.Context.CmdCopyBufferToImage(commandBuffer, stagingBuffer.Buffer, g_WorldRenderer.TextureArray.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    
+    g_WorldRenderer.Context.CmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier
+    );
+    
+    g_WorldRenderer.Context.EndCommandBuffer(commandBuffer);
+    
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    
+    g_WorldRenderer.Context.QueueSubmit(g_WorldRenderer.Context.Queue, 1, &submitInfo, VK_NULL_HANDLE);
+    g_WorldRenderer.Context.QueueWaitIdle(g_WorldRenderer.Context.Queue);
+    g_WorldRenderer.Context.FreeCommandBuffers(g_WorldRenderer.Context.Device, g_WorldRenderer.UploadCommandPool, 1, &commandBuffer);
+    
+    DestroyGpuBuffer(stagingBuffer);
+    
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = g_WorldRenderer.TextureArray.Image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = kWorldTextureLayerCount;
+    
+    g_WorldRenderer.Context.CreateImageView(g_WorldRenderer.Context.Device, &viewInfo, g_WorldRenderer.Context.Allocator, &g_WorldRenderer.TextureArray.View);
+    
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    
+    g_WorldRenderer.Context.CreateSampler(g_WorldRenderer.Context.Device, &samplerInfo, g_WorldRenderer.Context.Allocator, &g_WorldRenderer.TextureArray.Sampler);
+    
+    if (g_WorldRenderer.DescriptorSet == VK_NULL_HANDLE) {
+        VkDescriptorSetAllocateInfo dsAllocInfo{};
+        dsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        dsAllocInfo.descriptorPool = g_WorldRenderer.Context.DescriptorPool;
+        dsAllocInfo.descriptorSetCount = 1;
+        dsAllocInfo.pSetLayouts = &g_WorldRenderer.DescriptorSetLayout;
+        if (g_WorldRenderer.Context.AllocateDescriptorSets(g_WorldRenderer.Context.Device, &dsAllocInfo, &g_WorldRenderer.DescriptorSet) != VK_SUCCESS) {
+            std::fprintf(stderr, "Failed to allocate descriptor set\n");
+            return;
+        }
+    }
+    
+    VkDescriptorImageInfo imageInfoDesc{};
+    imageInfoDesc.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfoDesc.imageView = g_WorldRenderer.TextureArray.View;
+    imageInfoDesc.sampler = g_WorldRenderer.TextureArray.Sampler;
+    
+    VkWriteDescriptorSet descriptorWrite{};
+    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrite.dstSet = g_WorldRenderer.DescriptorSet;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pImageInfo = &imageInfoDesc;
+    
+    g_WorldRenderer.Context.UpdateDescriptorSets(g_WorldRenderer.Context.Device, 1, &descriptorWrite, 0, nullptr);
+    
+    g_WorldRenderer.PendingTextureUpload = false;
+}
+
 bool InitializeWorldSystem(float main_scale)
 {
     g_WorldState.SystemInitialized = true;
@@ -1380,9 +1699,213 @@ bool InitializeWorldSystem(float main_scale)
     return EnsureWorldTexturesLoaded();
 }
 
+
+#include <fstream>
+
+static std::vector<uint32_t> LoadSpvFile(const wchar_t* filename)
+{
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) return {};
+    size_t fileSize = (size_t)file.tellg();
+    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+    file.seekg(0);
+    file.read((char*)buffer.data(), fileSize);
+    file.close();
+    return buffer;
+}
+
+static VkShaderModule CreateShaderModule(const AppVulkanContext& ctx, const std::vector<uint32_t>& code)
+{
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = code.size() * sizeof(uint32_t);
+    createInfo.pCode = code.data();
+    VkShaderModule shaderModule;
+    if (ctx.CreateShaderModule(ctx.Device, &createInfo, ctx.Allocator, &shaderModule) != VK_SUCCESS)
+        return VK_NULL_HANDLE;
+    return shaderModule;
+}
+
+bool CreateWorldGraphicsPipeline()
+{
+    auto& ctx = g_WorldRenderer.Context;
+
+    auto vertShaderCode = LoadSpvFile(Utf8Path("C:/Users/Пользователь/Desktop/Minecraft legacy/Minecraft legacy/src/world/shaders/chunk.vert.spv").c_str());
+    auto fragShaderCode = LoadSpvFile(Utf8Path("C:/Users/Пользователь/Desktop/Minecraft legacy/Minecraft legacy/src/world/shaders/chunk.frag.spv").c_str());
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        std::fprintf(stderr, "Failed to load shader files from absolute paths\n");
+        return false;
+    }
+
+    VkShaderModule vertShaderModule = CreateShaderModule(ctx, vertShaderCode);
+    VkShaderModule fragShaderModule = CreateShaderModule(ctx, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    // Vertex Input
+    VkVertexInputBindingDescription bindingDescription{};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(GpuVertex);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkVertexInputAttributeDescription attributeDescriptions[3]{};
+    // Position
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(GpuVertex, Position);
+    // UV & Layer
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(GpuVertex, TexCoord);
+    // Color
+    attributeDescriptions[2].binding = 0;
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].format = VK_FORMAT_R8G8B8A8_UNORM;
+    attributeDescriptions[2].offset = offsetof(GpuVertex, Color);
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = 3;
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = 2;
+    dynamicState.pDynamicStates = dynamicStates;
+
+    // Descriptor Set Layout
+    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 0;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &samplerLayoutBinding;
+    if (ctx.CreateDescriptorSetLayout(ctx.Device, &layoutInfo, ctx.Allocator, &g_WorldRenderer.DescriptorSetLayout) != VK_SUCCESS)
+        return false;
+
+    // Push Constants
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(Mat4);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &g_WorldRenderer.DescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (ctx.CreatePipelineLayout(ctx.Device, &pipelineLayoutInfo, ctx.Allocator, &g_WorldRenderer.PipelineLayout) != VK_SUCCESS)
+        return false;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = g_WorldRenderer.PipelineLayout;
+    pipelineInfo.renderPass = ctx.RenderPass;
+    pipelineInfo.subpass = 0;
+    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+
+    if (ctx.CreateGraphicsPipelines(ctx.Device, VK_NULL_HANDLE, 1, &pipelineInfo, ctx.Allocator, &g_WorldRenderer.Pipeline) != VK_SUCCESS)
+        return false;
+
+    ctx.DestroyShaderModule(ctx.Device, vertShaderModule, ctx.Allocator);
+    ctx.DestroyShaderModule(ctx.Device, fragShaderModule, ctx.Allocator);
+
+    return true;
+}
+
 bool InitializeWorldRenderer(const AppVulkanContext& context)
 {
     g_WorldRenderer.Context = context;
+    if (!CreateWorldGraphicsPipeline()) {
+        return false;
+    }
+    
+    // Create Command Pool for uploads
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolInfo.queueFamilyIndex = context.QueueFamily;
+    if (context.CreateCommandPool(context.Device, &poolInfo, context.Allocator, &g_WorldRenderer.UploadCommandPool) != VK_SUCCESS) {
+        return false;
+    }
+    
     g_WorldRenderer.Initialized = true;
     g_WorldRenderer.PendingTextureUpload = true;
     g_WorldRenderer.PendingMeshUpload = true;
@@ -1391,6 +1914,40 @@ bool InitializeWorldRenderer(const AppVulkanContext& context)
 
 void ShutdownWorldRenderer()
 {
+    if (g_WorldRenderer.Context.Device == VK_NULL_HANDLE) {
+        g_WorldRenderer = {};
+        return;
+    }
+
+    if (g_WorldRenderer.TextureArray.Sampler != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroySampler(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Sampler, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.TextureArray.View != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyImageView(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.View, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.TextureArray.Image != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyImage(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Image, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.TextureArray.Memory != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.FreeMemory(g_WorldRenderer.Context.Device, g_WorldRenderer.TextureArray.Memory, g_WorldRenderer.Context.Allocator);
+    }
+
+    DestroyGpuBuffer(g_WorldRenderer.VertexBuffer);
+    DestroyGpuBuffer(g_WorldRenderer.IndexBuffer);
+
+    if (g_WorldRenderer.Pipeline != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyPipeline(g_WorldRenderer.Context.Device, g_WorldRenderer.Pipeline, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.PipelineLayout != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyPipelineLayout(g_WorldRenderer.Context.Device, g_WorldRenderer.PipelineLayout, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.DescriptorSetLayout != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyDescriptorSetLayout(g_WorldRenderer.Context.Device, g_WorldRenderer.DescriptorSetLayout, g_WorldRenderer.Context.Allocator);
+    }
+    if (g_WorldRenderer.UploadCommandPool != VK_NULL_HANDLE) {
+        g_WorldRenderer.Context.DestroyCommandPool(g_WorldRenderer.Context.Device, g_WorldRenderer.UploadCommandPool, g_WorldRenderer.Context.Allocator);
+    }
+
     g_WorldRenderer = {};
 }
 
@@ -1597,6 +2154,52 @@ void RenderWorld()
     DrawWorldHud(viewport_pos, viewport_size);
 }
 
-void RenderWorldVulkan(VkCommandBuffer, int, int)
+void RenderWorldVulkan(VkCommandBuffer cmd, int fb_width, int fb_height)
 {
+    UploadWorldMeshData();
+    UploadWorldTexturesVulkan();
+    
+    if (g_WorldRenderer.VertexBuffer.Buffer == VK_NULL_HANDLE || g_WorldRenderer.IndexBuffer.Buffer == VK_NULL_HANDLE || g_WorldRenderer.CpuIndices.empty()) {
+        return;
+    }
+    if (g_WorldRenderer.DescriptorSet == VK_NULL_HANDLE || g_WorldRenderer.Pipeline == VK_NULL_HANDLE) {
+        return;
+    }
+
+    g_WorldRenderer.Context.CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_WorldRenderer.Pipeline);
+    
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(fb_width);
+    viewport.height = static_cast<float>(fb_height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    g_WorldRenderer.Context.CmdSetViewport(cmd, 0, 1, &viewport);
+    
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {static_cast<uint32_t>(fb_width), static_cast<uint32_t>(fb_height)};
+    g_WorldRenderer.Context.CmdSetScissor(cmd, 0, 1, &scissor);
+    
+    g_WorldRenderer.Context.CmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_WorldRenderer.PipelineLayout, 0, 1, &g_WorldRenderer.DescriptorSet, 0, nullptr);
+    
+    const float aspect = static_cast<float>(fb_width) / static_cast<float>(fb_height);
+    Mat4 proj = PerspectiveMatrix(kWorldFieldOfViewYRadians, aspect, kNearClipDistance, kFarClipDistance);
+    
+    const Vec3 camera_position = { g_WorldState.Position.X, g_WorldState.Position.Y + kEyeHeight, g_WorldState.Position.Z };
+    const Vec3 forward = GetCameraForward();
+    const Vec3 right = GetCameraRight();
+    const Vec3 up = GetCameraUp();
+    
+    Mat4 view = ViewMatrix(camera_position, forward, right, up);
+    Mat4 mvp = MultiplyMatrix(proj, view);
+    
+    g_WorldRenderer.Context.CmdPushConstants(cmd, g_WorldRenderer.PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4), &mvp);
+    
+    VkDeviceSize offsets[] = {0};
+    g_WorldRenderer.Context.CmdBindVertexBuffers(cmd, 0, 1, &g_WorldRenderer.VertexBuffer.Buffer, offsets);
+    g_WorldRenderer.Context.CmdBindIndexBuffer(cmd, g_WorldRenderer.IndexBuffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
+    
+    g_WorldRenderer.Context.CmdDrawIndexed(cmd, static_cast<uint32_t>(g_WorldRenderer.CpuIndices.size()), 1, 0, 0, 0);
 }

@@ -166,6 +166,7 @@
     <ClCompile Include="src\menu\menu_state.cpp" />
     <ClCompile Include="src\menu\menu.cpp" />
     <ClCompile Include="src\world\world.cpp" />
+    <ClCompile Include="src\app\stb_impl.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_sdl3.cpp" />
     <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
@@ -183,6 +184,8 @@
     <ClInclude Include="src\menu\menu_play_game.h" />
     <ClInclude Include="src\menu\menu_state.h" />
     <ClInclude Include="src\world\world.h" />
+    <ClInclude Include="src\world\texture_loader.h" />
+    <ClInclude Include="src\app\vulkan_context.h" />
     <ClInclude Include="vulkan\vulkan.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -52,6 +52,7 @@ struct AppVulkanContext
     PFN_vkQueueWaitIdle QueueWaitIdle = nullptr;
     PFN_vkCmdPipelineBarrier CmdPipelineBarrier = nullptr;
     PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage = nullptr;
+    PFN_vkCmdCopyBuffer CmdCopyBuffer = nullptr;
     PFN_vkCmdBindPipeline CmdBindPipeline = nullptr;
     PFN_vkCmdBindDescriptorSets CmdBindDescriptorSets = nullptr;
     PFN_vkCmdBindVertexBuffers CmdBindVertexBuffers = nullptr;
@@ -59,4 +60,5 @@ struct AppVulkanContext
     PFN_vkCmdDrawIndexed CmdDrawIndexed = nullptr;
     PFN_vkCmdSetViewport CmdSetViewport = nullptr;
     PFN_vkCmdSetScissor CmdSetScissor = nullptr;
+    PFN_vkCmdPushConstants CmdPushConstants = nullptr;
 };

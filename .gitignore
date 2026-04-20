@@ -2,3 +2,16 @@
 x64/
 Source_4jd/
 Minecraft legacy/x64/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.log
+*.tlog
+*.lastbuildstate
+*.idb
+*.py
+build_output.txt
+run_log.txt
+saves/
+nul

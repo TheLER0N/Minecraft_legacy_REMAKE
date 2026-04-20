@@ -235,6 +235,7 @@ static void FillWorldVulkanContext(VkRenderPass render_pass)
     g_WorldVulkanContext.QueueWaitIdle = reinterpret_cast<PFN_vkQueueWaitIdle>(vkGetDeviceProcAddr(g_Device, "vkQueueWaitIdle"));
     g_WorldVulkanContext.CmdPipelineBarrier = reinterpret_cast<PFN_vkCmdPipelineBarrier>(vkGetDeviceProcAddr(g_Device, "vkCmdPipelineBarrier"));
     g_WorldVulkanContext.CmdCopyBufferToImage = reinterpret_cast<PFN_vkCmdCopyBufferToImage>(vkGetDeviceProcAddr(g_Device, "vkCmdCopyBufferToImage"));
+    g_WorldVulkanContext.CmdCopyBuffer = reinterpret_cast<PFN_vkCmdCopyBuffer>(vkGetDeviceProcAddr(g_Device, "vkCmdCopyBuffer"));
     g_WorldVulkanContext.CmdBindPipeline = reinterpret_cast<PFN_vkCmdBindPipeline>(vkGetDeviceProcAddr(g_Device, "vkCmdBindPipeline"));
     g_WorldVulkanContext.CmdBindDescriptorSets = reinterpret_cast<PFN_vkCmdBindDescriptorSets>(vkGetDeviceProcAddr(g_Device, "vkCmdBindDescriptorSets"));
     g_WorldVulkanContext.CmdBindVertexBuffers = reinterpret_cast<PFN_vkCmdBindVertexBuffers>(vkGetDeviceProcAddr(g_Device, "vkCmdBindVertexBuffers"));
@@ -242,6 +243,7 @@ static void FillWorldVulkanContext(VkRenderPass render_pass)
     g_WorldVulkanContext.CmdDrawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>(vkGetDeviceProcAddr(g_Device, "vkCmdDrawIndexed"));
     g_WorldVulkanContext.CmdSetViewport = reinterpret_cast<PFN_vkCmdSetViewport>(vkGetDeviceProcAddr(g_Device, "vkCmdSetViewport"));
     g_WorldVulkanContext.CmdSetScissor = reinterpret_cast<PFN_vkCmdSetScissor>(vkGetDeviceProcAddr(g_Device, "vkCmdSetScissor"));
+    g_WorldVulkanContext.CmdPushConstants = reinterpret_cast<PFN_vkCmdPushConstants>(vkGetDeviceProcAddr(g_Device, "vkCmdPushConstants"));
 }
 
 // Маленький helper: проверяет, поддерживается ли нужное расширение в переданном списке.
