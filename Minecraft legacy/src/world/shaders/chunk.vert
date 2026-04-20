@@ -13,7 +13,7 @@ layout(push_constant) uniform PushConstants {
 
 void main()
 {
-    gl_Position = push.uMVP * vec4(a_position, 1.0);
+    gl_Position = vec4(a_position, 1.0) * push.uMVP;
     v_uv = a_uv;
     v_color = a_color;
 }
