@@ -94,6 +94,29 @@ float hash_noise(int x, int z, WorldSeed seed) {
     return static_cast<float>(value & 0xFFFFFFull) / static_cast<float>(0xFFFFFFull);
 }
 
+float smooth_noise(float x, float z, WorldSeed seed) {
+    int x0 = static_cast<int>(std::floor(x));
+    int z0 = static_cast<int>(std::floor(z));
+    int x1 = x0 + 1;
+    int z1 = z0 + 1;
+
+    float tx = x - static_cast<float>(x0);
+    float tz = z - static_cast<float>(z0);
+
+    tx = tx * tx * (3.0f - 2.0f * tx);
+    tz = tz * tz * (3.0f - 2.0f * tz);
+
+    float n00 = hash_noise(x0, z0, seed);
+    float n10 = hash_noise(x1, z0, seed);
+    float n01 = hash_noise(x0, z1, seed);
+    float n11 = hash_noise(x1, z1, seed);
+
+    float nx0 = n00 + tx * (n10 - n00);
+    float nx1 = n01 + tx * (n11 - n01);
+
+    return nx0 + tz * (nx1 - nx0);
+}
+
 void append_face(ChunkMesh& mesh, const Vec3& color, const std::array<Vec3, 4>& vertices, const std::array<Vec2, 4>& uvs, std::uint32_t tex_index) {
     const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
     for (std::size_t i = 0; i < vertices.size(); ++i) {
@@ -279,11 +302,23 @@ ChunkData WorldGenerator::generate_chunk(ChunkCoord coord, WorldSeed seed) const
                 }
 
                 if (y == height) {
-                    chunk.set(x, y, z, BlockId::Grass);
+                    if (y <= water_level + 1) {
+                        chunk.set(x, y, z, BlockId::Sand);
+                    } else {
+                        chunk.set(x, y, z, BlockId::Grass);
+                    }
                 } else if (y > height - 4) {
-                    chunk.set(x, y, z, BlockId::Dirt);
+                    if (height <= water_level + 1) {
+                        chunk.set(x, y, z, BlockId::Sand);
+                    } else {
+                        chunk.set(x, y, z, BlockId::Dirt);
+                    }
                 } else {
-                    chunk.set(x, y, z, BlockId::Stone);
+                    if (hash_noise(world_x * 31 + y, world_z * 17 - y, seed) < 0.05f) {
+                        chunk.set(x, y, z, BlockId::Gravel);
+                    } else {
+                        chunk.set(x, y, z, BlockId::Stone);
+                    }
                 }
             }
         }
@@ -293,9 +328,14 @@ ChunkData WorldGenerator::generate_chunk(ChunkCoord coord, WorldSeed seed) const
 }
 
 float WorldGenerator::sample_height(int world_x, int world_z, WorldSeed seed) const {
-    const float low = hash_noise(world_x / 8, world_z / 8, seed) * 18.0f;
-    const float high = hash_noise(world_x / 3, world_z / 3, seed ^ 0xA5A5A5A5ull) * 8.0f;
-    return 28.0f + low + high;
+    const float x = static_cast<float>(world_x);
+    const float z = static_cast<float>(world_z);
+
+    float elevation = smooth_noise(x * 0.01f, z * 0.01f, seed) * 32.0f;
+    float roughness = smooth_noise(x * 0.05f, z * 0.05f, seed ^ 0x12345678ull) * 16.0f;
+    float detail = smooth_noise(x * 0.1f, z * 0.1f, seed ^ 0x87654321ull) * 8.0f;
+
+    return 30.0f + elevation + roughness + detail;
 }
 
 ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry) {

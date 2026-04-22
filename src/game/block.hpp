@@ -13,6 +13,8 @@ enum class BlockId : std::uint8_t {
     Dirt,
     Stone,
     Water,
+    Sand,
+    Gravel,
     Count
 };
 

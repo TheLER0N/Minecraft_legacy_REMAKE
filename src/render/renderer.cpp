@@ -1283,7 +1283,9 @@ bool Renderer::load_textures() {
         "assets/textures/texture_pack/classic/blocks/grass_carried.png",
         "assets/textures/texture_pack/classic/blocks/grass_side_carried.png",
         "assets/textures/texture_pack/classic/blocks/stone.png",
-        "assets/textures/texture_pack/classic/blocks/water_placeholder.png"
+        "assets/textures/texture_pack/classic/blocks/water_placeholder.png",
+        "assets/textures/texture_pack/classic/blocks/sand.png",
+        "assets/textures/texture_pack/classic/blocks/gravel.png"
     };
 
     const int array_layers = static_cast<int>(texture_paths.size());
