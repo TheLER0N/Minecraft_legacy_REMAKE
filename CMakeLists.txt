@@ -111,4 +111,7 @@ add_custom_command(TARGET minecraft_legacy POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}"
         "$<TARGET_FILE_DIR:minecraft_legacy>/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:minecraft_legacy>/assets"
 )
