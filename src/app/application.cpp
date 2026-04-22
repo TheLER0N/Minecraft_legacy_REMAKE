@@ -1,0 +1,216 @@
+#include "app/application.hpp"
+
+#include "common/log.hpp"
+
+namespace ml {
+
+namespace {
+
+constexpr bool kUseFixedDebugCamera = true;
+constexpr std::size_t kPendingUploadLogLimit = 8;
+constexpr std::size_t kPlacementFailureLogLimit = 8;
+constexpr float kBlockTargetDistance = 5.0f;
+constexpr float kPlayerEyeHeight = 1.62f;
+constexpr float kPlacementBodyPadding = 0.02f;
+
+bool aabb_intersects_block(const Aabb& box, const Int3& block) {
+    const float block_min_x = static_cast<float>(block.x);
+    const float block_min_y = static_cast<float>(block.y);
+    const float block_min_z = static_cast<float>(block.z);
+    const float block_max_x = block_min_x + 1.0f;
+    const float block_max_y = block_min_y + 1.0f;
+    const float block_max_z = block_min_z + 1.0f;
+
+    return box.min.x < block_max_x && box.max.x > block_min_x &&
+        box.min.y < block_max_y && box.max.y > block_min_y &&
+        box.min.z < block_max_z && box.max.z > block_min_z;
+}
+
+bool has_valid_placement_hit(const BlockHit& hit) {
+    const Int3 expected {
+        hit.block.x + hit.normal.x,
+        hit.block.y + hit.normal.y,
+        hit.block.z + hit.normal.z
+    };
+
+    return (hit.normal.x != 0 || hit.normal.y != 0 || hit.normal.z != 0) &&
+        hit.placement_block == expected;
+}
+
+Aabb placement_safety_bounds(const Aabb& box) {
+    return {
+        {box.min.x + kPlacementBodyPadding, box.min.y, box.min.z + kPlacementBodyPadding},
+        {box.max.x - kPlacementBodyPadding, box.max.y, box.max.z - kPlacementBodyPadding}
+    };
+}
+
+const char* set_block_result_message(SetBlockResult result) {
+    switch (result) {
+    case SetBlockResult::Success:
+        return "success";
+    case SetBlockResult::ChunkUnloaded:
+        return "target chunk unloaded";
+    case SetBlockResult::OutOfBounds:
+        return "target outside world height";
+    case SetBlockResult::Occupied:
+        return "target occupied";
+    case SetBlockResult::NoChange:
+        return "no change";
+    case SetBlockResult::IntersectsPlayer:
+        return "target intersects player";
+    case SetBlockResult::InvalidPlacementHit:
+        return "invalid placement hit";
+    }
+    return "unknown";
+}
+
+}
+
+Application::Application() = default;
+
+Application::~Application() {
+    renderer_.shutdown();
+    platform_.shutdown();
+}
+
+bool Application::initialize() {
+    log_message(LogLevel::Info, "Application: initialize platform");
+    if (!platform_.initialize()) {
+        log_message(LogLevel::Error, "Application: platform initialization failed");
+        return false;
+    }
+
+    log_message(LogLevel::Info, "Application: initialize renderer");
+    if (!renderer_.initialize(platform_.window(), platform_.shader_directory())) {
+        log_message(LogLevel::Error, "Renderer initialization failed");
+        return false;
+    }
+    renderer_.debug_log_draw_stats = false;
+
+    if (kUseFixedDebugCamera) {
+        camera_.set_pose({32.0f, 56.0f, 80.0f}, -90.0f, -22.0f);
+    }
+    player_.set_body_position({32.0f, 46.0f, 80.0f});
+    player_.set_view_from_forward(camera_.forward());
+
+    world_streamer_ = std::make_unique<WorldStreamer>(0xC0FFEEULL, block_registry_, 6);
+    log_message(LogLevel::Info, "Application: world streamer created");
+    return true;
+}
+
+int Application::run() {
+    std::size_t pending_upload_log_count = 0;
+    std::size_t placement_failure_log_count = 0;
+    while (!platform_.should_close()) {
+        platform_.pump_events();
+        const InputState& input = platform_.current_input();
+        if (platform_.current_input().toggle_wireframe_pressed) {
+            renderer_.toggle_wireframe();
+        }
+        if (input.toggle_debug_fly_pressed) {
+            debug_fly_enabled_ = !debug_fly_enabled_;
+            if (debug_fly_enabled_) {
+                camera_.set_pose(player_.eye_position(), -90.0f, -22.0f);
+                camera_.set_view_from_forward(player_.forward());
+            } else {
+                player_.set_body_position({
+                    camera_.position().x,
+                    camera_.position().y - kPlayerEyeHeight,
+                    camera_.position().z
+                });
+                player_.set_view_from_forward(camera_.forward());
+            }
+        }
+
+        if (input.selected_hotbar_slot >= 0 &&
+            input.selected_hotbar_slot < static_cast<int>(hotbar_.size())) {
+            selected_hotbar_slot_ = static_cast<std::size_t>(input.selected_hotbar_slot);
+        }
+
+        if (debug_fly_enabled_) {
+            camera_.update(input, platform_.frame_delta_seconds());
+        } else {
+            player_.update(input, platform_.frame_delta_seconds(), *world_streamer_);
+        }
+
+        const Vec3 observer_position = debug_fly_enabled_ ? camera_.position() : player_.position();
+        world_streamer_->update_observer(observer_position);
+        world_streamer_->tick_generation_jobs();
+
+        auto pending_uploads = world_streamer_->drain_pending_uploads();
+        if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
+            log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
+            ++pending_upload_log_count;
+        }
+
+        for (PendingChunkUpload& upload : pending_uploads) {
+            renderer_.upload_chunk_mesh(upload.coord, upload.mesh);
+        }
+
+        const Vec3 ray_origin = debug_fly_enabled_ ? camera_.position() : player_.eye_position();
+        const Vec3 ray_direction = debug_fly_enabled_ ? camera_.forward() : player_.forward();
+        hovered_block_ = world_streamer_->raycast(ray_origin, ray_direction, kBlockTargetDistance);
+
+        if (hovered_block_.has_value() && input.break_block_pressed) {
+            const BlockHit& hit = *hovered_block_;
+            if (world_streamer_->set_block_at_world(hit.block.x, hit.block.y, hit.block.z, BlockId::Air) == SetBlockResult::Success) {
+                hovered_block_.reset();
+            }
+        }
+
+        if (hovered_block_.has_value() && input.place_block_pressed) {
+            const BlockHit& hit = *hovered_block_;
+            const Int3 place_block = hit.placement_block;
+            const BlockQueryResult query = world_streamer_->query_block_at_world(place_block.x, place_block.y, place_block.z);
+            SetBlockResult placement_result = SetBlockResult::Success;
+
+            if (!has_valid_placement_hit(hit)) {
+                placement_result = SetBlockResult::InvalidPlacementHit;
+            } else if (aabb_intersects_block(placement_safety_bounds(player_.bounds()), place_block)) {
+                placement_result = SetBlockResult::IntersectsPlayer;
+            } else if (query.status == BlockQueryStatus::Unloaded) {
+                placement_result = SetBlockResult::ChunkUnloaded;
+            } else if (query.status == BlockQueryStatus::OutOfBounds) {
+                placement_result = SetBlockResult::OutOfBounds;
+            } else if (!block_registry_.is_replaceable(query.block)) {
+                placement_result = SetBlockResult::Occupied;
+            } else {
+                placement_result = world_streamer_->set_block_at_world(
+                    place_block.x,
+                    place_block.y,
+                    place_block.z,
+                    hotbar_[selected_hotbar_slot_]
+                );
+            }
+
+            if (placement_result != SetBlockResult::Success && placement_failure_log_count < kPlacementFailureLogLimit) {
+                log_message(
+                    LogLevel::Info,
+                    std::string("Application: block placement denied [reason=") + set_block_result_message(placement_result) +
+                        ", origin=(" + std::to_string(ray_origin.x) + "," + std::to_string(ray_origin.y) + "," + std::to_string(ray_origin.z) + ")" +
+                        ", dir=(" + std::to_string(ray_direction.x) + "," + std::to_string(ray_direction.y) + "," + std::to_string(ray_direction.z) + ")" +
+                        ", hit=(" + std::to_string(hit.block.x) + "," + std::to_string(hit.block.y) + "," + std::to_string(hit.block.z) + ")" +
+                        ", normal=(" + std::to_string(hit.normal.x) + "," + std::to_string(hit.normal.y) + "," + std::to_string(hit.normal.z) + ")" +
+                        ", place=(" + std::to_string(place_block.x) + "," + std::to_string(place_block.y) + "," + std::to_string(place_block.z) + ")" +
+                        ", query=" + std::to_string(static_cast<int>(query.block)) + "]"
+                );
+                ++placement_failure_log_count;
+            }
+        }
+
+        renderer_.set_target_block(hovered_block_);
+
+        const PlatformWindow& window = platform_.window();
+        const float aspect_ratio = static_cast<float>(window.width) / static_cast<float>(window.height == 0 ? 1 : window.height);
+        const CameraFrameData camera_frame = debug_fly_enabled_
+            ? camera_.frame_data(aspect_ratio)
+            : player_.camera_frame_data(aspect_ratio);
+        renderer_.begin_frame(camera_frame);
+        renderer_.draw_visible_chunks(world_streamer_->visible_chunks());
+        renderer_.end_frame();
+    }
+
+    return 0;
+}
+
+}

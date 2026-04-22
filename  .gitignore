@@ -1,0 +1,10 @@
+/build/
+/.vs/
+/out/
+*.user
+*.suo
+*.pdb
+*.obj
+*.exe
+*.spv
+/bin/
