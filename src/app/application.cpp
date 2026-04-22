@@ -88,9 +88,9 @@ bool Application::initialize() {
     renderer_.debug_log_draw_stats = false;
 
     if (kUseFixedDebugCamera) {
-        camera_.set_pose({32.0f, 56.0f, 80.0f}, -90.0f, -22.0f);
+        camera_.set_pose({32.0f, 110.0f, 80.0f}, -90.0f, -22.0f);
     }
-    player_.set_body_position({32.0f, 46.0f, 80.0f});
+    player_.set_body_position({32.0f, 100.0f, 80.0f});
     player_.set_view_from_forward(camera_.forward());
 
     world_streamer_ = std::make_unique<WorldStreamer>(0xC0FFEEULL, block_registry_, 6);
