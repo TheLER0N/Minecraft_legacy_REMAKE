@@ -36,6 +36,41 @@ struct QueueFamilySelection {
     std::optional<std::uint32_t> present_family;
 };
 
+struct ClipPoint {
+    float x {0.0f};
+    float y {0.0f};
+    float z {0.0f};
+    float w {1.0f};
+};
+
+ClipPoint transform_point_clip(const Mat4& matrix, const Vec3& point) {
+    return {
+        matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
+        matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
+        matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14],
+        matrix.m[3] * point.x + matrix.m[7] * point.y + matrix.m[11] * point.z + matrix.m[15]
+    };
+}
+
+bool point_inside_aabb(const Vec3& point, const Aabb& bounds) {
+    return point.x >= bounds.min.x && point.x <= bounds.max.x &&
+        point.y >= bounds.min.y && point.y <= bounds.max.y &&
+        point.z >= bounds.min.z && point.z <= bounds.max.z;
+}
+
+bool same_block_hit(const std::optional<BlockHit>& lhs, const std::optional<BlockHit>& rhs) {
+    if (lhs.has_value() != rhs.has_value()) {
+        return false;
+    }
+    if (!lhs.has_value()) {
+        return true;
+    }
+    return lhs->hit == rhs->hit &&
+        lhs->block == rhs->block &&
+        lhs->normal == rhs->normal &&
+        lhs->placement_block == rhs->placement_block;
+}
+
 VkSurfaceFormatKHR choose_surface_format(const std::vector<VkSurfaceFormatKHR>& formats) {
     for (const auto& format : formats) {
         if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -392,6 +427,10 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
         logged_push_constant_size_ = true;
     }
     recreate_swapchain_if_needed();
+    if (dynamic_hud_extent_.width != swapchain_extent_.width || dynamic_hud_extent_.height != swapchain_extent_.height) {
+        dynamic_hud_extent_ = swapchain_extent_;
+        mark_dynamic_hud_dirty();
+    }
 
     FrameResources& frame = frames_[current_frame_];
     vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
@@ -503,6 +542,21 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     const bool use_wireframe = wireframe_enabled_ && wireframe_supported_ && wireframe_pipeline_ != VK_NULL_HANDLE;
     const bool draw_textured_fill = !use_wireframe || wireframe_textures_enabled_;
 
+    std::vector<ActiveChunk> render_chunks;
+    render_chunks.reserve(visible_chunks.size());
+    for (const ActiveChunk& chunk : visible_chunks) {
+        auto it = chunk_buffers_.find(chunk.coord);
+        if (it == chunk_buffers_.end()) {
+            continue;
+        }
+        if (!aabb_visible_in_current_frustum(chunk_bounds(chunk.coord))) {
+            continue;
+        }
+        render_chunks.push_back(chunk);
+    }
+    last_drawn_chunks_ = render_chunks.size();
+    debug_hud_data_.drawn_chunks = last_drawn_chunks_;
+
     const auto draw_chunks_with_pipeline = [&](VkPipeline pipeline, VkPipelineLayout layout, bool bind_textures) {
         vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         vkCmdPushConstants(
@@ -518,11 +572,8 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &descriptor_set_, 0, nullptr);
         }
 
-        for (const ActiveChunk& chunk : visible_chunks) {
+        for (const ActiveChunk& chunk : render_chunks) {
             auto it = chunk_buffers_.find(chunk.coord);
-            if (it == chunk_buffers_.end()) {
-                continue;
-            }
 
             const VkBuffer vertex_buffers[] = {it->second.vertex_buffer.buffer};
             const VkDeviceSize offsets[] = {0};
@@ -540,14 +591,26 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     }
 
     if (wireframe_enabled_) {
-        update_chunk_outline_buffer(visible_chunks);
+        update_chunk_outline_buffer(render_chunks);
     } else {
         chunk_outline_vertex_count_ = 0;
     }
-    update_target_block_outline_buffer();
-    update_hotbar_buffer();
-    update_crosshair_buffer();
-    update_debug_hud_buffer();
+    if (target_block_dirty_) {
+        update_target_block_outline_buffer();
+        target_block_dirty_ = false;
+    }
+    if (hotbar_dirty_) {
+        update_hotbar_buffer();
+        hotbar_dirty_ = false;
+    }
+    if (crosshair_dirty_) {
+        update_crosshair_buffer();
+        crosshair_dirty_ = false;
+    }
+    if (debug_hud_dirty_) {
+        update_debug_hud_buffer();
+        debug_hud_dirty_ = false;
+    }
     draw_chunk_outlines(frame);
     draw_target_block_outline(frame);
     draw_hotbar(frame);
@@ -706,15 +769,36 @@ bool Renderer::wireframe_enabled() const {
 }
 
 void Renderer::set_target_block(const std::optional<BlockHit>& target_block) {
+    if (!same_block_hit(target_block_, target_block)) {
+        target_block_dirty_ = true;
+    }
     target_block_ = target_block;
 }
 
 void Renderer::set_hotbar_state(std::size_t selected_slot, std::size_t slot_count) {
-    hotbar_slot_count_ = std::max<std::size_t>(1, slot_count);
-    hotbar_selected_slot_ = std::min(selected_slot, hotbar_slot_count_ - 1);
+    const std::size_t next_slot_count = std::max<std::size_t>(1, slot_count);
+    const std::size_t next_selected_slot = std::min(selected_slot, next_slot_count - 1);
+    if (hotbar_slot_count_ != next_slot_count || hotbar_selected_slot_ != next_selected_slot) {
+        hotbar_dirty_ = true;
+    }
+    hotbar_slot_count_ = next_slot_count;
+    hotbar_selected_slot_ = next_selected_slot;
 }
 
 void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
+    if (debug_hud_enabled_ != enabled ||
+        debug_hud_data_.fps != data.fps ||
+        debug_hud_data_.position.x != data.position.x ||
+        debug_hud_data_.position.y != data.position.y ||
+        debug_hud_data_.position.z != data.position.z ||
+        debug_hud_data_.debug_fly != data.debug_fly ||
+        debug_hud_data_.visible_chunks != data.visible_chunks ||
+        debug_hud_data_.pending_uploads != data.pending_uploads ||
+        debug_hud_data_.uploads_this_frame != data.uploads_this_frame ||
+        debug_hud_data_.queued_rebuilds != data.queued_rebuilds ||
+        debug_hud_data_.drawn_chunks != data.drawn_chunks) {
+        debug_hud_dirty_ = true;
+    }
     debug_hud_enabled_ = enabled;
     debug_hud_data_ = data;
 }
@@ -1514,6 +1598,59 @@ std::vector<char> Renderer::read_binary_file(const std::string& path) const {
     return buffer;
 }
 
+Aabb Renderer::chunk_bounds(ChunkCoord coord) const {
+    const float min_x = static_cast<float>(coord.x * kChunkWidth);
+    const float min_z = static_cast<float>(coord.z * kChunkDepth);
+    return {
+        {min_x, 0.0f, min_z},
+        {
+            min_x + static_cast<float>(kChunkWidth),
+            static_cast<float>(kChunkHeight),
+            min_z + static_cast<float>(kChunkDepth)
+        }
+    };
+}
+
+bool Renderer::aabb_visible_in_current_frustum(const Aabb& bounds) const {
+    if (point_inside_aabb(current_camera_.camera_position, bounds)) {
+        return true;
+    }
+
+    const std::array<Vec3, 8> corners {{
+        {bounds.min.x, bounds.min.y, bounds.min.z},
+        {bounds.max.x, bounds.min.y, bounds.min.z},
+        {bounds.min.x, bounds.max.y, bounds.min.z},
+        {bounds.max.x, bounds.max.y, bounds.min.z},
+        {bounds.min.x, bounds.min.y, bounds.max.z},
+        {bounds.max.x, bounds.min.y, bounds.max.z},
+        {bounds.min.x, bounds.max.y, bounds.max.z},
+        {bounds.max.x, bounds.max.y, bounds.max.z}
+    }};
+
+    std::array<ClipPoint, corners.size()> clip_points {};
+    for (std::size_t i = 0; i < corners.size(); ++i) {
+        clip_points[i] = transform_point_clip(current_camera_.view_proj, corners[i]);
+    }
+
+    bool outside_left = true;
+    bool outside_right = true;
+    bool outside_bottom = true;
+    bool outside_top = true;
+    bool outside_near = true;
+    bool outside_far = true;
+
+    for (const ClipPoint& point : clip_points) {
+        outside_left = outside_left && point.x < -point.w;
+        outside_right = outside_right && point.x > point.w;
+        outside_bottom = outside_bottom && point.y < -point.w;
+        outside_top = outside_top && point.y > point.w;
+        outside_near = outside_near && point.z < 0.0f;
+        outside_far = outside_far && point.z > point.w;
+    }
+
+    return !(outside_left || outside_right || outside_bottom || outside_top || outside_near || outside_far);
+}
+
 void Renderer::upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex>& vertices) {
     if (vertices.empty()) {
         return;
@@ -1534,6 +1671,13 @@ void Renderer::upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex
     vkMapMemory(device_, buffer.memory, 0, buffer_size, 0, &mapped);
     std::memcpy(mapped, vertices.data(), static_cast<std::size_t>(buffer_size));
     vkUnmapMemory(device_, buffer.memory);
+}
+
+void Renderer::mark_dynamic_hud_dirty() {
+    target_block_dirty_ = true;
+    hotbar_dirty_ = true;
+    crosshair_dirty_ = true;
+    debug_hud_dirty_ = true;
 }
 
 void Renderer::update_chunk_outline_buffer(std::span<const ActiveChunk> visible_chunks) {
@@ -1702,6 +1846,7 @@ void Renderer::update_debug_hud_buffer() {
 
     const std::string mode = debug_hud_data_.debug_fly ? "MODE:FLY" : "MODE:PLAYER";
     const std::string chunks = "CH:" + std::to_string(debug_hud_data_.visible_chunks);
+    const std::string drawn = "DRAW:" + std::to_string(debug_hud_data_.drawn_chunks);
     const std::string uploads = "UP:" + std::to_string(debug_hud_data_.uploads_this_frame);
     const std::string pending = "PEND:" + std::to_string(debug_hud_data_.pending_uploads);
     const std::string rebuilds = "REB:" + std::to_string(debug_hud_data_.queued_rebuilds);
@@ -1709,7 +1854,7 @@ void Renderer::update_debug_hud_buffer() {
     std::vector<Vertex> vertices;
     vertices.reserve(
         (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
-            chunks.size() + uploads.size() + pending.size() + rebuilds.size()) * 16
+            chunks.size() + drawn.size() + uploads.size() + pending.size() + rebuilds.size()) * 16
     );
     const auto append_left_text = [&](const std::string& text, float y) {
         const float advance = 6.0f * scale;
@@ -1720,9 +1865,10 @@ void Renderer::update_debug_hud_buffer() {
     append_left_text(xyz_stream.str(), top - 20.0f);
     append_left_text(mode, top - 40.0f);
     append_left_text(chunks, top - 60.0f);
-    append_left_text(uploads, top - 80.0f);
-    append_left_text(pending, top - 100.0f);
-    append_left_text(rebuilds, top - 120.0f);
+    append_left_text(drawn, top - 80.0f);
+    append_left_text(uploads, top - 100.0f);
+    append_left_text(pending, top - 120.0f);
+    append_left_text(rebuilds, top - 140.0f);
 
     debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
     upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);

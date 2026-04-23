@@ -24,6 +24,7 @@ public:
         std::size_t pending_uploads {0};
         std::size_t uploads_this_frame {0};
         std::size_t queued_rebuilds {0};
+        std::size_t drawn_chunks {0};
     };
 
     ~Renderer();
@@ -106,6 +107,8 @@ private:
     std::uint32_t find_memory_type(std::uint32_t type_filter, VkMemoryPropertyFlags properties) const;
     VkShaderModule create_shader_module(const std::vector<char>& code) const;
     std::vector<char> read_binary_file(const std::string& path) const;
+    Aabb chunk_bounds(ChunkCoord coord) const;
+    bool aabb_visible_in_current_frustum(const Aabb& bounds) const;
     void update_chunk_outline_buffer(std::span<const ActiveChunk> visible_chunks);
     void draw_chunk_outlines(const FrameResources& frame);
     void update_target_block_outline_buffer();
@@ -120,6 +123,7 @@ private:
     bool load_textures();
     bool load_ui_textures();
     void destroy_textures();
+    void mark_dynamic_hud_dirty();
 
     VkInstance instance_ {VK_NULL_HANDLE};
     VkPhysicalDevice physical_device_ {VK_NULL_HANDLE};
@@ -193,6 +197,7 @@ private:
     std::uint32_t debug_hud_vertex_count_ {0};
     VkViewport viewport_ {};
     VkRect2D scissor_ {};
+    VkExtent2D dynamic_hud_extent_ {};
     bool logged_push_constant_size_ {false};
     bool logged_draw_stats_ {false};
     std::size_t logged_upload_count_ {0};
@@ -206,6 +211,11 @@ private:
     std::size_t hotbar_slot_count_ {9};
     bool debug_hud_enabled_ {false};
     DebugHudData debug_hud_data_ {};
+    std::size_t last_drawn_chunks_ {0};
+    bool target_block_dirty_ {true};
+    bool hotbar_dirty_ {true};
+    bool crosshair_dirty_ {true};
+    bool debug_hud_dirty_ {true};
 };
 
 }

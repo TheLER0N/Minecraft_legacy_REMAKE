@@ -24,9 +24,7 @@ public:
 private:
     struct BlockBreakState {
         std::optional<Int3> target {};
-        float progress_seconds {0.0f};
-        float required_seconds {0.0f};
-        float cooldown_seconds {0.0f};
+        float repeat_seconds {0.0f};
     };
 
     PlatformApp platform_;

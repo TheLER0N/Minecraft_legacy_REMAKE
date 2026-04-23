@@ -13,7 +13,8 @@ constexpr float kBlockTargetDistance = 5.0f;
 constexpr float kPlayerEyeHeight = 1.62f;
 constexpr float kPlacementBodyPadding = 0.02f;
 constexpr float kDebugFpsRefreshSeconds = 0.25f;
-constexpr float kBreakCooldownSeconds = 0.3f;
+constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
+constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 constexpr std::size_t kMaxChunkUploadsPerFrame = 2;
 
 bool aabb_intersects_block(const Aabb& box, const Int3& block) {
@@ -27,15 +28,6 @@ bool aabb_intersects_block(const Aabb& box, const Int3& block) {
     return box.min.x < block_max_x && box.max.x > block_min_x &&
         box.min.y < block_max_y && box.max.y > block_min_y &&
         box.min.z < block_max_z && box.max.z > block_min_z;
-}
-
-float required_break_seconds(BlockId block, const BlockRegistry& registry) {
-    const float hardness = registry.hardness(block);
-    if (hardness <= 0.0f) {
-        return 0.05f;
-    }
-    const float multiplier = block == BlockId::Stone ? 5.0f : 1.5f;
-    return std::max(0.05f, hardness * multiplier);
 }
 
 bool has_valid_placement_hit(const BlockHit& hit) {
@@ -54,6 +46,10 @@ Aabb placement_safety_bounds(const Aabb& box) {
         {box.min.x + kPlacementBodyPadding, box.min.y, box.min.z + kPlacementBodyPadding},
         {box.max.x - kPlacementBodyPadding, box.max.y, box.max.z - kPlacementBodyPadding}
     };
+}
+
+bool break_target_block(WorldStreamer& world, const BlockHit& hit) {
+    return world.set_block_at_world(hit.block.x, hit.block.y, hit.block.z, BlockId::Air) == SetBlockResult::Success;
 }
 
 const char* set_block_result_message(SetBlockResult result) {
@@ -125,6 +121,7 @@ int Application::run() {
         if (input.toggle_debug_hud_pressed) {
             debug_hud_enabled_ = !debug_hud_enabled_;
         }
+        const bool debug_hud_toggled = input.toggle_debug_hud_pressed;
         if (input.toggle_debug_fly_pressed) {
             debug_fly_enabled_ = !debug_fly_enabled_;
             if (debug_fly_enabled_) {
@@ -153,13 +150,14 @@ int Application::run() {
         }
 
         const Vec3 observer_position = debug_fly_enabled_ ? camera_.position() : player_.position();
-        world_streamer_->update_observer(observer_position);
+        const Vec3 observer_forward = debug_fly_enabled_ ? camera_.forward() : player_.forward();
+        world_streamer_->update_observer(observer_position, observer_forward);
         for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
             renderer_.unload_chunk_mesh(coord);
         }
         world_streamer_->tick_generation_jobs();
 
-        auto pending_uploads = world_streamer_->drain_pending_uploads(kMaxChunkUploadsPerFrame, observer_position);
+        auto pending_uploads = world_streamer_->drain_pending_uploads(kMaxChunkUploadsPerFrame, observer_position, observer_forward);
         if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
             log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
             ++pending_upload_log_count;
@@ -174,33 +172,25 @@ int Application::run() {
         hovered_block_ = world_streamer_->raycast(ray_origin, ray_direction, kBlockTargetDistance);
 
         const float dt = platform_.frame_delta_seconds();
-        block_break_.cooldown_seconds = std::max(0.0f, block_break_.cooldown_seconds - dt);
-        if (!input.break_block_held || !hovered_block_.has_value() || block_break_.cooldown_seconds > 0.0f) {
-            if (!input.break_block_held || !hovered_block_.has_value()) {
-                block_break_.target.reset();
-                block_break_.progress_seconds = 0.0f;
-                block_break_.required_seconds = 0.0f;
-            }
-        } else {
+        if (!input.break_block_held || !hovered_block_.has_value()) {
+            block_break_.target.reset();
+            block_break_.repeat_seconds = 0.0f;
+        } else if (input.break_block_pressed) {
             const BlockHit& hit = *hovered_block_;
-            if (!block_break_.target.has_value() || *block_break_.target != hit.block) {
-                block_break_.target = hit.block;
-                block_break_.progress_seconds = 0.0f;
-                block_break_.required_seconds = required_break_seconds(
-                    world_streamer_->block_at_world(hit.block.x, hit.block.y, hit.block.z),
-                    block_registry_
-                );
+            if (break_target_block(*world_streamer_, hit)) {
+                hovered_block_.reset();
             }
-
-            block_break_.progress_seconds += dt;
-            if (block_break_.progress_seconds >= block_break_.required_seconds) {
-                if (world_streamer_->set_block_at_world(hit.block.x, hit.block.y, hit.block.z, BlockId::Air) == SetBlockResult::Success) {
+            block_break_.target = hit.block;
+            block_break_.repeat_seconds = kBreakRepeatInitialDelaySeconds;
+        } else {
+            block_break_.repeat_seconds -= dt;
+            if (block_break_.repeat_seconds <= 0.0f) {
+                const BlockHit& hit = *hovered_block_;
+                if (break_target_block(*world_streamer_, hit)) {
                     hovered_block_.reset();
                 }
-                block_break_.target.reset();
-                block_break_.progress_seconds = 0.0f;
-                block_break_.required_seconds = 0.0f;
-                block_break_.cooldown_seconds = kBreakCooldownSeconds;
+                block_break_.target = hit.block;
+                block_break_.repeat_seconds = kBreakRepeatIntervalSeconds;
             }
         }
         const std::size_t uploads_this_frame = pending_uploads.size();
@@ -249,25 +239,29 @@ int Application::run() {
 
         debug_fps_accumulator_ += dt;
         ++debug_fps_frames_;
+        bool debug_hud_refresh = false;
         if (debug_fps_accumulator_ >= kDebugFpsRefreshSeconds) {
             debug_fps_ = static_cast<float>(debug_fps_frames_) / debug_fps_accumulator_;
             debug_fps_accumulator_ = 0.0f;
             debug_fps_frames_ = 0;
+            debug_hud_refresh = true;
         }
         const Vec3 debug_position = debug_fly_enabled_ ? camera_.position() : player_.position();
         const WorldStreamer::StreamingStats streaming_stats = world_streamer_->stats();
-        renderer_.set_debug_hud(
-            debug_hud_enabled_,
-            Renderer::DebugHudData {
-                debug_fps_,
-                debug_position,
-                debug_fly_enabled_,
-                streaming_stats.visible_chunks,
-                streaming_stats.pending_uploads,
-                uploads_this_frame,
-                streaming_stats.queued_rebuilds
-            }
-        );
+        if (debug_hud_toggled || (debug_hud_enabled_ && debug_hud_refresh)) {
+            renderer_.set_debug_hud(
+                debug_hud_enabled_,
+                Renderer::DebugHudData {
+                    debug_fps_,
+                    debug_position,
+                    debug_fly_enabled_,
+                    streaming_stats.visible_chunks,
+                    streaming_stats.pending_uploads,
+                    uploads_this_frame,
+                    streaming_stats.queued_rebuilds
+                }
+            );
+        }
 
         const PlatformWindow& window = platform_.window();
         const float aspect_ratio = static_cast<float>(window.width) / static_cast<float>(window.height == 0 ? 1 : window.height);

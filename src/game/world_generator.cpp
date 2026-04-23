@@ -286,12 +286,21 @@ void append_greedy_face(
         break;
     }
 
-    const std::array<Vec2, 4> uvs {{
+    std::array<Vec2, 4> uvs {{
         {0.0f, fh},
         {0.0f, 0.0f},
         {fw, 0.0f},
         {fw, fh}
     }};
+    if (face_index == 1) {
+        // Bottom faces have the opposite vertex walk from top faces, so keep UVs tied to world X/Z.
+        uvs = {{
+            {0.0f, 0.0f},
+            {fw, 0.0f},
+            {fw, fh},
+            {0.0f, fh}
+        }};
+    }
     append_face(mesh, key.color, vertices, uvs, key.texture_index);
 }
 
@@ -537,6 +546,19 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     assert(slab_faces == 6);
     assert(slab_mesh.vertices.size() == 24);
     assert(slab_mesh.indices.size() == 36);
+    bool found_tiled_bottom = false;
+    for (std::size_t i = 0; i + 3 < slab_mesh.vertices.size(); i += 4) {
+        const Vertex& a = slab_mesh.vertices[i + 0];
+        const Vertex& b = slab_mesh.vertices[i + 1];
+        const Vertex& c = slab_mesh.vertices[i + 2];
+        const Vertex& d = slab_mesh.vertices[i + 3];
+        if (a.position.y == 0.0f && b.position.y == 0.0f && c.position.y == 0.0f && d.position.y == 0.0f) {
+            const float uv_width = std::max({a.uv.x, b.uv.x, c.uv.x, d.uv.x}) - std::min({a.uv.x, b.uv.x, c.uv.x, d.uv.x});
+            const float uv_height = std::max({a.uv.y, b.uv.y, c.uv.y, d.uv.y}) - std::min({a.uv.y, b.uv.y, c.uv.y, d.uv.y});
+            found_tiled_bottom = uv_width == 3.0f && uv_height == 2.0f;
+        }
+    }
+    assert(found_tiled_bottom);
 
     ChunkData seam_left {};
     seam_left.set(kChunkWidth - 1, 0, 0, BlockId::Stone);

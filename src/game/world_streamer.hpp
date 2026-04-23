@@ -6,6 +6,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -28,10 +29,12 @@ public:
     ~WorldStreamer();
 
     void update_observer(Vec3 position);
+    void update_observer(Vec3 position, Vec3 forward);
     void tick_generation_jobs();
     std::span<const ActiveChunk> visible_chunks() const;
     std::vector<PendingChunkUpload> drain_pending_uploads();
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position);
+    std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position, Vec3 observer_forward);
     std::vector<ChunkCoord> drain_pending_unloads();
     StreamingStats stats() const;
     BlockQueryResult query_block_at_world(int x, int y, int z) const;
@@ -90,6 +93,8 @@ private:
     ChunkCoord world_to_chunk(Vec3 position) const;
     ChunkCoord world_to_chunk(int world_x, int world_z) const;
     bool desired_chunk(const ChunkCoord& origin, const ChunkCoord& candidate) const;
+    float chunk_priority_score(ChunkCoord coord, Vec3 observer_position, Vec3 observer_forward) const;
+    void push_job_locked(ChunkJob&& job);
     void queue_generate_job(ChunkCoord coord, std::uint64_t version);
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
@@ -103,7 +108,7 @@ private:
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
-    std::queue<ChunkJob> job_queue_;
+    std::deque<ChunkJob> job_queue_;
     std::queue<JobResult> completed_;
     std::unordered_map<ChunkCoord, RebuildState, ChunkCoordHasher> rebuild_states_;
     bool stop_requested_ {false};
@@ -114,6 +119,8 @@ private:
     std::vector<PendingChunkUpload> pending_uploads_;
     std::vector<ChunkCoord> pending_unloads_;
     ChunkCoord observer_chunk_ {};
+    Vec3 observer_position_ {};
+    Vec3 observer_forward_ {0.0f, 0.0f, -1.0f};
     std::uint64_t next_chunk_version_ {1};
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
