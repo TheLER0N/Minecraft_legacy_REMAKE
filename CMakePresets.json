@@ -16,6 +16,17 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "MINECRAFT_LEGACY_FETCH_SDL3": "ON"
       }
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows MSVC Release",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/windows-msvc-release",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_BUILD_TYPE": "Release",
+        "MINECRAFT_LEGACY_FETCH_SDL3": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -23,7 +34,11 @@
       "name": "build-windows-msvc-debug",
       "displayName": "Build Windows MSVC Debug",
       "configurePreset": "windows-msvc-debug"
+    },
+    {
+      "name": "build-windows-msvc-release",
+      "displayName": "Build Windows MSVC Release",
+      "configurePreset": "windows-msvc-release"
     }
   ]
 }
-
