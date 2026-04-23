@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace ml {
 
@@ -139,6 +140,32 @@ bool should_emit_face(BlockId block, BlockId neighbor, const BlockRegistry& bloc
     return block_registry.is_opaque(neighbor) != block_registry.is_opaque(block);
 }
 
+bool is_greedy_mesh_block(BlockId block, const BlockRegistry& block_registry) {
+    return block_registry.is_opaque(block) && block_registry.is_solid(block);
+}
+
+struct FaceKey {
+    BlockId block {BlockId::Air};
+    std::uint32_t texture_index {0};
+    Vec3 color {1.0f, 1.0f, 1.0f};
+};
+
+struct MaskCell {
+    bool valid {false};
+    FaceKey key {};
+};
+
+bool same_color(const Vec3& lhs, const Vec3& rhs) {
+    return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+bool same_mask_cell(const MaskCell& lhs, const MaskCell& rhs) {
+    return lhs.valid == rhs.valid &&
+        lhs.key.block == rhs.key.block &&
+        lhs.key.texture_index == rhs.key.texture_index &&
+        same_color(lhs.key.color, rhs.key.color);
+}
+
 float smooth_noise(float x, float z, WorldSeed seed) {
     int x0 = static_cast<int>(std::floor(x));
     int z0 = static_cast<int>(std::floor(z));
@@ -176,16 +203,222 @@ void append_face(ChunkMesh& mesh, const Vec3& color, const std::array<Vec3, 4>& 
     mesh.indices.push_back(base + 0);
 }
 
+FaceKey make_face_key(BlockId block, const FaceTemplate& face, const BlockRegistry& block_registry) {
+    FaceKey key {};
+    key.block = block;
+    key.color = {1.0f, 1.0f, 1.0f};
+
+    if (face.neighbor_y == 1) {
+        key.texture_index = block_registry.get(block).tex_top;
+        if (block == BlockId::Grass) {
+            key.color = block_registry.get(block).debug_color;
+        }
+    } else if (face.neighbor_y == -1) {
+        key.texture_index = block_registry.get(block).tex_bottom;
+    } else {
+        key.texture_index = block_registry.get(block).tex_side;
+    }
+
+    return key;
+}
+
+void append_greedy_face(
+    ChunkMesh& mesh,
+    ChunkCoord coord,
+    int face_index,
+    int slice,
+    int u,
+    int v,
+    int width,
+    int height,
+    const FaceKey& key) {
+    const float chunk_x = static_cast<float>(coord.x * kChunkWidth);
+    const float chunk_z = static_cast<float>(coord.z * kChunkDepth);
+    const float fw = static_cast<float>(width);
+    const float fh = static_cast<float>(height);
+
+    std::array<Vec3, 4> vertices {};
+    switch (face_index) {
+    case 0: { // top: u=x, v=z, slice=y
+        const float x = chunk_x + static_cast<float>(u);
+        const float y = static_cast<float>(slice + 1);
+        const float z = chunk_z + static_cast<float>(v);
+        vertices = {{{x, y, z}, {x, y, z + fh}, {x + fw, y, z + fh}, {x + fw, y, z}}};
+        break;
+    }
+    case 1: { // bottom: u=x, v=z, slice=y
+        const float x = chunk_x + static_cast<float>(u);
+        const float y = static_cast<float>(slice);
+        const float z = chunk_z + static_cast<float>(v);
+        vertices = {{{x, y, z}, {x + fw, y, z}, {x + fw, y, z + fh}, {x, y, z + fh}}};
+        break;
+    }
+    case 2: { // east: u=z, v=y, slice=x
+        const float x = chunk_x + static_cast<float>(slice + 1);
+        const float y = static_cast<float>(v);
+        const float z = chunk_z + static_cast<float>(u);
+        vertices = {{{x, y, z}, {x, y + fh, z}, {x, y + fh, z + fw}, {x, y, z + fw}}};
+        break;
+    }
+    case 3: { // west: u=z, v=y, slice=x
+        const float x = chunk_x + static_cast<float>(slice);
+        const float y = static_cast<float>(v);
+        const float z = chunk_z + static_cast<float>(u);
+        vertices = {{{x, y, z + fw}, {x, y + fh, z + fw}, {x, y + fh, z}, {x, y, z}}};
+        break;
+    }
+    case 4: { // south: u=x, v=y, slice=z
+        const float x = chunk_x + static_cast<float>(u);
+        const float y = static_cast<float>(v);
+        const float z = chunk_z + static_cast<float>(slice + 1);
+        vertices = {{{x + fw, y, z}, {x + fw, y + fh, z}, {x, y + fh, z}, {x, y, z}}};
+        break;
+    }
+    case 5: { // north: u=x, v=y, slice=z
+        const float x = chunk_x + static_cast<float>(u);
+        const float y = static_cast<float>(v);
+        const float z = chunk_z + static_cast<float>(slice);
+        vertices = {{{x, y, z}, {x, y + fh, z}, {x + fw, y + fh, z}, {x + fw, y, z}}};
+        break;
+    }
+    default:
+        assert(false);
+        break;
+    }
+
+    const std::array<Vec2, 4> uvs {{
+        {0.0f, fh},
+        {0.0f, 0.0f},
+        {fw, 0.0f},
+        {fw, fh}
+    }};
+    append_face(mesh, key.color, vertices, uvs, key.texture_index);
+}
+
 template <typename SampleFn>
 ChunkMesh build_mesh_from_sampler(SampleFn&& sample, ChunkCoord coord, const BlockRegistry& block_registry, std::size_t* face_count_out = nullptr) {
     ChunkMesh mesh {};
     std::size_t face_count = 0;
 
+    const auto emit_greedy_mask = [&](int face_index, int slice, int mask_width, int mask_height, std::vector<MaskCell>& mask) {
+        for (int v = 0; v < mask_height; ++v) {
+            for (int u = 0; u < mask_width;) {
+                const int index = u + v * mask_width;
+                if (!mask[static_cast<std::size_t>(index)].valid) {
+                    ++u;
+                    continue;
+                }
+
+                int width = 1;
+                while (u + width < mask_width &&
+                    same_mask_cell(
+                        mask[static_cast<std::size_t>(index)],
+                        mask[static_cast<std::size_t>(u + width + v * mask_width)])) {
+                    ++width;
+                }
+
+                int height = 1;
+                bool can_extend = true;
+                while (v + height < mask_height && can_extend) {
+                    for (int step = 0; step < width; ++step) {
+                        if (!same_mask_cell(
+                                mask[static_cast<std::size_t>(index)],
+                                mask[static_cast<std::size_t>(u + step + (v + height) * mask_width)])) {
+                            can_extend = false;
+                            break;
+                        }
+                    }
+                    if (can_extend) {
+                        ++height;
+                    }
+                }
+
+                append_greedy_face(mesh, coord, face_index, slice, u, v, width, height, mask[static_cast<std::size_t>(index)].key);
+                ++face_count;
+
+                for (int clear_v = 0; clear_v < height; ++clear_v) {
+                    for (int clear_u = 0; clear_u < width; ++clear_u) {
+                        mask[static_cast<std::size_t>(u + clear_u + (v + clear_v) * mask_width)].valid = false;
+                    }
+                }
+                u += width;
+            }
+        }
+    };
+
+    const auto make_mask_cell = [&](BlockId block, BlockId neighbor, int face_index) {
+        MaskCell cell {};
+        if (is_greedy_mesh_block(block, block_registry) && should_emit_face(block, neighbor, block_registry)) {
+            cell.valid = true;
+            cell.key = make_face_key(block, kFaceTemplates[static_cast<std::size_t>(face_index)], block_registry);
+        }
+        return cell;
+    };
+
+    std::vector<MaskCell> mask {};
+
+    mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkDepth));
+    for (int y = 0; y < kChunkHeight; ++y) {
+        std::fill(mask.begin(), mask.end(), MaskCell {});
+        for (int z = 0; z < kChunkDepth; ++z) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y + 1, z), 0);
+            }
+        }
+        emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
+
+        std::fill(mask.begin(), mask.end(), MaskCell {});
+        for (int z = 0; z < kChunkDepth; ++z) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y - 1, z), 1);
+            }
+        }
+        emit_greedy_mask(1, y, kChunkWidth, kChunkDepth, mask);
+    }
+
+    mask.resize(static_cast<std::size_t>(kChunkDepth * kChunkHeight));
+    for (int x = 0; x < kChunkWidth; ++x) {
+        std::fill(mask.begin(), mask.end(), MaskCell {});
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int z = 0; z < kChunkDepth; ++z) {
+                mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x + 1, y, z), 2);
+            }
+        }
+        emit_greedy_mask(2, x, kChunkDepth, kChunkHeight, mask);
+
+        std::fill(mask.begin(), mask.end(), MaskCell {});
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int z = 0; z < kChunkDepth; ++z) {
+                mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x - 1, y, z), 3);
+            }
+        }
+        emit_greedy_mask(3, x, kChunkDepth, kChunkHeight, mask);
+    }
+
+    mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkHeight));
+    for (int z = 0; z < kChunkDepth; ++z) {
+        std::fill(mask.begin(), mask.end(), MaskCell {});
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z + 1), 4);
+            }
+        }
+        emit_greedy_mask(4, z, kChunkWidth, kChunkHeight, mask);
+
+        std::fill(mask.begin(), mask.end(), MaskCell {});
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z - 1), 5);
+            }
+        }
+        emit_greedy_mask(5, z, kChunkWidth, kChunkHeight, mask);
+    }
+
     for (int y = 0; y < kChunkHeight; ++y) {
         for (int z = 0; z < kChunkDepth; ++z) {
             for (int x = 0; x < kChunkWidth; ++x) {
                 const BlockId block = sample(x, y, z);
-                if (!block_registry.is_renderable(block)) {
+                if (!block_registry.is_renderable(block) || is_greedy_mesh_block(block, block_registry)) {
                     continue;
                 }
 
@@ -283,9 +516,27 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     };
     std::size_t double_faces = 0;
     const ChunkMesh double_mesh = build_mesh_from_sampler(double_sample, {}, block_registry, &double_faces);
-    assert(double_faces == 10);
-    assert(double_mesh.vertices.size() == 40);
-    assert(double_mesh.indices.size() == 60);
+    assert(double_faces == 6);
+    assert(double_mesh.vertices.size() == 24);
+    assert(double_mesh.indices.size() == 36);
+
+    ChunkData slab {};
+    for (int z = 0; z < 2; ++z) {
+        for (int x = 0; x < 3; ++x) {
+            slab.set(x, 0, z, BlockId::Stone);
+        }
+    }
+    const auto slab_sample = [&](int x, int y, int z) -> BlockId {
+        if (x < 0 || x >= kChunkWidth || y < 0 || y >= kChunkHeight || z < 0 || z >= kChunkDepth) {
+            return BlockId::Air;
+        }
+        return slab.get(x, y, z);
+    };
+    std::size_t slab_faces = 0;
+    const ChunkMesh slab_mesh = build_mesh_from_sampler(slab_sample, {}, block_registry, &slab_faces);
+    assert(slab_faces == 6);
+    assert(slab_mesh.vertices.size() == 24);
+    assert(slab_mesh.indices.size() == 36);
 
     ChunkData seam_left {};
     seam_left.set(kChunkWidth - 1, 0, 0, BlockId::Stone);
@@ -323,6 +574,24 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     assert(left_extent[1] == static_cast<float>(kChunkWidth));
     assert(right_extent[0] == static_cast<float>(kChunkWidth));
     assert(right_extent[1] == static_cast<float>(kChunkWidth + 1));
+
+    const auto seam_left_neighbor_sample = [&](int x, int y, int z) -> BlockId {
+        if (y < 0 || y >= kChunkHeight || z < 0 || z >= kChunkDepth) {
+            return BlockId::Air;
+        }
+        if (x >= kChunkWidth) {
+            return seam_right.get(0, y, z);
+        }
+        if (x < 0) {
+            return BlockId::Air;
+        }
+        return seam_left.get(x, y, z);
+    };
+    std::size_t seam_neighbor_faces = 0;
+    const ChunkMesh seam_neighbor_mesh = build_mesh_from_sampler(seam_left_neighbor_sample, {0, 0}, block_registry, &seam_neighbor_faces);
+    assert(seam_neighbor_faces == 5);
+    assert(seam_neighbor_mesh.vertices.size() == 20);
+    assert(seam_neighbor_mesh.indices.size() == 30);
 
     log_message(LogLevel::Info, "WorldGenerator: seam self-check passed, chunk boundary blocks remain 1x1x1");
 }
@@ -671,11 +940,39 @@ float WorldGenerator::sample_height(int world_x, int world_z, WorldSeed seed) co
 }
 
 ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry) {
+    return build_chunk_mesh(chunk_data, coord, block_registry, {});
+}
+
+ChunkMesh build_chunk_mesh(
+    const ChunkData& chunk_data,
+    ChunkCoord coord,
+    const BlockRegistry& block_registry,
+    const ChunkMeshNeighbors& neighbors) {
     run_mesh_builder_self_check(block_registry);
 
     const auto sample = [&](int x, int y, int z) -> BlockId {
-        if (x < 0 || x >= kChunkWidth || y < 0 || y >= kChunkHeight || z < 0 || z >= kChunkDepth) {
+        if (y < 0 || y >= kChunkHeight) {
             return BlockId::Air;
+        }
+        if (x < 0) {
+            return neighbors.west != nullptr && z >= 0 && z < kChunkDepth
+                ? neighbors.west->get(kChunkWidth - 1, y, z)
+                : BlockId::Air;
+        }
+        if (x >= kChunkWidth) {
+            return neighbors.east != nullptr && z >= 0 && z < kChunkDepth
+                ? neighbors.east->get(0, y, z)
+                : BlockId::Air;
+        }
+        if (z < 0) {
+            return neighbors.north != nullptr
+                ? neighbors.north->get(x, y, kChunkDepth - 1)
+                : BlockId::Air;
+        }
+        if (z >= kChunkDepth) {
+            return neighbors.south != nullptr
+                ? neighbors.south->get(x, y, 0)
+                : BlockId::Air;
         }
         return chunk_data.get(x, y, z);
     };

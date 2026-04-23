@@ -58,6 +58,7 @@ set(SHADER_OUTPUTS
     "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/hud_textured.vert.spv"
     "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/hud_textured.frag.spv"
     "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/color.frag.spv"
+    "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/wireframe_debug.frag.spv"
 )
 
 add_custom_command(
@@ -68,6 +69,7 @@ add_custom_command(
     COMMAND "${GLSLC_EXECUTABLE}" "${MINECRAFT_LEGACY_SHADER_DIR}/hud_textured.vert" -o "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/hud_textured.vert.spv"
     COMMAND "${GLSLC_EXECUTABLE}" "${MINECRAFT_LEGACY_SHADER_DIR}/hud_textured.frag" -o "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/hud_textured.frag.spv"
     COMMAND "${GLSLC_EXECUTABLE}" "${MINECRAFT_LEGACY_SHADER_DIR}/color.frag" -o "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/color.frag.spv"
+    COMMAND "${GLSLC_EXECUTABLE}" "${MINECRAFT_LEGACY_SHADER_DIR}/wireframe_debug.frag" -o "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}/wireframe_debug.frag.spv"
     DEPENDS
         "${MINECRAFT_LEGACY_SHADER_DIR}/voxel.vert"
         "${MINECRAFT_LEGACY_SHADER_DIR}/voxel.frag"
@@ -75,6 +77,7 @@ add_custom_command(
         "${MINECRAFT_LEGACY_SHADER_DIR}/hud_textured.vert"
         "${MINECRAFT_LEGACY_SHADER_DIR}/hud_textured.frag"
         "${MINECRAFT_LEGACY_SHADER_DIR}/color.frag"
+        "${MINECRAFT_LEGACY_SHADER_DIR}/wireframe_debug.frag"
     COMMENT "Compiling Vulkan shaders"
     VERBATIM
 )

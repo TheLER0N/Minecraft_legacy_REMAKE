@@ -41,7 +41,7 @@ void PlayerController::update(const InputState& input, float dt, const WorldStre
     velocity_.x = move_intent.x * move_speed_;
     velocity_.z = move_intent.z * move_speed_;
 
-    if (grounded_ && input.jump_pressed) {
+    if (grounded_ && input.pressed(Key::Up)) {
         velocity_.y = jump_speed_;
         grounded_ = false;
     }

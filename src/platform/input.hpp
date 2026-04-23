@@ -24,9 +24,12 @@ struct InputState {
     bool capture_mouse {true};
     bool toggle_mouse_pressed {false};
     bool toggle_wireframe_pressed {false};
+    bool toggle_wireframe_textures_pressed {false};
+    bool toggle_debug_hud_pressed {false};
     bool toggle_debug_fly_pressed {false};
     bool jump_pressed {false};
     bool break_block_pressed {false};
+    bool break_block_held {false};
     bool place_block_pressed {false};
     int selected_hotbar_slot {-1};
     bool close_requested {false};

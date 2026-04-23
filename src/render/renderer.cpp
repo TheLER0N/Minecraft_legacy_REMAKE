@@ -9,12 +9,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <set>
+#include <sstream>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -43,6 +46,11 @@ VkSurfaceFormatKHR choose_surface_format(const std::vector<VkSurfaceFormatKHR>& 
 }
 
 VkPresentModeKHR choose_present_mode(const std::vector<VkPresentModeKHR>& modes) {
+    for (const auto mode : modes) {
+        if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            return mode;
+        }
+    }
     for (const auto mode : modes) {
         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
             return mode;
@@ -189,6 +197,109 @@ void append_hud_textured_quad(
     vertices.push_back({{x0, y0, 0.0f}, color, {u0, v0}, 0});
 }
 
+std::uint8_t segment_mask(char c) {
+    switch (c) {
+    case '0': return 0b0111111;
+    case '1': return 0b0000110;
+    case '2': return 0b1011011;
+    case '3': return 0b1001111;
+    case '4': return 0b1100110;
+    case '5': return 0b1101101;
+    case '6': return 0b1111101;
+    case '7': return 0b0000111;
+    case '8': return 0b1111111;
+    case '9': return 0b1101111;
+    case 'A': return 0b1110111;
+    case 'B': return 0b1111100;
+    case 'C': return 0b0111001;
+    case 'D': return 0b0111110;
+    case 'E': return 0b1111001;
+    case 'F': return 0b1110001;
+    case 'H': return 0b1110110;
+    case 'I': return 0b0000110;
+    case 'L': return 0b0111000;
+    case 'M': return 0b0110111;
+    case 'N': return 0b1010100;
+    case 'O': return 0b0111111;
+    case 'P': return 0b1110011;
+    case 'Q': return 0b1100111;
+    case 'R': return 0b1110111;
+    case 'S': return 0b1101101;
+    case 'T': return 0b1111000;
+    case 'U': return 0b0111110;
+    case 'X': return 0b1110110;
+    case 'Y': return 0b1101110;
+    case 'Z': return 0b1011011;
+    default: return 0;
+    }
+}
+
+void append_hud_line(
+    std::vector<Vertex>& vertices,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float width,
+    float height,
+    Vec3 color) {
+    vertices.push_back({{screen_x_to_ndc(x0, width), screen_y_to_ndc(y0, height), 0.0f}, color});
+    vertices.push_back({{screen_x_to_ndc(x1, width), screen_y_to_ndc(y1, height), 0.0f}, color});
+}
+
+void append_debug_char(
+    std::vector<Vertex>& vertices,
+    char c,
+    float x,
+    float y,
+    float scale,
+    float width,
+    float height,
+    Vec3 color) {
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    const float w = 4.0f * scale;
+    const float h = 7.0f * scale;
+    const float mid = y + h * 0.5f;
+    const std::uint8_t mask = segment_mask(c);
+
+    if ((mask & (1u << 0)) != 0u) append_hud_line(vertices, x, y, x + w, y, width, height, color);
+    if ((mask & (1u << 1)) != 0u) append_hud_line(vertices, x + w, y, x + w, mid, width, height, color);
+    if ((mask & (1u << 2)) != 0u) append_hud_line(vertices, x + w, mid, x + w, y + h, width, height, color);
+    if ((mask & (1u << 3)) != 0u) append_hud_line(vertices, x, y + h, x + w, y + h, width, height, color);
+    if ((mask & (1u << 4)) != 0u) append_hud_line(vertices, x, mid, x, y + h, width, height, color);
+    if ((mask & (1u << 5)) != 0u) append_hud_line(vertices, x, y, x, mid, width, height, color);
+    if ((mask & (1u << 6)) != 0u) append_hud_line(vertices, x, mid, x + w, mid, width, height, color);
+
+    if (c == ':' || c == '.') {
+        append_hud_line(vertices, x + w * 0.5f, y + h * 0.3f, x + w * 0.5f, y + h * 0.3f + scale, width, height, color);
+        append_hud_line(vertices, x + w * 0.5f, y + h * 0.7f, x + w * 0.5f, y + h * 0.7f + scale, width, height, color);
+    } else if (c == '-') {
+        append_hud_line(vertices, x, mid, x + w, mid, width, height, color);
+    } else if (c == '/') {
+        append_hud_line(vertices, x, y + h, x + w, y, width, height, color);
+    }
+}
+
+void append_debug_text(
+    std::vector<Vertex>& vertices,
+    const std::string& text,
+    float right,
+    float top,
+    float scale,
+    float width,
+    float height,
+    Vec3 color) {
+    const float advance = 6.0f * scale;
+    const float text_width = static_cast<float>(text.size()) * advance;
+    float x = right - text_width;
+    for (char c : text) {
+        if (c != ' ') {
+            append_debug_char(vertices, c, x, top, scale, width, height, color);
+        }
+        x += advance;
+    }
+}
+
 }
 
 Renderer::~Renderer() {
@@ -284,6 +395,7 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
 
     FrameResources& frame = frames_[current_frame_];
     vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
+    retire_deferred_chunk_buffers();
 
     const VkResult acquire_result = vkAcquireNextImageKHR(
         device_,
@@ -335,9 +447,8 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
 void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh) {
     auto existing = chunk_buffers_.find(coord);
     if (existing != chunk_buffers_.end()) {
-        vkDeviceWaitIdle(device_);
-        destroy_buffer(existing->second.vertex_buffer);
-        destroy_buffer(existing->second.index_buffer);
+        defer_destroy_chunk_buffers(std::move(existing->second));
+        chunk_buffers_.erase(existing);
     }
 
     if (mesh.vertices.empty() || mesh.indices.empty()) {
@@ -373,43 +484,75 @@ void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh) {
     chunk_buffers_[coord] = render_data;
 }
 
+void Renderer::unload_chunk_mesh(ChunkCoord coord) {
+    auto existing = chunk_buffers_.find(coord);
+    if (existing == chunk_buffers_.end()) {
+        return;
+    }
+
+    defer_destroy_chunk_buffers(std::move(existing->second));
+    chunk_buffers_.erase(existing);
+}
+
 void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) {
     if (!frame_started_) {
         return;
     }
 
     const FrameResources& frame = frames_[current_frame_];
-    const VkPipeline active_pipeline = (wireframe_enabled_ && wireframe_supported_ && wireframe_pipeline_ != VK_NULL_HANDLE)
-        ? wireframe_pipeline_
-        : fill_pipeline_;
+    const bool use_wireframe = wireframe_enabled_ && wireframe_supported_ && wireframe_pipeline_ != VK_NULL_HANDLE;
+    const bool draw_textured_fill = !use_wireframe || wireframe_textures_enabled_;
 
-    vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, active_pipeline);
+    const auto draw_chunks_with_pipeline = [&](VkPipeline pipeline, VkPipelineLayout layout, bool bind_textures) {
+        vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdPushConstants(
+            frame.command_buffer,
+            layout,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0,
+            sizeof(Mat4),
+            current_camera_.view_proj.m.data()
+        );
 
-    if (descriptor_set_ != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1, &descriptor_set_, 0, nullptr);
-    }
-
-    for (const ActiveChunk& chunk : visible_chunks) {
-        auto it = chunk_buffers_.find(chunk.coord);
-        if (it == chunk_buffers_.end()) {
-            continue;
+        if (bind_textures && descriptor_set_ != VK_NULL_HANDLE) {
+            vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &descriptor_set_, 0, nullptr);
         }
 
-        const VkBuffer vertex_buffers[] = {it->second.vertex_buffer.buffer};
-        const VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
-        vkCmdBindIndexBuffer(frame.command_buffer, it->second.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(frame.command_buffer, it->second.index_count, 1, 0, 0, 0);
+        for (const ActiveChunk& chunk : visible_chunks) {
+            auto it = chunk_buffers_.find(chunk.coord);
+            if (it == chunk_buffers_.end()) {
+                continue;
+            }
+
+            const VkBuffer vertex_buffers[] = {it->second.vertex_buffer.buffer};
+            const VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(frame.command_buffer, it->second.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(frame.command_buffer, it->second.index_count, 1, 0, 0, 0);
+        }
+    };
+
+    if (draw_textured_fill) {
+        draw_chunks_with_pipeline(fill_pipeline_, pipeline_layout_, true);
+    }
+    if (use_wireframe) {
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false);
     }
 
-    update_chunk_outline_buffer(visible_chunks);
+    if (wireframe_enabled_) {
+        update_chunk_outline_buffer(visible_chunks);
+    } else {
+        chunk_outline_vertex_count_ = 0;
+    }
     update_target_block_outline_buffer();
     update_hotbar_buffer();
     update_crosshair_buffer();
+    update_debug_hud_buffer();
     draw_chunk_outlines(frame);
     draw_target_block_outline(frame);
     draw_hotbar(frame);
     draw_crosshair(frame);
+    draw_debug_hud(frame);
 }
 
 void Renderer::end_frame() {
@@ -461,12 +604,14 @@ void Renderer::shutdown() {
         destroy_buffer(render_data.index_buffer);
     }
     chunk_buffers_.clear();
+    destroy_deferred_chunk_buffers_immediate();
     destroy_buffer(chunk_outline_vertex_buffer_);
     destroy_buffer(target_block_outline_vertex_buffer_);
     destroy_buffer(hotbar_fill_vertex_buffer_);
     destroy_buffer(hotbar_outline_vertex_buffer_);
     destroy_buffer(hotbar_texture_vertex_buffer_);
     destroy_buffer(crosshair_vertex_buffer_);
+    destroy_buffer(debug_hud_vertex_buffer_);
 
     for (auto& frame : frames_) {
         if (frame.image_available != VK_NULL_HANDLE) {
@@ -546,6 +691,16 @@ void Renderer::toggle_wireframe() {
     log_message(LogLevel::Info, wireframe_enabled_ ? "Renderer: wireframe enabled" : "Renderer: wireframe disabled");
 }
 
+void Renderer::toggle_wireframe_textures() {
+    wireframe_textures_enabled_ = !wireframe_textures_enabled_;
+    log_message(
+        LogLevel::Info,
+        wireframe_textures_enabled_
+            ? "Renderer: wireframe texture overlay enabled"
+            : "Renderer: wireframe texture overlay disabled"
+    );
+}
+
 bool Renderer::wireframe_enabled() const {
     return wireframe_enabled_;
 }
@@ -557,6 +712,11 @@ void Renderer::set_target_block(const std::optional<BlockHit>& target_block) {
 void Renderer::set_hotbar_state(std::size_t selected_slot, std::size_t slot_count) {
     hotbar_slot_count_ = std::max<std::size_t>(1, slot_count);
     hotbar_selected_slot_ = std::min(selected_slot, hotbar_slot_count_ - 1);
+}
+
+void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
+    debug_hud_enabled_ = enabled;
+    debug_hud_data_ = data;
 }
 
 bool Renderer::create_instance() {
@@ -617,10 +777,14 @@ bool Renderer::pick_physical_device() {
             VkPhysicalDeviceFeatures features {};
             vkGetPhysicalDeviceFeatures(physical_device_, &features);
             wireframe_supported_ = features.fillModeNonSolid == VK_TRUE;
+            wide_lines_supported_ = features.wideLines == VK_TRUE;
             if (!logged_wireframe_support_) {
                 log_message(LogLevel::Info, wireframe_supported_
                     ? "Renderer: fillModeNonSolid is supported"
                     : "Renderer: fillModeNonSolid is not supported, wireframe disabled");
+                log_message(LogLevel::Info, wide_lines_supported_
+                    ? "Renderer: wideLines is supported"
+                    : "Renderer: wideLines is not supported, wireframe line width stays 1px");
                 logged_wireframe_support_ = true;
             }
             return true;
@@ -648,6 +812,7 @@ bool Renderer::create_device() {
 
     VkPhysicalDeviceFeatures enabled_features {};
     enabled_features.fillModeNonSolid = wireframe_supported_ ? VK_TRUE : VK_FALSE;
+    enabled_features.wideLines = wide_lines_supported_ ? VK_TRUE : VK_FALSE;
 
     const std::array device_extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
@@ -811,8 +976,10 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
     const auto hud_textured_vertex_code = read_binary_file(shader_directory + "/hud_textured.vert.spv");
     const auto hud_textured_fragment_code = read_binary_file(shader_directory + "/hud_textured.frag.spv");
     const auto color_fragment_code = read_binary_file(shader_directory + "/color.frag.spv");
+    const auto wireframe_debug_fragment_code = read_binary_file(shader_directory + "/wireframe_debug.frag.spv");
     if (vertex_code.empty() || fragment_code.empty() || hud_vertex_code.empty() ||
-        hud_textured_vertex_code.empty() || hud_textured_fragment_code.empty() || color_fragment_code.empty()) {
+        hud_textured_vertex_code.empty() || hud_textured_fragment_code.empty() || color_fragment_code.empty() ||
+        wireframe_debug_fragment_code.empty()) {
         return false;
     }
 
@@ -878,13 +1045,13 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
     if (wireframe_supported_) {
         if (!create_graphics_pipeline(
                 vertex_code,
-                color_fragment_code,
-                hud_pipeline_layout_, // Changed to hud_pipeline_layout since we don't bind descriptors for wireframe
+                wireframe_debug_fragment_code,
+                hud_pipeline_layout_,
                 VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
                 VK_POLYGON_MODE_LINE,
                 VK_CULL_MODE_NONE,
                 true,
-                true,
+                false,
                 false,
                 &wireframe_pipeline_)) {
             return false;
@@ -1029,7 +1196,7 @@ bool Renderer::create_graphics_pipeline(
 
     VkPipelineRasterizationStateCreateInfo rasterizer {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     rasterizer.polygonMode = polygon_mode;
-    rasterizer.lineWidth = 1.0f;
+    rasterizer.lineWidth = (polygon_mode == VK_POLYGON_MODE_LINE && wide_lines_supported_) ? 2.0f : 1.0f;
     rasterizer.cullMode = cull_mode;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
@@ -1228,6 +1395,41 @@ bool Renderer::recreate_swapchain_if_needed() {
         return false;
     }
     return true;
+}
+
+void Renderer::defer_destroy_chunk_buffers(ChunkRenderData&& render_data) {
+    if (render_data.vertex_buffer.buffer == VK_NULL_HANDLE && render_data.index_buffer.buffer == VK_NULL_HANDLE) {
+        return;
+    }
+
+    deferred_chunk_buffers_.push_back({
+        render_data.vertex_buffer,
+        render_data.index_buffer,
+        static_cast<std::uint32_t>(frames_.size() + 1)
+    });
+}
+
+void Renderer::retire_deferred_chunk_buffers() {
+    for (auto it = deferred_chunk_buffers_.begin(); it != deferred_chunk_buffers_.end();) {
+        if (it->frames_remaining > 0) {
+            --it->frames_remaining;
+        }
+        if (it->frames_remaining == 0) {
+            destroy_buffer(it->vertex_buffer);
+            destroy_buffer(it->index_buffer);
+            it = deferred_chunk_buffers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void Renderer::destroy_deferred_chunk_buffers_immediate() {
+    for (DeferredChunkBuffers& buffers : deferred_chunk_buffers_) {
+        destroy_buffer(buffers.vertex_buffer);
+        destroy_buffer(buffers.index_buffer);
+    }
+    deferred_chunk_buffers_.clear();
 }
 
 Renderer::GpuBuffer Renderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
@@ -1476,6 +1678,56 @@ void Renderer::update_hotbar_buffer() {
     upload_dynamic_buffer(hotbar_texture_vertex_buffer_, vertices);
 }
 
+void Renderer::update_debug_hud_buffer() {
+    debug_hud_vertex_count_ = 0;
+    if (!debug_hud_enabled_ || swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+        return;
+    }
+
+    const float width = static_cast<float>(swapchain_extent_.width);
+    const float height = static_cast<float>(swapchain_extent_.height);
+    const float left = 18.0f;
+    const float top = height - 32.0f;
+    const float scale = 2.0f;
+    const Vec3 color {1.0f, 1.0f, 1.0f};
+
+    std::ostringstream fps_stream;
+    fps_stream << "FPS:" << static_cast<int>(debug_hud_data_.fps + 0.5f);
+
+    std::ostringstream xyz_stream;
+    xyz_stream << std::fixed << std::setprecision(2)
+        << "XYZ:" << debug_hud_data_.position.x
+        << "/" << debug_hud_data_.position.y
+        << "/" << debug_hud_data_.position.z;
+
+    const std::string mode = debug_hud_data_.debug_fly ? "MODE:FLY" : "MODE:PLAYER";
+    const std::string chunks = "CH:" + std::to_string(debug_hud_data_.visible_chunks);
+    const std::string uploads = "UP:" + std::to_string(debug_hud_data_.uploads_this_frame);
+    const std::string pending = "PEND:" + std::to_string(debug_hud_data_.pending_uploads);
+    const std::string rebuilds = "REB:" + std::to_string(debug_hud_data_.queued_rebuilds);
+
+    std::vector<Vertex> vertices;
+    vertices.reserve(
+        (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
+            chunks.size() + uploads.size() + pending.size() + rebuilds.size()) * 16
+    );
+    const auto append_left_text = [&](const std::string& text, float y) {
+        const float advance = 6.0f * scale;
+        append_debug_text(vertices, text, left + static_cast<float>(text.size()) * advance, y, scale, width, height, color);
+    };
+
+    append_left_text(fps_stream.str(), top);
+    append_left_text(xyz_stream.str(), top - 20.0f);
+    append_left_text(mode, top - 40.0f);
+    append_left_text(chunks, top - 60.0f);
+    append_left_text(uploads, top - 80.0f);
+    append_left_text(pending, top - 100.0f);
+    append_left_text(rebuilds, top - 120.0f);
+
+    debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
+    upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);
+}
+
 void Renderer::draw_chunk_outlines(const FrameResources& frame) {
     if (chunk_outline_vertex_count_ == 0 || chunk_outline_pipeline_ == VK_NULL_HANDLE) {
         return;
@@ -1511,6 +1763,18 @@ void Renderer::draw_hotbar(const FrameResources& frame) {
     const VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
     vkCmdDraw(frame.command_buffer, hotbar_texture_vertex_count_, 1, 0, 0);
+}
+
+void Renderer::draw_debug_hud(const FrameResources& frame) {
+    if (debug_hud_vertex_count_ == 0 || crosshair_pipeline_ == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, crosshair_pipeline_);
+    const VkBuffer vertex_buffers[] = {debug_hud_vertex_buffer_.buffer};
+    const VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
+    vkCmdDraw(frame.command_buffer, debug_hud_vertex_count_, 1, 0, 0);
 }
 
 void Renderer::draw_crosshair(const FrameResources& frame) {

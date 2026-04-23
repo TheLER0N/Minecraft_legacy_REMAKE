@@ -16,6 +16,16 @@ namespace ml {
 
 class Renderer {
 public:
+    struct DebugHudData {
+        float fps {0.0f};
+        Vec3 position {};
+        bool debug_fly {false};
+        std::size_t visible_chunks {0};
+        std::size_t pending_uploads {0};
+        std::size_t uploads_this_frame {0};
+        std::size_t queued_rebuilds {0};
+    };
+
     ~Renderer();
 
     bool debug_disable_culling {false};
@@ -24,13 +34,16 @@ public:
     bool initialize(const PlatformWindow& window, const std::string& shader_directory);
     void begin_frame(const CameraFrameData& camera);
     void upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh);
+    void unload_chunk_mesh(ChunkCoord coord);
     void draw_visible_chunks(std::span<const ActiveChunk> visible_chunks);
     void end_frame();
     void shutdown();
     void toggle_wireframe();
+    void toggle_wireframe_textures();
     bool wireframe_enabled() const;
     void set_target_block(const std::optional<BlockHit>& target_block);
     void set_hotbar_state(std::size_t selected_slot, std::size_t slot_count);
+    void set_debug_hud(bool enabled, const DebugHudData& data);
 
 private:
     struct GpuBuffer {
@@ -43,6 +56,12 @@ private:
         GpuBuffer vertex_buffer;
         GpuBuffer index_buffer;
         std::uint32_t index_count {0};
+    };
+
+    struct DeferredChunkBuffers {
+        GpuBuffer vertex_buffer;
+        GpuBuffer index_buffer;
+        std::uint32_t frames_remaining {0};
     };
 
     struct FrameResources {
@@ -79,6 +98,9 @@ private:
     bool create_sync_objects();
     void destroy_swapchain_objects();
     bool recreate_swapchain_if_needed();
+    void defer_destroy_chunk_buffers(ChunkRenderData&& render_data);
+    void retire_deferred_chunk_buffers();
+    void destroy_deferred_chunk_buffers_immediate();
     GpuBuffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
     void destroy_buffer(GpuBuffer& buffer);
     std::uint32_t find_memory_type(std::uint32_t type_filter, VkMemoryPropertyFlags properties) const;
@@ -92,6 +114,8 @@ private:
     void draw_crosshair(const FrameResources& frame);
     void update_hotbar_buffer();
     void draw_hotbar(const FrameResources& frame);
+    void update_debug_hud_buffer();
+    void draw_debug_hud(const FrameResources& frame);
     void upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex>& vertices);
     bool load_textures();
     bool load_ui_textures();
@@ -152,6 +176,7 @@ private:
     VkDescriptorSet ui_descriptor_set_ {VK_NULL_HANDLE};
 
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHasher> chunk_buffers_;
+    std::vector<DeferredChunkBuffers> deferred_chunk_buffers_;
     GpuBuffer chunk_outline_vertex_buffer_ {};
     std::uint32_t chunk_outline_vertex_count_ {0};
     GpuBuffer target_block_outline_vertex_buffer_ {};
@@ -164,17 +189,23 @@ private:
     std::uint32_t hotbar_texture_vertex_count_ {0};
     GpuBuffer crosshair_vertex_buffer_ {};
     std::uint32_t crosshair_vertex_count_ {0};
+    GpuBuffer debug_hud_vertex_buffer_ {};
+    std::uint32_t debug_hud_vertex_count_ {0};
     VkViewport viewport_ {};
     VkRect2D scissor_ {};
     bool logged_push_constant_size_ {false};
     bool logged_draw_stats_ {false};
     std::size_t logged_upload_count_ {0};
     bool wireframe_supported_ {false};
+    bool wide_lines_supported_ {false};
     bool wireframe_enabled_ {false};
+    bool wireframe_textures_enabled_ {false};
     bool logged_wireframe_support_ {false};
     std::optional<BlockHit> target_block_ {};
     std::size_t hotbar_selected_slot_ {0};
     std::size_t hotbar_slot_count_ {9};
+    bool debug_hud_enabled_ {false};
+    DebugHudData debug_hud_data_ {};
 };
 
 }

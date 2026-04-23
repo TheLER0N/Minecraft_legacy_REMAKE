@@ -66,6 +66,8 @@ void PlatformApp::pump_events() {
     input_.mouse_delta = {};
     input_.toggle_mouse_pressed = false;
     input_.toggle_wireframe_pressed = false;
+    input_.toggle_wireframe_textures_pressed = false;
+    input_.toggle_debug_hud_pressed = false;
     input_.toggle_debug_fly_pressed = false;
     input_.jump_pressed = false;
     input_.break_block_pressed = false;
@@ -100,6 +102,12 @@ void PlatformApp::pump_events() {
                 }
                 if (event.key.scancode == SDL_SCANCODE_F2) {
                     input_.toggle_debug_fly_pressed = true;
+                }
+                if (event.key.scancode == SDL_SCANCODE_F3) {
+                    input_.toggle_debug_hud_pressed = true;
+                }
+                if (event.key.scancode == SDL_SCANCODE_M) {
+                    input_.toggle_wireframe_textures_pressed = true;
                 }
                 if (event.key.scancode == SDL_SCANCODE_SPACE) {
                     input_.jump_pressed = true;
@@ -154,8 +162,14 @@ void PlatformApp::pump_events() {
             }
             if (event.button.button == SDL_BUTTON_LEFT) {
                 input_.break_block_pressed = true;
+                input_.break_block_held = true;
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
                 input_.place_block_pressed = true;
+            }
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                input_.break_block_held = false;
             }
             break;
         default:

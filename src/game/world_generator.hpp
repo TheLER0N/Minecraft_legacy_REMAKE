@@ -23,6 +23,19 @@ private:
     const BlockRegistry& block_registry_;
 };
 
+struct ChunkMeshNeighbors {
+    const ChunkData* west {nullptr};
+    const ChunkData* east {nullptr};
+    const ChunkData* north {nullptr};
+    const ChunkData* south {nullptr};
+};
+
 ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry);
+ChunkMesh build_chunk_mesh(
+    const ChunkData& chunk_data,
+    ChunkCoord coord,
+    const BlockRegistry& block_registry,
+    const ChunkMeshNeighbors& neighbors
+);
 
 }

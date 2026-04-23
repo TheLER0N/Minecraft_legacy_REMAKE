@@ -42,6 +42,7 @@ struct BlockDef {
     std::uint32_t tex_top {0};
     std::uint32_t tex_bottom {0};
     std::uint32_t tex_side {0};
+    float hardness {0.0f};
 };
 
 class BlockRegistry {
@@ -52,6 +53,7 @@ public:
     bool is_solid(BlockId id) const;
     bool is_replaceable(BlockId id) const;
     bool is_renderable(BlockId id) const;
+    float hardness(BlockId id) const;
 
 private:
     std::array<BlockDef, static_cast<std::size_t>(BlockId::Count)> defs_ {};

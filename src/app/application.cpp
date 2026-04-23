@@ -12,6 +12,9 @@ constexpr std::size_t kPlacementFailureLogLimit = 8;
 constexpr float kBlockTargetDistance = 5.0f;
 constexpr float kPlayerEyeHeight = 1.62f;
 constexpr float kPlacementBodyPadding = 0.02f;
+constexpr float kDebugFpsRefreshSeconds = 0.25f;
+constexpr float kBreakCooldownSeconds = 0.3f;
+constexpr std::size_t kMaxChunkUploadsPerFrame = 2;
 
 bool aabb_intersects_block(const Aabb& box, const Int3& block) {
     const float block_min_x = static_cast<float>(block.x);
@@ -24,6 +27,15 @@ bool aabb_intersects_block(const Aabb& box, const Int3& block) {
     return box.min.x < block_max_x && box.max.x > block_min_x &&
         box.min.y < block_max_y && box.max.y > block_min_y &&
         box.min.z < block_max_z && box.max.z > block_min_z;
+}
+
+float required_break_seconds(BlockId block, const BlockRegistry& registry) {
+    const float hardness = registry.hardness(block);
+    if (hardness <= 0.0f) {
+        return 0.05f;
+    }
+    const float multiplier = block == BlockId::Stone ? 5.0f : 1.5f;
+    return std::max(0.05f, hardness * multiplier);
 }
 
 bool has_valid_placement_hit(const BlockHit& hit) {
@@ -107,6 +119,12 @@ int Application::run() {
         if (platform_.current_input().toggle_wireframe_pressed) {
             renderer_.toggle_wireframe();
         }
+        if (input.toggle_wireframe_textures_pressed && renderer_.wireframe_enabled()) {
+            renderer_.toggle_wireframe_textures();
+        }
+        if (input.toggle_debug_hud_pressed) {
+            debug_hud_enabled_ = !debug_hud_enabled_;
+        }
         if (input.toggle_debug_fly_pressed) {
             debug_fly_enabled_ = !debug_fly_enabled_;
             if (debug_fly_enabled_) {
@@ -136,9 +154,12 @@ int Application::run() {
 
         const Vec3 observer_position = debug_fly_enabled_ ? camera_.position() : player_.position();
         world_streamer_->update_observer(observer_position);
+        for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
+            renderer_.unload_chunk_mesh(coord);
+        }
         world_streamer_->tick_generation_jobs();
 
-        auto pending_uploads = world_streamer_->drain_pending_uploads();
+        auto pending_uploads = world_streamer_->drain_pending_uploads(kMaxChunkUploadsPerFrame, observer_position);
         if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
             log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
             ++pending_upload_log_count;
@@ -152,12 +173,37 @@ int Application::run() {
         const Vec3 ray_direction = debug_fly_enabled_ ? camera_.forward() : player_.forward();
         hovered_block_ = world_streamer_->raycast(ray_origin, ray_direction, kBlockTargetDistance);
 
-        if (hovered_block_.has_value() && input.break_block_pressed) {
+        const float dt = platform_.frame_delta_seconds();
+        block_break_.cooldown_seconds = std::max(0.0f, block_break_.cooldown_seconds - dt);
+        if (!input.break_block_held || !hovered_block_.has_value() || block_break_.cooldown_seconds > 0.0f) {
+            if (!input.break_block_held || !hovered_block_.has_value()) {
+                block_break_.target.reset();
+                block_break_.progress_seconds = 0.0f;
+                block_break_.required_seconds = 0.0f;
+            }
+        } else {
             const BlockHit& hit = *hovered_block_;
-            if (world_streamer_->set_block_at_world(hit.block.x, hit.block.y, hit.block.z, BlockId::Air) == SetBlockResult::Success) {
-                hovered_block_.reset();
+            if (!block_break_.target.has_value() || *block_break_.target != hit.block) {
+                block_break_.target = hit.block;
+                block_break_.progress_seconds = 0.0f;
+                block_break_.required_seconds = required_break_seconds(
+                    world_streamer_->block_at_world(hit.block.x, hit.block.y, hit.block.z),
+                    block_registry_
+                );
+            }
+
+            block_break_.progress_seconds += dt;
+            if (block_break_.progress_seconds >= block_break_.required_seconds) {
+                if (world_streamer_->set_block_at_world(hit.block.x, hit.block.y, hit.block.z, BlockId::Air) == SetBlockResult::Success) {
+                    hovered_block_.reset();
+                }
+                block_break_.target.reset();
+                block_break_.progress_seconds = 0.0f;
+                block_break_.required_seconds = 0.0f;
+                block_break_.cooldown_seconds = kBreakCooldownSeconds;
             }
         }
+        const std::size_t uploads_this_frame = pending_uploads.size();
 
         if (hovered_block_.has_value() && input.place_block_pressed) {
             const BlockHit& hit = *hovered_block_;
@@ -200,6 +246,28 @@ int Application::run() {
         }
 
         renderer_.set_target_block(hovered_block_);
+
+        debug_fps_accumulator_ += dt;
+        ++debug_fps_frames_;
+        if (debug_fps_accumulator_ >= kDebugFpsRefreshSeconds) {
+            debug_fps_ = static_cast<float>(debug_fps_frames_) / debug_fps_accumulator_;
+            debug_fps_accumulator_ = 0.0f;
+            debug_fps_frames_ = 0;
+        }
+        const Vec3 debug_position = debug_fly_enabled_ ? camera_.position() : player_.position();
+        const WorldStreamer::StreamingStats streaming_stats = world_streamer_->stats();
+        renderer_.set_debug_hud(
+            debug_hud_enabled_,
+            Renderer::DebugHudData {
+                debug_fps_,
+                debug_position,
+                debug_fly_enabled_,
+                streaming_stats.visible_chunks,
+                streaming_stats.pending_uploads,
+                uploads_this_frame,
+                streaming_stats.queued_rebuilds
+            }
+        );
 
         const PlatformWindow& window = platform_.window();
         const float aspect_ratio = static_cast<float>(window.width) / static_cast<float>(window.height == 0 ? 1 : window.height);
