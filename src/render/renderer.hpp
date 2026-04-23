@@ -30,6 +30,7 @@ public:
     void toggle_wireframe();
     bool wireframe_enabled() const;
     void set_target_block(const std::optional<BlockHit>& target_block);
+    void set_hotbar_state(std::size_t selected_slot, std::size_t slot_count);
 
 private:
     struct GpuBuffer {
@@ -68,6 +69,7 @@ private:
         VkCullModeFlags cull_mode,
         bool depth_test,
         bool depth_write,
+        bool alpha_blend,
         VkPipeline* output_pipeline
     );
     bool create_depth_resources();
@@ -88,8 +90,11 @@ private:
     void draw_target_block_outline(const FrameResources& frame);
     void update_crosshair_buffer();
     void draw_crosshair(const FrameResources& frame);
+    void update_hotbar_buffer();
+    void draw_hotbar(const FrameResources& frame);
     void upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex>& vertices);
     bool load_textures();
+    bool load_ui_textures();
     void destroy_textures();
 
     VkInstance instance_ {VK_NULL_HANDLE};
@@ -108,10 +113,14 @@ private:
     VkRenderPass render_pass_ {VK_NULL_HANDLE};
     VkPipelineLayout pipeline_layout_ {VK_NULL_HANDLE};
     VkPipelineLayout hud_pipeline_layout_ {VK_NULL_HANDLE};
+    VkPipelineLayout ui_pipeline_layout_ {VK_NULL_HANDLE};
     VkPipeline fill_pipeline_ {VK_NULL_HANDLE};
     VkPipeline wireframe_pipeline_ {VK_NULL_HANDLE};
     VkPipeline chunk_outline_pipeline_ {VK_NULL_HANDLE};
     VkPipeline block_outline_pipeline_ {VK_NULL_HANDLE};
+    VkPipeline hotbar_fill_pipeline_ {VK_NULL_HANDLE};
+    VkPipeline hotbar_outline_pipeline_ {VK_NULL_HANDLE};
+    VkPipeline hotbar_texture_pipeline_ {VK_NULL_HANDLE};
     VkPipeline crosshair_pipeline_ {VK_NULL_HANDLE};
     VkCommandPool command_pool_ {VK_NULL_HANDLE};
     std::vector<FrameResources> frames_;
@@ -134,11 +143,25 @@ private:
     VkDescriptorPool descriptor_pool_ {VK_NULL_HANDLE};
     VkDescriptorSet descriptor_set_ {VK_NULL_HANDLE};
 
+    VkImage ui_texture_ {VK_NULL_HANDLE};
+    VkDeviceMemory ui_texture_memory_ {VK_NULL_HANDLE};
+    VkImageView ui_texture_view_ {VK_NULL_HANDLE};
+    VkSampler ui_texture_sampler_ {VK_NULL_HANDLE};
+    VkDescriptorSetLayout ui_descriptor_set_layout_ {VK_NULL_HANDLE};
+    VkDescriptorPool ui_descriptor_pool_ {VK_NULL_HANDLE};
+    VkDescriptorSet ui_descriptor_set_ {VK_NULL_HANDLE};
+
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHasher> chunk_buffers_;
     GpuBuffer chunk_outline_vertex_buffer_ {};
     std::uint32_t chunk_outline_vertex_count_ {0};
     GpuBuffer target_block_outline_vertex_buffer_ {};
     std::uint32_t target_block_outline_vertex_count_ {0};
+    GpuBuffer hotbar_fill_vertex_buffer_ {};
+    std::uint32_t hotbar_fill_vertex_count_ {0};
+    GpuBuffer hotbar_outline_vertex_buffer_ {};
+    std::uint32_t hotbar_outline_vertex_count_ {0};
+    GpuBuffer hotbar_texture_vertex_buffer_ {};
+    std::uint32_t hotbar_texture_vertex_count_ {0};
     GpuBuffer crosshair_vertex_buffer_ {};
     std::uint32_t crosshair_vertex_count_ {0};
     VkViewport viewport_ {};
@@ -150,6 +173,8 @@ private:
     bool wireframe_enabled_ {false};
     bool logged_wireframe_support_ {false};
     std::optional<BlockHit> target_block_ {};
+    std::size_t hotbar_selected_slot_ {0};
+    std::size_t hotbar_slot_count_ {9};
 };
 
 }

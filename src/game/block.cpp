@@ -10,6 +10,8 @@ BlockRegistry::BlockRegistry() {
     defs_[static_cast<std::size_t>(BlockId::Water)] = {BlockId::Water, "water", BlockFlags::None, {0.18f, 0.36f, 0.80f}, 4, 4, 4};
     defs_[static_cast<std::size_t>(BlockId::Sand)] = {BlockId::Sand, "sand", BlockFlags::Opaque | BlockFlags::Solid, {0.86f, 0.84f, 0.60f}, 5, 5, 5};
     defs_[static_cast<std::size_t>(BlockId::Gravel)] = {BlockId::Gravel, "gravel", BlockFlags::Opaque | BlockFlags::Solid, {0.52f, 0.51f, 0.50f}, 6, 6, 6};
+    defs_[static_cast<std::size_t>(BlockId::OakLog)] = {BlockId::OakLog, "oak_log", BlockFlags::Opaque | BlockFlags::Solid, {0.60f, 0.42f, 0.24f}, 8, 8, 7};
+    defs_[static_cast<std::size_t>(BlockId::OakLeaves)] = {BlockId::OakLeaves, "oak_leaves", BlockFlags::Solid, {0.42f, 0.72f, 0.24f}, 9, 9, 9};
 }
 
 const BlockDef& BlockRegistry::get(BlockId id) const {

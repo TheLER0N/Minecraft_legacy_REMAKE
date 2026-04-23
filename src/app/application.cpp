@@ -126,6 +126,7 @@ int Application::run() {
             input.selected_hotbar_slot < static_cast<int>(hotbar_.size())) {
             selected_hotbar_slot_ = static_cast<std::size_t>(input.selected_hotbar_slot);
         }
+        renderer_.set_hotbar_state(selected_hotbar_slot_, hotbar_.size());
 
         if (debug_fly_enabled_) {
             camera_.update(input, platform_.frame_delta_seconds());

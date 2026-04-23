@@ -109,6 +109,86 @@ void append_box_edges(std::vector<Vertex>& vertices, Vec3 min_corner, Vec3 max_c
     }
 }
 
+float screen_x_to_ndc(float x, float width) {
+    return width > 0.0f ? (x / width) * 2.0f - 1.0f : 0.0f;
+}
+
+float screen_y_to_ndc(float y, float height) {
+    return height > 0.0f ? (y / height) * 2.0f - 1.0f : 0.0f;
+}
+
+void append_hud_rect_fill(
+    std::vector<Vertex>& vertices,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    float width,
+    float height,
+    Vec3 color) {
+    const float x0 = screen_x_to_ndc(left, width);
+    const float x1 = screen_x_to_ndc(right, width);
+    const float y0 = screen_y_to_ndc(top, height);
+    const float y1 = screen_y_to_ndc(bottom, height);
+
+    vertices.push_back({{x0, y0, 0.0f}, color});
+    vertices.push_back({{x0, y1, 0.0f}, color});
+    vertices.push_back({{x1, y1, 0.0f}, color});
+    vertices.push_back({{x1, y1, 0.0f}, color});
+    vertices.push_back({{x1, y0, 0.0f}, color});
+    vertices.push_back({{x0, y0, 0.0f}, color});
+}
+
+void append_hud_rect_outline(
+    std::vector<Vertex>& vertices,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    float width,
+    float height,
+    Vec3 color) {
+    const float x0 = screen_x_to_ndc(left, width);
+    const float x1 = screen_x_to_ndc(right, width);
+    const float y0 = screen_y_to_ndc(top, height);
+    const float y1 = screen_y_to_ndc(bottom, height);
+
+    vertices.push_back({{x0, y0, 0.0f}, color});
+    vertices.push_back({{x1, y0, 0.0f}, color});
+    vertices.push_back({{x1, y0, 0.0f}, color});
+    vertices.push_back({{x1, y1, 0.0f}, color});
+    vertices.push_back({{x1, y1, 0.0f}, color});
+    vertices.push_back({{x0, y1, 0.0f}, color});
+    vertices.push_back({{x0, y1, 0.0f}, color});
+    vertices.push_back({{x0, y0, 0.0f}, color});
+}
+
+void append_hud_textured_quad(
+    std::vector<Vertex>& vertices,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    float width,
+    float height,
+    float u0,
+    float v0,
+    float u1,
+    float v1) {
+    const float x0 = screen_x_to_ndc(left, width);
+    const float x1 = screen_x_to_ndc(right, width);
+    const float y0 = screen_y_to_ndc(top, height);
+    const float y1 = screen_y_to_ndc(bottom, height);
+    const Vec3 color {1.0f, 1.0f, 1.0f};
+
+    vertices.push_back({{x0, y0, 0.0f}, color, {u0, v0}, 0});
+    vertices.push_back({{x0, y1, 0.0f}, color, {u0, v1}, 0});
+    vertices.push_back({{x1, y1, 0.0f}, color, {u1, v1}, 0});
+    vertices.push_back({{x1, y1, 0.0f}, color, {u1, v1}, 0});
+    vertices.push_back({{x1, y0, 0.0f}, color, {u1, v0}, 0});
+    vertices.push_back({{x0, y0, 0.0f}, color, {u0, v0}, 0});
+}
+
 }
 
 Renderer::~Renderer() {
@@ -174,6 +254,10 @@ bool Renderer::initialize(const PlatformWindow& window, const std::string& shade
     log_message(LogLevel::Info, "Renderer: load_textures");
     if (!load_textures()) {
         log_message(LogLevel::Error, "Renderer: load_textures failed");
+        return false;
+    }
+    if (!load_ui_textures()) {
+        log_message(LogLevel::Error, "Renderer: load_ui_textures failed");
         return false;
     }
     log_message(LogLevel::Info, "Renderer: create_command_buffers");
@@ -320,9 +404,11 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
     update_chunk_outline_buffer(visible_chunks);
     update_target_block_outline_buffer();
+    update_hotbar_buffer();
     update_crosshair_buffer();
     draw_chunk_outlines(frame);
     draw_target_block_outline(frame);
+    draw_hotbar(frame);
     draw_crosshair(frame);
 }
 
@@ -377,6 +463,9 @@ void Renderer::shutdown() {
     chunk_buffers_.clear();
     destroy_buffer(chunk_outline_vertex_buffer_);
     destroy_buffer(target_block_outline_vertex_buffer_);
+    destroy_buffer(hotbar_fill_vertex_buffer_);
+    destroy_buffer(hotbar_outline_vertex_buffer_);
+    destroy_buffer(hotbar_texture_vertex_buffer_);
     destroy_buffer(crosshair_vertex_buffer_);
 
     for (auto& frame : frames_) {
@@ -404,6 +493,15 @@ void Renderer::shutdown() {
     if (block_outline_pipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, block_outline_pipeline_, nullptr);
     }
+    if (hotbar_fill_pipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, hotbar_fill_pipeline_, nullptr);
+    }
+    if (hotbar_outline_pipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, hotbar_outline_pipeline_, nullptr);
+    }
+    if (hotbar_texture_pipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, hotbar_texture_pipeline_, nullptr);
+    }
     if (crosshair_pipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, crosshair_pipeline_, nullptr);
     }
@@ -418,6 +516,9 @@ void Renderer::shutdown() {
     }
     if (hud_pipeline_layout_ != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device_, hud_pipeline_layout_, nullptr);
+    }
+    if (ui_pipeline_layout_ != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device_, ui_pipeline_layout_, nullptr);
     }
     if (render_pass_ != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device_, render_pass_, nullptr);
@@ -451,6 +552,11 @@ bool Renderer::wireframe_enabled() const {
 
 void Renderer::set_target_block(const std::optional<BlockHit>& target_block) {
     target_block_ = target_block;
+}
+
+void Renderer::set_hotbar_state(std::size_t selected_slot, std::size_t slot_count) {
+    hotbar_slot_count_ = std::max<std::size_t>(1, slot_count);
+    hotbar_selected_slot_ = std::min(selected_slot, hotbar_slot_count_ - 1);
 }
 
 bool Renderer::create_instance() {
@@ -702,8 +808,11 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
     const auto vertex_code = read_binary_file(shader_directory + "/voxel.vert.spv");
     const auto fragment_code = read_binary_file(shader_directory + "/voxel.frag.spv");
     const auto hud_vertex_code = read_binary_file(shader_directory + "/hud.vert.spv");
+    const auto hud_textured_vertex_code = read_binary_file(shader_directory + "/hud_textured.vert.spv");
+    const auto hud_textured_fragment_code = read_binary_file(shader_directory + "/hud_textured.frag.spv");
     const auto color_fragment_code = read_binary_file(shader_directory + "/color.frag.spv");
-    if (vertex_code.empty() || fragment_code.empty() || hud_vertex_code.empty() || color_fragment_code.empty()) {
+    if (vertex_code.empty() || fragment_code.empty() || hud_vertex_code.empty() ||
+        hud_textured_vertex_code.empty() || hud_textured_fragment_code.empty() || color_fragment_code.empty()) {
         return false;
     }
 
@@ -724,6 +833,9 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
     if (vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &descriptor_set_layout_) != VK_SUCCESS) {
         return false;
     }
+    if (vkCreateDescriptorSetLayout(device_, &layout_create_info, nullptr, &ui_descriptor_set_layout_) != VK_SUCCESS) {
+        return false;
+    }
 
     VkPipelineLayoutCreateInfo layout_info {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout_info.pushConstantRangeCount = 1;
@@ -742,6 +854,13 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
         return false;
     }
 
+    VkPipelineLayoutCreateInfo ui_layout_info {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    ui_layout_info.setLayoutCount = 1;
+    ui_layout_info.pSetLayouts = &ui_descriptor_set_layout_;
+    if (vkCreatePipelineLayout(device_, &ui_layout_info, nullptr, &ui_pipeline_layout_) != VK_SUCCESS) {
+        return false;
+    }
+
     if (!create_graphics_pipeline(
             vertex_code,
             fragment_code,
@@ -751,6 +870,7 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
             debug_disable_culling ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT,
             true,
             true,
+            false,
             &fill_pipeline_)) {
         return false;
     }
@@ -765,6 +885,7 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
                 VK_CULL_MODE_NONE,
                 true,
                 true,
+                false,
                 &wireframe_pipeline_)) {
             return false;
         }
@@ -779,6 +900,7 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
             VK_CULL_MODE_NONE,
             true,
             false,
+            false,
             &chunk_outline_pipeline_)) {
         return false;
     }
@@ -792,7 +914,22 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
             VK_CULL_MODE_NONE,
             true,
             false,
+            false,
             &block_outline_pipeline_)) {
+        return false;
+    }
+
+    if (!create_graphics_pipeline(
+            hud_vertex_code,
+            color_fragment_code,
+            hud_pipeline_layout_,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_POLYGON_MODE_FILL,
+            VK_CULL_MODE_NONE,
+            false,
+            false,
+            false,
+            &hotbar_fill_pipeline_)) {
         return false;
     }
 
@@ -803,6 +940,35 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
             VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
             VK_POLYGON_MODE_FILL,
             VK_CULL_MODE_NONE,
+            false,
+            false,
+            false,
+            &hotbar_outline_pipeline_)) {
+        return false;
+    }
+
+    if (!create_graphics_pipeline(
+            hud_textured_vertex_code,
+            hud_textured_fragment_code,
+            ui_pipeline_layout_,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_POLYGON_MODE_FILL,
+            VK_CULL_MODE_NONE,
+            false,
+            false,
+            true,
+            &hotbar_texture_pipeline_)) {
+        return false;
+    }
+
+    if (!create_graphics_pipeline(
+            hud_vertex_code,
+            color_fragment_code,
+            hud_pipeline_layout_,
+            VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+            VK_POLYGON_MODE_FILL,
+            VK_CULL_MODE_NONE,
+            false,
             false,
             false,
             &crosshair_pipeline_)) {
@@ -821,6 +987,7 @@ bool Renderer::create_graphics_pipeline(
     VkCullModeFlags cull_mode,
     bool depth_test,
     bool depth_write,
+    bool alpha_blend,
     VkPipeline* output_pipeline) {
     const VkShaderModule vertex_module = create_shader_module(vertex_code);
     const VkShaderModule fragment_module = create_shader_module(fragment_code);
@@ -880,6 +1047,15 @@ bool Renderer::create_graphics_pipeline(
         VK_COLOR_COMPONENT_G_BIT |
         VK_COLOR_COMPONENT_B_BIT |
         VK_COLOR_COMPONENT_A_BIT;
+    if (alpha_blend) {
+        color_blend_attachment.blendEnable = VK_TRUE;
+        color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
 
     VkPipelineColorBlendStateCreateInfo color_blending {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
     color_blending.attachmentCount = 1;
@@ -1241,6 +1417,65 @@ void Renderer::update_crosshair_buffer() {
     upload_dynamic_buffer(crosshair_vertex_buffer_, vertices);
 }
 
+void Renderer::update_hotbar_buffer() {
+    hotbar_fill_vertex_count_ = 0;
+    hotbar_outline_vertex_count_ = 0;
+    hotbar_texture_vertex_count_ = 0;
+
+    if (hotbar_slot_count_ == 0 || swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+        return;
+    }
+
+    constexpr float ui_scale = 3.0f;
+    constexpr float slot_width = 20.0f * ui_scale;
+    constexpr float slot_height = 22.0f * ui_scale;
+    constexpr float selected_width = 24.0f * ui_scale;
+    constexpr float selected_height = 24.0f * ui_scale;
+    constexpr float bottom_margin = 24.0f;
+    constexpr float atlas_width = 204.0f;
+    constexpr float atlas_height = 24.0f;
+    const float width = static_cast<float>(swapchain_extent_.width);
+    const float height = static_cast<float>(swapchain_extent_.height);
+    const float total_width = static_cast<float>(hotbar_slot_count_) * slot_width;
+    const float start_x = (width - total_width) * 0.5f;
+    const float top = height - bottom_margin - slot_height;
+
+    std::vector<Vertex> vertices;
+    vertices.reserve(hotbar_slot_count_ * 6 + 6);
+
+    for (std::size_t slot = 0; slot < hotbar_slot_count_; ++slot) {
+        const float left = start_x + static_cast<float>(slot) * slot_width;
+        const float right = left + slot_width;
+        const float bottom = top + slot_height;
+        const float u0 = static_cast<float>(slot * 20) / atlas_width;
+        const float u1 = static_cast<float>(slot * 20 + 20) / atlas_width;
+        const float v0 = 0.0f;
+        const float v1 = 22.0f / atlas_height;
+        append_hud_textured_quad(vertices, left, top, right, bottom, width, height, u0, v0, u1, v1);
+    }
+
+    const float selected_left = start_x + static_cast<float>(hotbar_selected_slot_) * slot_width - 2.0f * ui_scale;
+    const float selected_top = top - 1.0f * ui_scale;
+    const float selected_u0 = 180.0f / atlas_width;
+    const float selected_u1 = 204.0f / atlas_width;
+    append_hud_textured_quad(
+        vertices,
+        selected_left,
+        selected_top,
+        selected_left + selected_width,
+        selected_top + selected_height,
+        width,
+        height,
+        selected_u0,
+        0.0f,
+        selected_u1,
+        1.0f
+    );
+
+    hotbar_texture_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
+    upload_dynamic_buffer(hotbar_texture_vertex_buffer_, vertices);
+}
+
 void Renderer::draw_chunk_outlines(const FrameResources& frame) {
     if (chunk_outline_vertex_count_ == 0 || chunk_outline_pipeline_ == VK_NULL_HANDLE) {
         return;
@@ -1265,6 +1500,19 @@ void Renderer::draw_target_block_outline(const FrameResources& frame) {
     vkCmdDraw(frame.command_buffer, target_block_outline_vertex_count_, 1, 0, 0);
 }
 
+void Renderer::draw_hotbar(const FrameResources& frame) {
+    if (hotbar_texture_vertex_count_ == 0 || hotbar_texture_pipeline_ == VK_NULL_HANDLE || ui_descriptor_set_ == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, hotbar_texture_pipeline_);
+    vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ui_pipeline_layout_, 0, 1, &ui_descriptor_set_, 0, nullptr);
+    const VkBuffer vertex_buffers[] = {hotbar_texture_vertex_buffer_.buffer};
+    const VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
+    vkCmdDraw(frame.command_buffer, hotbar_texture_vertex_count_, 1, 0, 0);
+}
+
 void Renderer::draw_crosshair(const FrameResources& frame) {
     if (crosshair_vertex_count_ == 0 || crosshair_pipeline_ == VK_NULL_HANDLE) {
         return;
@@ -1285,7 +1533,10 @@ bool Renderer::load_textures() {
         "assets/textures/texture_pack/classic/blocks/stone.png",
         "assets/textures/texture_pack/classic/blocks/water_placeholder.png",
         "assets/textures/texture_pack/classic/blocks/sand.png",
-        "assets/textures/texture_pack/classic/blocks/gravel.png"
+        "assets/textures/texture_pack/classic/blocks/gravel.png",
+        "assets/textures/texture_pack/classic/blocks/log_oak.png",
+        "assets/textures/texture_pack/classic/blocks/log_oak_top.png",
+        "assets/textures/texture_pack/classic/blocks/leaves_big_oak_carried.tga"
     };
 
     const int array_layers = static_cast<int>(texture_paths.size());
@@ -1515,7 +1766,263 @@ bool Renderer::load_textures() {
     return true;
 }
 
+bool Renderer::load_ui_textures() {
+    constexpr int atlas_width = 204;
+    constexpr int atlas_height = 24;
+    constexpr int tex_channels = 4;
+    const VkDeviceSize image_size = atlas_width * atlas_height * tex_channels;
+
+    std::vector<stbi_uc> atlas(static_cast<std::size_t>(image_size), 0);
+    const auto blit_image = [&](const std::string& path, int dst_x, int expected_width, int expected_height) -> bool {
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        if (pixels == nullptr) {
+            log_message(LogLevel::Error, "Renderer: failed to load UI texture image");
+            return false;
+        }
+        if (width != expected_width || height != expected_height) {
+            log_message(LogLevel::Error, "Renderer: UI texture has unexpected size");
+            stbi_image_free(pixels);
+            return false;
+        }
+
+        for (int y = 0; y < height; ++y) {
+            const std::size_t src_offset = static_cast<std::size_t>(y * width * tex_channels);
+            const std::size_t dst_offset = static_cast<std::size_t>((y * atlas_width + dst_x) * tex_channels);
+            std::memcpy(atlas.data() + dst_offset, pixels + src_offset, static_cast<std::size_t>(width * tex_channels));
+        }
+        stbi_image_free(pixels);
+        return true;
+    };
+
+    for (int i = 0; i < 9; ++i) {
+        if (!blit_image(
+                "assets/textures/texture_pack/classic/ui/hotbar_" + std::to_string(i) + ".png",
+                i * 20,
+                20,
+                22)) {
+            return false;
+        }
+    }
+    if (!blit_image("assets/textures/texture_pack/classic/ui/selected_hotbar_slot.png", 180, 24, 24)) {
+        return false;
+    }
+
+    GpuBuffer staging_buffer = create_buffer(
+        image_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    void* data = nullptr;
+    vkMapMemory(device_, staging_buffer.memory, 0, image_size, 0, &data);
+    std::memcpy(data, atlas.data(), static_cast<std::size_t>(image_size));
+    vkUnmapMemory(device_, staging_buffer.memory);
+
+    VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = atlas_width;
+    image_info.extent.height = atlas_height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateImage(device_, &image_info, nullptr, &ui_texture_) != VK_SUCCESS) {
+        destroy_buffer(staging_buffer);
+        return false;
+    }
+
+    VkMemoryRequirements mem_requirements {};
+    vkGetImageMemoryRequirements(device_, ui_texture_, &mem_requirements);
+
+    VkMemoryAllocateInfo alloc_info {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    alloc_info.allocationSize = mem_requirements.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(device_, &alloc_info, nullptr, &ui_texture_memory_) != VK_SUCCESS) {
+        destroy_buffer(staging_buffer);
+        return false;
+    }
+    vkBindImageMemory(device_, ui_texture_, ui_texture_memory_, 0);
+
+    VkCommandBufferAllocateInfo alloc_info_cb {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc_info_cb.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info_cb.commandPool = command_pool_;
+    alloc_info_cb.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(device_, &alloc_info_cb, &command_buffer);
+
+    VkCommandBufferBeginInfo begin_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(command_buffer, &begin_info);
+
+    VkImageMemoryBarrier barrier {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = ui_texture_;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        command_buffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    VkBufferImageCopy region {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {atlas_width, atlas_height, 1};
+
+    vkCmdCopyBufferToImage(command_buffer, staging_buffer.buffer, ui_texture_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        command_buffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    vkEndCommandBuffer(command_buffer);
+
+    VkSubmitInfo submit_info {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+    vkQueueSubmit(graphics_queue_, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphics_queue_);
+    vkFreeCommandBuffers(device_, command_pool_, 1, &command_buffer);
+    destroy_buffer(staging_buffer);
+
+    VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view_info.image = ui_texture_;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device_, &view_info, nullptr, &ui_texture_view_) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkSamplerCreateInfo sampler_info {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_info.magFilter = VK_FILTER_NEAREST;
+    sampler_info.minFilter = VK_FILTER_NEAREST;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.anisotropyEnable = VK_FALSE;
+    sampler_info.maxAnisotropy = 1.0f;
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_TRANSPARENT_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+    if (vkCreateSampler(device_, &sampler_info, nullptr, &ui_texture_sampler_) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorPoolSize pool_size {};
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes = &pool_size;
+    pool_info.maxSets = 1;
+    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &ui_descriptor_pool_) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorSetAllocateInfo alloc_info_set {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    alloc_info_set.descriptorPool = ui_descriptor_pool_;
+    alloc_info_set.descriptorSetCount = 1;
+    alloc_info_set.pSetLayouts = &ui_descriptor_set_layout_;
+    if (vkAllocateDescriptorSets(device_, &alloc_info_set, &ui_descriptor_set_) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorImageInfo image_desc_info {};
+    image_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_desc_info.imageView = ui_texture_view_;
+    image_desc_info.sampler = ui_texture_sampler_;
+
+    VkWriteDescriptorSet descriptor_write {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    descriptor_write.dstSet = ui_descriptor_set_;
+    descriptor_write.dstBinding = 0;
+    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_write.descriptorCount = 1;
+    descriptor_write.pImageInfo = &image_desc_info;
+    vkUpdateDescriptorSets(device_, 1, &descriptor_write, 0, nullptr);
+
+    return true;
+}
+
 void Renderer::destroy_textures() {
+    if (ui_descriptor_pool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, ui_descriptor_pool_, nullptr);
+        ui_descriptor_pool_ = VK_NULL_HANDLE;
+    }
+    if (ui_descriptor_set_layout_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device_, ui_descriptor_set_layout_, nullptr);
+        ui_descriptor_set_layout_ = VK_NULL_HANDLE;
+    }
+    if (ui_texture_sampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, ui_texture_sampler_, nullptr);
+        ui_texture_sampler_ = VK_NULL_HANDLE;
+    }
+    if (ui_texture_view_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, ui_texture_view_, nullptr);
+        ui_texture_view_ = VK_NULL_HANDLE;
+    }
+    if (ui_texture_ != VK_NULL_HANDLE) {
+        vkDestroyImage(device_, ui_texture_, nullptr);
+        ui_texture_ = VK_NULL_HANDLE;
+    }
+    if (ui_texture_memory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, ui_texture_memory_, nullptr);
+        ui_texture_memory_ = VK_NULL_HANDLE;
+    }
+
     if (descriptor_pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
         descriptor_pool_ = VK_NULL_HANDLE;

@@ -113,6 +113,24 @@ void PlatformApp::pump_events() {
                 if (event.key.scancode == SDL_SCANCODE_3) {
                     input_.selected_hotbar_slot = 2;
                 }
+                if (event.key.scancode == SDL_SCANCODE_4) {
+                    input_.selected_hotbar_slot = 3;
+                }
+                if (event.key.scancode == SDL_SCANCODE_5) {
+                    input_.selected_hotbar_slot = 4;
+                }
+                if (event.key.scancode == SDL_SCANCODE_6) {
+                    input_.selected_hotbar_slot = 5;
+                }
+                if (event.key.scancode == SDL_SCANCODE_7) {
+                    input_.selected_hotbar_slot = 6;
+                }
+                if (event.key.scancode == SDL_SCANCODE_8) {
+                    input_.selected_hotbar_slot = 7;
+                }
+                if (event.key.scancode == SDL_SCANCODE_9) {
+                    input_.selected_hotbar_slot = 8;
+                }
 
                 if (const auto mapped = map_scancode(event.key.scancode); mapped.has_value()) {
                     input_.keys[static_cast<std::size_t>(*mapped)] = true;

@@ -10,5 +10,8 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
     vec4 tex_color = texture(texSampler, vec3(frag_uv, float(frag_tex_index)));
+    if (tex_color.a < 0.5) {
+        discard;
+    }
     out_color = tex_color * vec4(frag_color, 1.0);
 }

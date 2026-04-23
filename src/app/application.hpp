@@ -30,7 +30,17 @@ private:
     std::unique_ptr<WorldStreamer> world_streamer_;
     std::optional<BlockHit> hovered_block_;
     bool debug_fly_enabled_ {false};
-    std::array<BlockId, 5> hotbar_ {BlockId::Grass, BlockId::Dirt, BlockId::Stone, BlockId::Sand, BlockId::Gravel};
+    std::array<BlockId, 9> hotbar_ {
+        BlockId::Grass,
+        BlockId::Dirt,
+        BlockId::Stone,
+        BlockId::Sand,
+        BlockId::Gravel,
+        BlockId::OakLog,
+        BlockId::OakLeaves,
+        BlockId::Stone,
+        BlockId::Stone
+    };
     std::size_t selected_hotbar_slot_ {0};
 };
 
