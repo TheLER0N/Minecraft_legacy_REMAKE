@@ -204,6 +204,13 @@ struct FaceLighting {
     std::array<Vec3, 4> colors {};
 };
 
+struct FaceLightKey {
+    std::array<std::uint8_t, 4> sky {};
+    std::array<std::uint8_t, 4> ao {};
+
+    bool operator==(const FaceLightKey&) const = default;
+};
+
 struct LightNode {
     int x {0};
     int y {0};
@@ -248,6 +255,7 @@ struct ChunkLightData {
 struct MaskCell {
     bool valid {false};
     FaceKey key {};
+    FaceLightKey light {};
 };
 
 bool same_color(const Vec3& lhs, const Vec3& rhs) {
@@ -258,7 +266,8 @@ bool same_mask_cell(const MaskCell& lhs, const MaskCell& rhs) {
     return lhs.valid == rhs.valid &&
         lhs.key.block == rhs.key.block &&
         lhs.key.texture_index == rhs.key.texture_index &&
-        same_color(lhs.key.color, rhs.key.color);
+        same_color(lhs.key.color, rhs.key.color) &&
+        lhs.light == rhs.light;
 }
 
 MeshSection& mesh_section_for_block(ChunkMesh& mesh, BlockId block, const BlockRegistry& block_registry) {
@@ -307,6 +316,33 @@ float vertex_ao(bool side_a, bool side_b, bool corner) {
     case 2: return 0.64f;
     default: return 0.52f;
     }
+}
+
+std::uint8_t vertex_ao_key(bool side_a, bool side_b, bool corner) {
+    if (side_a && side_b) {
+        return 3;
+    }
+    return static_cast<std::uint8_t>((side_a ? 1 : 0) + (side_b ? 1 : 0) + (corner ? 1 : 0));
+}
+
+std::uint8_t bucket_sky_light(std::uint8_t level) {
+    if (level == 0) {
+        return 0;
+    }
+    if (level <= 3) {
+        return 1;
+    }
+    if (level <= 7) {
+        return 2;
+    }
+    if (level <= 11) {
+        return 3;
+    }
+    return 4;
+}
+
+std::uint8_t bucket_ao_key(std::uint8_t raw_ao) {
+    return raw_ao;
 }
 
 float light_level_to_brightness(std::uint8_t level) {
@@ -410,24 +446,49 @@ std::uint8_t greedy_face_vertex_light_level(const ChunkLightData& light, int fac
     return light.get(x, y, z);
 }
 
+std::array<Int3, 3> ao_offsets_for_corner(int face_index, int sx, int sy, int sz) {
+    switch (face_index) {
+    case 0: return {{{sx, 1, 0}, {0, 1, sz}, {sx, 1, sz}}};
+    case 1: return {{{sx, -1, 0}, {0, -1, sz}, {sx, -1, sz}}};
+    case 2: return {{{1, sy, 0}, {1, 0, sz}, {1, sy, sz}}};
+    case 3: return {{{-1, sy, 0}, {-1, 0, sz}, {-1, sy, sz}}};
+    case 4: return {{{sx, 0, 1}, {0, sy, 1}, {sx, sy, 1}}};
+    case 5: return {{{sx, 0, -1}, {0, sy, -1}, {sx, sy, -1}}};
+    default:
+        return {{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}};
+    }
+}
+
 std::array<Int3, 3> ao_offsets_for_vertex(int face_index, const Vec3& vertex) {
     const int sx = vertex.x > 0.5f ? 1 : -1;
     const int sy = vertex.y > 0.5f ? 1 : -1;
     const int sz = vertex.z > 0.5f ? 1 : -1;
+    return ao_offsets_for_corner(face_index, sx, sy, sz);
+}
+
+Int3 greedy_corner_origin(int face_index, const Vec3& vertex, const Vec3& center) {
+    const auto axis_cell = [](float value, float center_value) {
+        const float adjusted = value > center_value ? value - 0.001f : value;
+        return static_cast<int>(std::floor(adjusted));
+    };
+
+    Int3 origin {
+        axis_cell(vertex.x, center.x),
+        axis_cell(vertex.y, center.y),
+        axis_cell(vertex.z, center.z)
+    };
 
     switch (face_index) {
-    case 0:
-    case 1:
-        return {{{sx, 0, 0}, {0, 0, sz}, {sx, 0, sz}}};
-    case 2:
-    case 3:
-        return {{{0, sy, 0}, {0, 0, sz}, {0, sy, sz}}};
-    case 4:
-    case 5:
-        return {{{sx, 0, 0}, {0, sy, 0}, {sx, sy, 0}}};
-    default:
-        return {{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}};
+    case 0: origin.y = static_cast<int>(std::floor(vertex.y)) - 1; break;
+    case 1: origin.y = static_cast<int>(std::floor(vertex.y)); break;
+    case 2: origin.x = static_cast<int>(std::floor(vertex.x)) - 1; break;
+    case 3: origin.x = static_cast<int>(std::floor(vertex.x)); break;
+    case 4: origin.z = static_cast<int>(std::floor(vertex.z)) - 1; break;
+    case 5: origin.z = static_cast<int>(std::floor(vertex.z)); break;
+    default: break;
     }
+
+    return origin;
 }
 
 template <typename SampleFn>
@@ -463,6 +524,33 @@ FaceLighting make_face_lighting(
 }
 
 template <typename SampleFn>
+FaceLightKey make_face_light_key(
+    SampleFn&& sample,
+    const BlockRegistry& block_registry,
+    const ChunkLightData& light,
+    BlockId block,
+    int face_index,
+    int origin_x,
+    int origin_y,
+    int origin_z) {
+    FaceLightKey key {};
+    const bool water = block_registry.render_type(block) == BlockRenderType::Transparent;
+    const std::array<Vec3, 4>& local_vertices = kFaceTemplates[static_cast<std::size_t>(face_index)].vertices;
+
+    for (std::size_t i = 0; i < local_vertices.size(); ++i) {
+        const Vec3& local = local_vertices[i];
+        const auto offsets = ao_offsets_for_vertex(face_index, local);
+        const bool side_a = is_ao_occluder(sample(origin_x + offsets[0].x, origin_y + offsets[0].y, origin_z + offsets[0].z), block_registry);
+        const bool side_b = is_ao_occluder(sample(origin_x + offsets[1].x, origin_y + offsets[1].y, origin_z + offsets[1].z), block_registry);
+        const bool corner = is_ao_occluder(sample(origin_x + offsets[2].x, origin_y + offsets[2].y, origin_z + offsets[2].z), block_registry);
+        key.sky[i] = bucket_sky_light(face_vertex_light_level(light, face_index, local, origin_x, origin_y, origin_z));
+        key.ao[i] = water ? 0 : bucket_ao_key(vertex_ao_key(side_a, side_b, corner));
+    }
+
+    return key;
+}
+
+template <typename SampleFn>
 FaceLighting make_greedy_face_lighting(
     SampleFn&& sample,
     const BlockRegistry& block_registry,
@@ -486,35 +574,11 @@ FaceLighting make_greedy_face_lighting(
         const int sx = vertex.x >= center.x ? 1 : -1;
         const int sy = vertex.y >= center.y ? 1 : -1;
         const int sz = vertex.z >= center.z ? 1 : -1;
-        const int bx = static_cast<int>(std::floor(vertex.x)) - (sx < 0 ? 1 : 0);
-        const int by = static_cast<int>(std::floor(vertex.y)) - (sy < 0 ? 1 : 0);
-        const int bz = static_cast<int>(std::floor(vertex.z)) - (sz < 0 ? 1 : 0);
-
-        bool side_a = false;
-        bool side_b = false;
-        bool corner = false;
-        switch (face_index) {
-        case 0:
-        case 1:
-            side_a = is_ao_occluder(sample(bx + sx, by, bz), block_registry);
-            side_b = is_ao_occluder(sample(bx, by, bz + sz), block_registry);
-            corner = is_ao_occluder(sample(bx + sx, by, bz + sz), block_registry);
-            break;
-        case 2:
-        case 3:
-            side_a = is_ao_occluder(sample(bx, by + sy, bz), block_registry);
-            side_b = is_ao_occluder(sample(bx, by, bz + sz), block_registry);
-            corner = is_ao_occluder(sample(bx, by + sy, bz + sz), block_registry);
-            break;
-        case 4:
-        case 5:
-            side_a = is_ao_occluder(sample(bx + sx, by, bz), block_registry);
-            side_b = is_ao_occluder(sample(bx, by + sy, bz), block_registry);
-            corner = is_ao_occluder(sample(bx + sx, by + sy, bz), block_registry);
-            break;
-        default:
-            break;
-        }
+        const Int3 origin = greedy_corner_origin(face_index, vertex, center);
+        const auto offsets = ao_offsets_for_corner(face_index, sx, sy, sz);
+        const bool side_a = is_ao_occluder(sample(origin.x + offsets[0].x, origin.y + offsets[0].y, origin.z + offsets[0].z), block_registry);
+        const bool side_b = is_ao_occluder(sample(origin.x + offsets[1].x, origin.y + offsets[1].y, origin.z + offsets[1].z), block_registry);
+        const bool corner = is_ao_occluder(sample(origin.x + offsets[2].x, origin.y + offsets[2].y, origin.z + offsets[2].z), block_registry);
 
         const float ao = water ? 1.0f : vertex_ao(side_a, side_b, corner);
         const std::uint8_t light_level = greedy_face_vertex_light_level(light, face_index, vertex, center);
@@ -739,11 +803,12 @@ ChunkMesh build_mesh_from_sampler(
         }
     };
 
-    const auto make_mask_cell = [&](BlockId block, BlockId neighbor, int face_index, auto&& eligible) {
+    const auto make_mask_cell = [&](int x, int y, int z, BlockId block, BlockId neighbor, int face_index, auto&& eligible) {
         MaskCell cell {};
         if (eligible(block, block_registry) && should_emit_face(block, neighbor, block_registry, face_index, leaves_mode)) {
             cell.valid = true;
             cell.key = make_face_key(block, kFaceTemplates[static_cast<std::size_t>(face_index)], block_registry);
+            cell.light = make_face_light_key(sample, block_registry, light, block, face_index, x, y, z);
         }
         return cell;
     };
@@ -756,7 +821,7 @@ ChunkMesh build_mesh_from_sampler(
                 std::fill(mask.begin(), mask.end(), MaskCell {});
                 for (int z = 0; z < kChunkDepth; ++z) {
                     for (int x = 0; x < kChunkWidth; ++x) {
-                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y + 1, z), 0, eligible);
+                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y + 1, z), 0, eligible);
                     }
                 }
                 emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
@@ -764,7 +829,7 @@ ChunkMesh build_mesh_from_sampler(
                 std::fill(mask.begin(), mask.end(), MaskCell {});
                 for (int z = 0; z < kChunkDepth; ++z) {
                     for (int x = 0; x < kChunkWidth; ++x) {
-                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y - 1, z), 1, eligible);
+                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y - 1, z), 1, eligible);
                     }
                 }
                 emit_greedy_mask(1, y, kChunkWidth, kChunkDepth, mask);
@@ -772,7 +837,7 @@ ChunkMesh build_mesh_from_sampler(
                 std::fill(mask.begin(), mask.end(), MaskCell {});
                 for (int z = 0; z < kChunkDepth; ++z) {
                     for (int x = 0; x < kChunkWidth; ++x) {
-                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y + 1, z), 0, eligible);
+                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y + 1, z), 0, eligible);
                     }
                 }
                 emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
@@ -784,7 +849,7 @@ ChunkMesh build_mesh_from_sampler(
             std::fill(mask.begin(), mask.end(), MaskCell {});
             for (int y = 0; y < kChunkHeight; ++y) {
                 for (int z = 0; z < kChunkDepth; ++z) {
-                    mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x + 1, y, z), 2, eligible);
+                    mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x + 1, y, z), 2, eligible);
                 }
             }
             emit_greedy_mask(2, x, kChunkDepth, kChunkHeight, mask);
@@ -792,7 +857,7 @@ ChunkMesh build_mesh_from_sampler(
             std::fill(mask.begin(), mask.end(), MaskCell {});
             for (int y = 0; y < kChunkHeight; ++y) {
                 for (int z = 0; z < kChunkDepth; ++z) {
-                    mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x - 1, y, z), 3, eligible);
+                    mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x - 1, y, z), 3, eligible);
                 }
             }
             emit_greedy_mask(3, x, kChunkDepth, kChunkHeight, mask);
@@ -803,7 +868,7 @@ ChunkMesh build_mesh_from_sampler(
             std::fill(mask.begin(), mask.end(), MaskCell {});
             for (int y = 0; y < kChunkHeight; ++y) {
                 for (int x = 0; x < kChunkWidth; ++x) {
-                    mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z + 1), 4, eligible);
+                    mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y, z + 1), 4, eligible);
                 }
             }
             emit_greedy_mask(4, z, kChunkWidth, kChunkHeight, mask);
@@ -811,7 +876,7 @@ ChunkMesh build_mesh_from_sampler(
             std::fill(mask.begin(), mask.end(), MaskCell {});
             for (int y = 0; y < kChunkHeight; ++y) {
                 for (int x = 0; x < kChunkWidth; ++x) {
-                    mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z - 1), 5, eligible);
+                    mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y, z - 1), 5, eligible);
                 }
             }
             emit_greedy_mask(5, z, kChunkWidth, kChunkHeight, mask);
@@ -950,6 +1015,26 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     assert(double_faces == 6);
     assert(double_mesh.opaque_mesh.vertices.size() == 24);
     assert(double_mesh.opaque_mesh.indices.size() == 36);
+
+    ChunkData ao_split_blocks {};
+    ao_split_blocks.set(0, 0, 0, BlockId::Stone);
+    ao_split_blocks.set(1, 0, 0, BlockId::Stone);
+    const auto ao_split_sample = [&](int x, int y, int z) -> BlockId {
+        if (y < 0 || y >= kChunkHeight) {
+            return BlockId::Air;
+        }
+        if (x == 0 && y == 1 && z == -1) {
+            return BlockId::Stone;
+        }
+        if (x < 0 || x >= kChunkWidth || z < 0 || z >= kChunkDepth) {
+            return BlockId::Air;
+        }
+        return ao_split_blocks.get(x, y, z);
+    };
+    std::size_t ao_split_faces = 0;
+    const ChunkMesh ao_split_mesh = build_mesh_from_sampler(ao_split_sample, block_registry, LeavesRenderMode::Fancy, &ao_split_faces);
+    assert(ao_split_faces > double_faces);
+    assert(ao_split_mesh.opaque_mesh.vertices.size() > double_mesh.opaque_mesh.vertices.size());
 
     ChunkData slab {};
     for (int z = 0; z < 2; ++z) {

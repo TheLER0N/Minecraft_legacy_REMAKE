@@ -4,6 +4,8 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb_truetype.h>
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -43,6 +45,24 @@ struct ClipPoint {
     float z {0.0f};
     float w {1.0f};
 };
+
+std::uint32_t decode_utf8(const char*& it, const char* end) {
+    if (it == end) return 0;
+    std::uint32_t ch = static_cast<std::uint8_t>(*it++);
+    if (ch < 0x80) return ch;
+    if (ch < 0xC0) return 0xFFFD;
+    if (ch < 0xE0) {
+        if (it == end) return 0xFFFD;
+        ch = ((ch & 0x1F) << 6) | (static_cast<std::uint8_t>(*it++) & 0x3F);
+    } else if (ch < 0xF0) {
+        if (it + 1 >= end) { it = end; return 0xFFFD; }
+        ch = ((ch & 0x0F) << 12) | ((static_cast<std::uint8_t>(*it++) & 0x3F) << 6) | (static_cast<std::uint8_t>(*it++) & 0x3F);
+    } else if (ch < 0xF8) {
+        if (it + 2 >= end) { it = end; return 0xFFFD; }
+        ch = ((ch & 0x07) << 18) | ((static_cast<std::uint8_t>(*it++) & 0x3F) << 12) | ((static_cast<std::uint8_t>(*it++) & 0x3F) << 6) | (static_cast<std::uint8_t>(*it++) & 0x3F);
+    }
+    return ch;
+}
 
 struct DrawSectionView {
     VkBuffer vertex_buffer {VK_NULL_HANDLE};
@@ -674,6 +694,7 @@ void Renderer::draw_main_menu(float time_seconds, bool use_night_panorama, int h
     draw_textured_buffer(frame, menu_logo_vertex_buffer_, menu_logo_vertex_count_, menu_logo_.descriptor_set);
     draw_textured_buffer(frame, menu_button_vertex_buffer_, menu_button_vertex_count_, menu_button_.descriptor_set);
     draw_textured_buffer(frame, menu_button_highlight_vertex_buffer_, menu_button_highlight_vertex_count_, menu_button_highlighted_.descriptor_set);
+    draw_textured_buffer(frame, menu_font_vertex_buffer_, menu_font_vertex_count_, menu_font_.texture.descriptor_set);
     draw_colored_buffer(frame, menu_text_vertex_buffer_, menu_text_vertex_count_, hotbar_fill_pipeline_);
 }
 
@@ -863,6 +884,7 @@ void Renderer::shutdown() {
     destroy_buffer(menu_button_highlight_vertex_buffer_);
     destroy_buffer(menu_overlay_vertex_buffer_);
     destroy_buffer(menu_text_vertex_buffer_);
+    destroy_buffer(menu_font_vertex_buffer_);
 
     for (auto& frame : frames_) {
         if (frame.image_available != VK_NULL_HANDLE) {
@@ -2242,6 +2264,7 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
     menu_button_highlight_vertex_count_ = 0;
     menu_overlay_vertex_count_ = 0;
     menu_text_vertex_count_ = 0;
+    menu_font_vertex_count_ = 0;
     if (swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
         return;
     }
@@ -2277,12 +2300,12 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
     upload_dynamic_buffer(menu_logo_vertex_buffer_, logo_vertices);
 
     constexpr std::array<const char*, 6> labels {{
-        "PLAY GAME",
-        "MINI GAMES",
-        "LEADERBOARDS",
-        "HELP & OPTIONS",
-        "MINECRAFT STORE",
-        "LAUNCH NEW MINECRAFT"
+        "Play Game",
+        "Mini Games",
+        "Leaderboards",
+        "Help & Options",
+        "Minecraft Store",
+        "Launch New Minecraft"
     }};
     const float button_width = 200.0f * scale;
     const float button_height = 20.0f * scale;
@@ -2293,9 +2316,11 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
     std::vector<Vertex> button_vertices;
     std::vector<Vertex> button_highlight_vertices;
     std::vector<Vertex> text_vertices;
+    std::vector<Vertex> font_vertices;
     button_vertices.reserve(6 * 5);
     button_highlight_vertices.reserve(6);
     text_vertices.reserve(6000);
+    font_vertices.reserve(6000);
 
     for (std::size_t i = 0; i < labels.size(); ++i) {
         const float top = first_top + static_cast<float>(i) * (button_height + gap);
@@ -2305,27 +2330,51 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
         const std::string label = labels[i];
         const float preferred_text_scale = std::max(1.2f, scale * 1.12f);
         const float text_scale = std::max(1.0f, std::min(preferred_text_scale, (button_width * 0.82f) / pixel_text_width(label, 1.0f)));
-        const float text_width = pixel_text_width(label, text_scale);
-        const float text_left = left + (button_width - text_width) * 0.5f;
-        const float text_top = top + (button_height - 7.0f * text_scale) * 0.5f;
+        const float font_pixel_height = 8.0f * preferred_text_scale;
+        const float text_width = menu_font_.loaded ? menu_font_text_width(label, font_pixel_height) : pixel_text_width(label, text_scale);
+        
+        float actual_pixel_height = font_pixel_height;
+        if (text_width > button_width * 0.82f && menu_font_.loaded) {
+            actual_pixel_height = actual_pixel_height * ((button_width * 0.82f) / text_width);
+        }
+        
+        const float actual_text_width = menu_font_.loaded ? menu_font_text_width(label, actual_pixel_height) : text_width;
+        const float text_left = left + (button_width - actual_text_width) * 0.5f;
+        const float text_top = top + (button_height - actual_pixel_height) * 0.5f;
         const Vec3 text_color = static_cast<int>(i) == hovered_button ? Vec3 {1.0f, 1.0f, 0.25f} : Vec3 {1.0f, 1.0f, 1.0f};
-        append_pixel_text(text_vertices, label, text_left + std::max(1.0f, scale * 0.35f), text_top + std::max(1.0f, scale * 0.35f), text_scale, width, height, {0.15f, 0.15f, 0.15f});
-        append_pixel_text(text_vertices, label, text_left, text_top, text_scale, width, height, text_color);
+        
+        if (menu_font_.loaded) {
+            append_menu_font_text(font_vertices, label, text_left + std::max(1.0f, scale * 0.4f), text_top + std::max(1.0f, scale * 0.4f), actual_pixel_height, width, height, {0.0f, 0.0f, 0.0f});
+            append_menu_font_text(font_vertices, label, text_left, text_top, actual_pixel_height, width, height, text_color);
+        } else {
+            append_pixel_text(text_vertices, label, text_left + std::max(1.0f, scale * 0.4f), text_top + std::max(1.0f, scale * 0.4f), text_scale, width, height, {0.0f, 0.0f, 0.0f});
+            append_pixel_text(text_vertices, label, text_left, text_top, text_scale, width, height, text_color);
+        }
     }
 
     const std::string splash = "WHAT DOES THE FOX SAY?";
     const float splash_scale = std::max(1.5f, std::min(scale * 1.45f, (width * 0.30f) / pixel_text_width(splash, 1.0f)));
-    const float splash_left = std::min(width * 0.54f, width - pixel_text_width(splash, splash_scale) - width * 0.08f);
+    const float splash_font_height = 12.0f * splash_scale;
+    const float splash_actual_width = menu_font_.loaded ? menu_font_text_width(splash, splash_font_height) : pixel_text_width(splash, splash_scale);
+    const float splash_left = std::min(width * 0.54f, width - splash_actual_width - width * 0.08f);
     const float splash_top = logo_top + logo_height * 0.42f;
-    append_pixel_text(text_vertices, splash, splash_left + 2.0f, splash_top + 2.0f, splash_scale, width, height, {0.25f, 0.25f, 0.0f}, -0.34f);
-    append_pixel_text(text_vertices, splash, splash_left, splash_top, splash_scale, width, height, {1.0f, 1.0f, 0.0f}, -0.34f);
+    
+    if (menu_font_.loaded) {
+        append_menu_font_text(font_vertices, splash, splash_left + 2.0f, splash_top + 2.0f, splash_font_height, width, height, {0.25f, 0.25f, 0.0f}, -0.34f);
+        append_menu_font_text(font_vertices, splash, splash_left, splash_top, splash_font_height, width, height, {1.0f, 1.0f, 0.0f}, -0.34f);
+    } else {
+        append_pixel_text(text_vertices, splash, splash_left + 2.0f, splash_top + 2.0f, splash_scale, width, height, {0.25f, 0.25f, 0.0f}, -0.34f);
+        append_pixel_text(text_vertices, splash, splash_left, splash_top, splash_scale, width, height, {1.0f, 1.0f, 0.0f}, -0.34f);
+    }
 
     menu_button_vertex_count_ = static_cast<std::uint32_t>(button_vertices.size());
     menu_button_highlight_vertex_count_ = static_cast<std::uint32_t>(button_highlight_vertices.size());
     menu_text_vertex_count_ = static_cast<std::uint32_t>(text_vertices.size());
+    menu_font_vertex_count_ = static_cast<std::uint32_t>(font_vertices.size());
     upload_dynamic_buffer(menu_button_vertex_buffer_, button_vertices);
     upload_dynamic_buffer(menu_button_highlight_vertex_buffer_, button_highlight_vertices);
     upload_dynamic_buffer(menu_text_vertex_buffer_, text_vertices);
+    upload_dynamic_buffer(menu_font_vertex_buffer_, font_vertices);
 }
 
 void Renderer::draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set) {
@@ -2826,6 +2875,9 @@ bool Renderer::load_ui_textures() {
 }
 
 bool Renderer::load_menu_textures() {
+    if (!load_menu_font()) {
+        log_message(LogLevel::Error, "Renderer: failed to load menu font");
+    }
     return load_menu_texture("assets/panorama/panorama_tu69_day.png", false, false, menu_panorama_day_) &&
         load_menu_texture("assets/panorama/panorama_tu69_night.png", false, false, menu_panorama_night_) &&
         load_menu_texture("assets/button/button.png", false, true, menu_button_) &&
@@ -3117,6 +3169,368 @@ void Renderer::destroy_textures() {
     if (texture_memory_ != VK_NULL_HANDLE) {
         vkFreeMemory(device_, texture_memory_, nullptr);
         texture_memory_ = VK_NULL_HANDLE;
+    }
+}
+
+bool Renderer::load_menu_texture_from_rgba(const std::vector<std::uint8_t>& pixels, std::uint32_t width, std::uint32_t height, bool repeat, bool pixelated, MenuTexture& texture) {
+    if (pixels.empty() || width == 0 || height == 0) {
+        log_message(LogLevel::Error, "Renderer: invalid pixels for load_menu_texture_from_rgba");
+        return false;
+    }
+
+    texture.width = width;
+    texture.height = height;
+    constexpr int tex_channels = 4;
+    const VkDeviceSize image_size = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * tex_channels;
+
+    GpuBuffer staging_buffer = create_buffer(
+        image_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    void* data = nullptr;
+    vkMapMemory(device_, staging_buffer.memory, 0, image_size, 0, &data);
+    std::memcpy(data, pixels.data(), static_cast<std::size_t>(image_size));
+    vkUnmapMemory(device_, staging_buffer.memory);
+
+    VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = texture.width;
+    image_info.extent.height = texture.height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateImage(device_, &image_info, nullptr, &texture.image) != VK_SUCCESS) {
+        destroy_buffer(staging_buffer);
+        return false;
+    }
+
+    VkMemoryRequirements mem_requirements {};
+    vkGetImageMemoryRequirements(device_, texture.image, &mem_requirements);
+
+    VkMemoryAllocateInfo alloc_info {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    alloc_info.allocationSize = mem_requirements.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(device_, &alloc_info, nullptr, &texture.memory) != VK_SUCCESS) {
+        destroy_buffer(staging_buffer);
+        return false;
+    }
+    vkBindImageMemory(device_, texture.image, texture.memory, 0);
+
+    VkCommandBufferAllocateInfo alloc_info_cb {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc_info_cb.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info_cb.commandPool = command_pool_;
+    alloc_info_cb.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(device_, &alloc_info_cb, &command_buffer);
+
+    VkCommandBufferBeginInfo begin_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(command_buffer, &begin_info);
+
+    VkImageMemoryBarrier barrier {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = texture.image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        command_buffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    VkBufferImageCopy region {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {texture.width, texture.height, 1};
+
+    vkCmdCopyBufferToImage(command_buffer, staging_buffer.buffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        command_buffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    vkEndCommandBuffer(command_buffer);
+
+    VkSubmitInfo submit_info {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+    vkQueueSubmit(graphics_queue_, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphics_queue_);
+    vkFreeCommandBuffers(device_, command_pool_, 1, &command_buffer);
+    destroy_buffer(staging_buffer);
+
+    VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view_info.image = texture.image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device_, &view_info, nullptr, &texture.view) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkSamplerCreateInfo sampler_info {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_info.magFilter = pixelated ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    sampler_info.minFilter = pixelated ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    sampler_info.addressModeU = repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.anisotropyEnable = VK_FALSE;
+    sampler_info.maxAnisotropy = 1.0f;
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_TRANSPARENT_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_info.mipmapMode = pixelated ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+    if (vkCreateSampler(device_, &sampler_info, nullptr, &texture.sampler) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorPoolSize pool_size {};
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes = &pool_size;
+    pool_info.maxSets = 1;
+    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &texture.descriptor_pool) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorSetAllocateInfo alloc_info_set {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    alloc_info_set.descriptorPool = texture.descriptor_pool;
+    alloc_info_set.descriptorSetCount = 1;
+    alloc_info_set.pSetLayouts = &ui_descriptor_set_layout_;
+    if (vkAllocateDescriptorSets(device_, &alloc_info_set, &texture.descriptor_set) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorImageInfo image_desc_info {};
+    image_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_desc_info.imageView = texture.view;
+    image_desc_info.sampler = texture.sampler;
+
+    VkWriteDescriptorSet descriptor_write {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    descriptor_write.dstSet = texture.descriptor_set;
+    descriptor_write.dstBinding = 0;
+    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_write.descriptorCount = 1;
+    descriptor_write.pImageInfo = &image_desc_info;
+    vkUpdateDescriptorSets(device_, 1, &descriptor_write, 0, nullptr);
+
+    return true;
+}
+
+bool Renderer::load_menu_font() {
+    std::ifstream file("assets/fonts/RU/minecraft.ttf", std::ios::binary);
+    if (!file) {
+        log_message(LogLevel::Error, "Renderer: failed to open assets/fonts/RU/minecraft.ttf");
+        return false;
+    }
+    
+    std::vector<unsigned char> ttf_buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    log_message(LogLevel::Info, "Renderer: loaded minecraft.ttf, size: " + std::to_string(ttf_buffer.size()) + " bytes");
+    
+    const float pixel_height = 64.0f;
+    menu_font_.pixel_height = pixel_height;
+    
+    const int atlas_width = 2048;
+    const int atlas_height = 2048;
+    std::vector<unsigned char> bitmap(atlas_width * atlas_height);
+    
+    stbtt_pack_context spc;
+    if (!stbtt_PackBegin(&spc, bitmap.data(), atlas_width, atlas_height, 0, 1, nullptr)) {
+        log_message(LogLevel::Error, "Renderer: stbtt_PackBegin failed");
+        return false;
+    }
+    
+    stbtt_packedchar ascii_data[128];
+    stbtt_packedchar cyrillic_data[256];
+    
+    stbtt_pack_range ranges[2];
+    ranges[0].font_size = pixel_height;
+    ranges[0].first_unicode_codepoint_in_range = 0;
+    ranges[0].array_of_unicode_codepoints = nullptr;
+    ranges[0].num_chars = 128;
+    ranges[0].chardata_for_range = ascii_data;
+    ranges[0].h_oversample = 1;
+    ranges[0].v_oversample = 1;
+    
+    ranges[1].font_size = pixel_height;
+    ranges[1].first_unicode_codepoint_in_range = 0x0400; // Cyrillic range U+0400 to U+04FF
+    ranges[1].array_of_unicode_codepoints = nullptr;
+    ranges[1].num_chars = 256;
+    ranges[1].chardata_for_range = cyrillic_data;
+    ranges[1].h_oversample = 1;
+    ranges[1].v_oversample = 1;
+    
+    if (!stbtt_PackFontRanges(&spc, ttf_buffer.data(), 0, ranges, 2)) {
+        log_message(LogLevel::Error, "Renderer: stbtt_PackFontRanges failed (atlas size might still be too small or font is invalid)");
+        stbtt_PackEnd(&spc);
+        return false;
+    }
+    stbtt_PackEnd(&spc);
+    log_message(LogLevel::Info, "Renderer: font glyphs packed successfully into " + std::to_string(atlas_width) + "x" + std::to_string(atlas_height) + " atlas");
+    
+    std::vector<std::uint8_t> rgba(atlas_width * atlas_height * 4);
+    for (int i = 0; i < atlas_width * atlas_height; ++i) {
+        rgba[i * 4 + 0] = 255;
+        rgba[i * 4 + 1] = 255;
+        rgba[i * 4 + 2] = 255;
+        rgba[i * 4 + 3] = bitmap[i];
+    }
+    
+    if (!load_menu_texture_from_rgba(rgba, atlas_width, atlas_height, false, false, menu_font_.texture)) {
+        log_message(LogLevel::Error, "Renderer: failed to create font texture from RGBA data");
+        return false;
+    }
+    
+    for (int i = 0; i < 128; ++i) {
+        MenuGlyph& glyph = menu_font_.glyphs[i];
+        glyph.u0 = ascii_data[i].x0 / static_cast<float>(atlas_width);
+        glyph.v0 = ascii_data[i].y0 / static_cast<float>(atlas_height);
+        glyph.u1 = ascii_data[i].x1 / static_cast<float>(atlas_width);
+        glyph.v1 = ascii_data[i].y1 / static_cast<float>(atlas_height);
+        glyph.width = static_cast<float>(ascii_data[i].x1 - ascii_data[i].x0);
+        glyph.height = static_cast<float>(ascii_data[i].y1 - ascii_data[i].y0);
+        glyph.advance = ascii_data[i].xadvance;
+        glyph.bearing_x = ascii_data[i].xoff;
+        glyph.bearing_y = ascii_data[i].yoff;
+    }
+    
+    for (int i = 0; i < 256; ++i) {
+        MenuGlyph& glyph = menu_font_.glyphs[0x0400 + i];
+        glyph.u0 = cyrillic_data[i].x0 / static_cast<float>(atlas_width);
+        glyph.v0 = cyrillic_data[i].y0 / static_cast<float>(atlas_height);
+        glyph.u1 = cyrillic_data[i].x1 / static_cast<float>(atlas_width);
+        glyph.v1 = cyrillic_data[i].y1 / static_cast<float>(atlas_height);
+        glyph.width = static_cast<float>(cyrillic_data[i].x1 - cyrillic_data[i].x0);
+        glyph.height = static_cast<float>(cyrillic_data[i].y1 - cyrillic_data[i].y0);
+        glyph.advance = cyrillic_data[i].xadvance;
+        glyph.bearing_x = cyrillic_data[i].xoff;
+        glyph.bearing_y = cyrillic_data[i].yoff;
+    }
+    
+    menu_font_.loaded = true;
+    log_message(LogLevel::Info, "Renderer: menu font loaded successfully");
+    return true;
+}
+
+float Renderer::menu_font_text_width(const std::string& text, float target_pixel_height) const {
+    if (!menu_font_.loaded) return 0.0f;
+    float width = 0.0f;
+    const float scale = target_pixel_height / menu_font_.pixel_height;
+    const char* it = text.c_str();
+    const char* end = it + text.size();
+    while (it < end) {
+        const std::uint32_t c = decode_utf8(it, end);
+        if (c < menu_font_.glyphs.size()) {
+            width += menu_font_.glyphs[c].advance * scale;
+        }
+    }
+    return width;
+}
+
+void Renderer::append_menu_font_text(std::vector<Vertex>& vertices, const std::string& text, float x, float y, float target_pixel_height, float viewport_width, float viewport_height, Vec3 color, float rotation_radians) const {
+    if (!menu_font_.loaded) return;
+    float cursor_x = x;
+    const float cursor_y = y;
+    const float scale = target_pixel_height / menu_font_.pixel_height;
+    
+    const float cos_r = std::cos(rotation_radians);
+    const float sin_r = std::sin(rotation_radians);
+    
+    const char* it = text.c_str();
+    const char* end = it + text.size();
+    while (it < end) {
+        const std::uint32_t c = decode_utf8(it, end);
+        if (c < menu_font_.glyphs.size()) {
+            const MenuGlyph& glyph = menu_font_.glyphs[c];
+            if (glyph.width > 0.0f && glyph.height > 0.0f) {
+                const float x0 = cursor_x + glyph.bearing_x * scale;
+                const float y0 = cursor_y + glyph.bearing_y * scale + target_pixel_height * 0.8f;
+                const float x1 = x0 + glyph.width * scale;
+                const float y1 = y0 + glyph.height * scale;
+                
+                auto transform = [&](float vx, float vy) -> std::pair<float, float> {
+                    float dx = vx - x;
+                    float dy = vy - y;
+                    return {x + dx * cos_r - dy * sin_r, y + dx * sin_r + dy * cos_r};
+                };
+                
+                std::pair<float, float> t0 = transform(x0, y0);
+                std::pair<float, float> t1 = transform(x1, y0);
+                std::pair<float, float> t2 = transform(x1, y1);
+                std::pair<float, float> t3 = transform(x0, y1);
+                
+                const float nx0 = (t0.first / viewport_width) * 2.0f - 1.0f;
+                const float ny0 = (t0.second / viewport_height) * 2.0f - 1.0f;
+                const float nx1 = (t1.first / viewport_width) * 2.0f - 1.0f;
+                const float ny1 = (t1.second / viewport_height) * 2.0f - 1.0f;
+                const float nx2 = (t2.first / viewport_width) * 2.0f - 1.0f;
+                const float ny2 = (t2.second / viewport_height) * 2.0f - 1.0f;
+                const float nx3 = (t3.first / viewport_width) * 2.0f - 1.0f;
+                const float ny3 = (t3.second / viewport_height) * 2.0f - 1.0f;
+                
+                vertices.push_back({{nx0, ny0, 0.0f}, color, {glyph.u0, glyph.v0}, 0});
+                vertices.push_back({{nx3, ny3, 0.0f}, color, {glyph.u0, glyph.v1}, 0});
+                vertices.push_back({{nx2, ny2, 0.0f}, color, {glyph.u1, glyph.v1}, 0});
+                
+                vertices.push_back({{nx0, ny0, 0.0f}, color, {glyph.u0, glyph.v0}, 0});
+                vertices.push_back({{nx2, ny2, 0.0f}, color, {glyph.u1, glyph.v1}, 0});
+                vertices.push_back({{nx1, ny1, 0.0f}, color, {glyph.u1, glyph.v0}, 0});
+            }
+            cursor_x += glyph.advance * scale;
+        }
     }
 }
 

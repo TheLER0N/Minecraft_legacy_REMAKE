@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -95,6 +96,25 @@ private:
         std::uint32_t height {0};
     };
 
+    struct MenuGlyph {
+        float u0 {0.0f};
+        float v0 {0.0f};
+        float u1 {0.0f};
+        float v1 {0.0f};
+        float width {0.0f};
+        float height {0.0f};
+        float advance {0.0f};
+        float bearing_x {0.0f};
+        float bearing_y {0.0f};
+    };
+
+    struct MenuFont {
+        MenuTexture texture {};
+        std::array<MenuGlyph, 1280> glyphs {};
+        float pixel_height {32.0f};
+        bool loaded {false};
+    };
+
     bool create_instance();
     bool create_surface(const PlatformWindow& window);
     bool pick_physical_device();
@@ -152,9 +172,13 @@ private:
     bool load_ui_textures();
     bool load_menu_textures();
     bool load_menu_texture(const std::string& path, bool repeat, bool pixelated, MenuTexture& texture);
+    bool load_menu_texture_from_rgba(const std::vector<std::uint8_t>& pixels, std::uint32_t width, std::uint32_t height, bool repeat, bool pixelated, MenuTexture& texture);
+    bool load_menu_font();
     void destroy_menu_texture(MenuTexture& texture);
     void destroy_textures();
     void mark_dynamic_hud_dirty();
+    float menu_font_text_width(const std::string& text, float pixel_height) const;
+    void append_menu_font_text(std::vector<Vertex>& vertices, const std::string& text, float x, float y, float pixel_height, float width, float height, Vec3 color, float rotation_radians = 0.0f) const;
 
     VkInstance instance_ {VK_NULL_HANDLE};
     VkPhysicalDevice physical_device_ {VK_NULL_HANDLE};
@@ -216,6 +240,7 @@ private:
     MenuTexture menu_button_ {};
     MenuTexture menu_button_highlighted_ {};
     MenuTexture menu_logo_ {};
+    MenuFont menu_font_ {};
 
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHasher> chunk_buffers_;
     std::vector<DeferredChunkBuffers> deferred_chunk_buffers_;
@@ -245,6 +270,8 @@ private:
     std::uint32_t menu_overlay_vertex_count_ {0};
     GpuBuffer menu_text_vertex_buffer_ {};
     std::uint32_t menu_text_vertex_count_ {0};
+    GpuBuffer menu_font_vertex_buffer_ {};
+    std::uint32_t menu_font_vertex_count_ {0};
     VkViewport viewport_ {};
     VkRect2D scissor_ {};
     VkExtent2D dynamic_hud_extent_ {};
