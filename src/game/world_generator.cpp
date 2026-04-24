@@ -1510,42 +1510,42 @@ ChunkMesh build_chunk_mesh(
         }
         if (x < 0 && z < 0) {
             return neighbors.northwest != nullptr
-                ? neighbors.northwest->get(kChunkWidth - 1, y, kChunkDepth - 1)
+                ? neighbors.northwest->get(y)
                 : BlockId::Air;
         }
         if (x >= kChunkWidth && z < 0) {
             return neighbors.northeast != nullptr
-                ? neighbors.northeast->get(0, y, kChunkDepth - 1)
+                ? neighbors.northeast->get(y)
                 : BlockId::Air;
         }
         if (x < 0 && z >= kChunkDepth) {
             return neighbors.southwest != nullptr
-                ? neighbors.southwest->get(kChunkWidth - 1, y, 0)
+                ? neighbors.southwest->get(y)
                 : BlockId::Air;
         }
         if (x >= kChunkWidth && z >= kChunkDepth) {
             return neighbors.southeast != nullptr
-                ? neighbors.southeast->get(0, y, 0)
+                ? neighbors.southeast->get(y)
                 : BlockId::Air;
         }
         if (x < 0) {
             return neighbors.west != nullptr && z >= 0 && z < kChunkDepth
-                ? neighbors.west->get(kChunkWidth - 1, y, z)
+                ? neighbors.west->get(y, z)
                 : BlockId::Air;
         }
         if (x >= kChunkWidth) {
             return neighbors.east != nullptr && z >= 0 && z < kChunkDepth
-                ? neighbors.east->get(0, y, z)
+                ? neighbors.east->get(y, z)
                 : BlockId::Air;
         }
         if (z < 0) {
             return neighbors.north != nullptr
-                ? neighbors.north->get(x, y, kChunkDepth - 1)
+                ? neighbors.north->get(x, y)
                 : BlockId::Air;
         }
         if (z >= kChunkDepth) {
             return neighbors.south != nullptr
-                ? neighbors.south->get(x, y, 0)
+                ? neighbors.south->get(x, y)
                 : BlockId::Air;
         }
         return chunk_data.get(x, y, z);

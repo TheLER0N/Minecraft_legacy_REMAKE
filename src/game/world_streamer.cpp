@@ -13,6 +13,8 @@ namespace {
 
 constexpr float kRaycastEpsilon = 0.0001f;
 constexpr float kRaycastTieEpsilon = 0.00001f;
+constexpr int kMinChunkRadius = 2;
+constexpr int kMaxChunkRadius = 100;
 
 bool nearly_equal(float lhs, float rhs) {
     return std::abs(lhs - rhs) <= kRaycastTieEpsilon;
@@ -32,7 +34,7 @@ WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry
     : seed_(seed)
     , block_registry_(block_registry)
     , generator_(block_registry)
-    , chunk_radius_(chunk_radius) {
+    , chunk_radius_(std::clamp(chunk_radius, kMinChunkRadius, kMaxChunkRadius)) {
     const std::size_t worker_count = std::max<std::size_t>(2, std::thread::hardware_concurrency() / 2);
     workers_.reserve(worker_count);
     for (std::size_t i = 0; i < worker_count; ++i) {
@@ -133,6 +135,23 @@ void WorldStreamer::tick_generation_jobs() {
         ++processed;
 
         if (result.type == ChunkJobType::RebuildMesh) {
+            if (result.stale_rebuild) {
+                auto state_it = rebuild_states_.find(result.coord);
+                if (state_it != rebuild_states_.end()) {
+                    state_it->second.queued = false;
+                    state_it->second.dirty = false;
+                }
+                if (logged_rebuild_lifecycle_count_ < 16) {
+                    log_message(
+                        LogLevel::Info,
+                        std::string("WorldStreamer: stale rebuild skipped coord=(") +
+                            std::to_string(result.coord.x) + "," + std::to_string(result.coord.z) + ")"
+                    );
+                    ++logged_rebuild_lifecycle_count_;
+                }
+                queue_rebuild_job_if_loaded_locked(result.coord);
+                continue;
+            }
             auto state_it = rebuild_states_.find(result.coord);
             if (state_it != rebuild_states_.end() && state_it->second.dirty) {
                 state_it->second.queued = false;
@@ -214,8 +233,11 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
 
     const Vec3 planar_forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
 
-    std::sort(
+    const std::size_t upload_count = std::min(max_count, pending_uploads_.size());
+    const auto upload_end = pending_uploads_.begin() + static_cast<std::ptrdiff_t>(upload_count);
+    std::partial_sort(
         pending_uploads_.begin(),
+        upload_end,
         pending_uploads_.end(),
         [&](const PendingChunkUpload& lhs, const PendingChunkUpload& rhs) {
             return chunk_priority_score(lhs.coord, observer_position, planar_forward) <
@@ -223,7 +245,6 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
         }
     );
 
-    const std::size_t upload_count = std::min(max_count, pending_uploads_.size());
     std::vector<PendingChunkUpload> uploads;
     uploads.reserve(upload_count);
     for (std::size_t i = 0; i < upload_count; ++i) {
@@ -452,6 +473,22 @@ LeavesRenderMode WorldStreamer::leaves_render_mode() const {
     return leaves_render_mode_;
 }
 
+int WorldStreamer::chunk_radius() const {
+    return chunk_radius_;
+}
+
+void WorldStreamer::set_chunk_radius(int radius) {
+    const int clamped_radius = std::clamp(radius, kMinChunkRadius, kMaxChunkRadius);
+    if (clamped_radius == chunk_radius_) {
+        return;
+    }
+
+    chunk_radius_ = clamped_radius;
+    observer_chunk_ = {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+    log_message(LogLevel::Info, std::string("WorldStreamer: render distance set to ") + std::to_string(chunk_radius_));
+    update_observer(observer_position_, observer_forward_);
+}
+
 void WorldStreamer::worker_loop() {
     while (true) {
         ChunkJob job {};
@@ -475,6 +512,18 @@ void WorldStreamer::worker_loop() {
         if (job.type == ChunkJobType::GenerateChunk) {
             result.chunk_data = generator_.generate_chunk(job.coord, seed_);
         } else if (job.snapshot.has_value()) {
+            {
+                std::lock_guard lock(mutex_);
+                const auto state_it = rebuild_states_.find(job.coord);
+                if (state_it == rebuild_states_.end() || state_it->second.serial != job.rebuild_serial) {
+                    result.stale_rebuild = true;
+                }
+            }
+            if (result.stale_rebuild) {
+                std::lock_guard lock(mutex_);
+                completed_.push(std::move(result));
+                continue;
+            }
             const ChunkMeshSnapshot& snapshot = *job.snapshot;
             result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), snapshot.leaves_mode);
         }
@@ -543,7 +592,7 @@ void WorldStreamer::push_job_locked(ChunkJob&& job) {
 void WorldStreamer::queue_generate_job(ChunkCoord coord, std::uint64_t version) {
     {
         std::lock_guard lock(mutex_);
-        push_job_locked({coord, version, ChunkJobType::GenerateChunk, std::nullopt});
+        push_job_locked({coord, version, 0, ChunkJobType::GenerateChunk, std::nullopt});
     }
     cv_.notify_one();
 }
@@ -557,6 +606,7 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
     auto state_it = rebuild_states_.find(coord);
     if (state_it != rebuild_states_.end() && state_it->second.queued) {
         state_it->second.dirty = true;
+        state_it->second.serial = next_rebuild_serial_++;
         if (logged_rebuild_lifecycle_count_ < 16) {
             log_message(
                 LogLevel::Info,
@@ -576,25 +626,69 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
     RebuildState& state = rebuild_states_[coord];
     state.queued = true;
     state.dirty = false;
+    state.serial = next_rebuild_serial_++;
     if (logged_rebuild_lifecycle_count_ < 16) {
         log_message(
             LogLevel::Info,
             std::string("WorldStreamer: rebuild queued coord=(") +
                 std::to_string(coord.x) + "," + std::to_string(coord.z) + ")"
         );
-        ++logged_rebuild_lifecycle_count_;
+            ++logged_rebuild_lifecycle_count_;
     }
-    push_job_locked({coord, snapshot->version, ChunkJobType::RebuildMesh, std::move(snapshot)});
+    push_job_locked({coord, snapshot->version, state.serial, ChunkJobType::RebuildMesh, std::move(snapshot)});
     cv_.notify_one();
 }
 
 std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snapshot(ChunkCoord coord) const {
-    const auto chunk_data = [this](ChunkCoord neighbor_coord) -> std::optional<ChunkData> {
+    const auto find_chunk_data = [this](ChunkCoord neighbor_coord) -> const ChunkData* {
         const auto it = chunks_.find(neighbor_coord);
         if (it == chunks_.end() || !it->second.data.has_value()) {
+            return nullptr;
+        }
+        return &*it->second.data;
+    };
+
+    const auto side_x = [&](ChunkCoord neighbor_coord, int source_x) -> std::optional<ChunkSideBorderX> {
+        const ChunkData* chunk = find_chunk_data(neighbor_coord);
+        if (chunk == nullptr) {
             return std::nullopt;
         }
-        return *it->second.data;
+
+        ChunkSideBorderX border {};
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int z = 0; z < kChunkDepth; ++z) {
+                border.blocks[static_cast<std::size_t>(z + y * kChunkDepth)] = chunk->get(source_x, y, z);
+            }
+        }
+        return border;
+    };
+
+    const auto side_z = [&](ChunkCoord neighbor_coord, int source_z) -> std::optional<ChunkSideBorderZ> {
+        const ChunkData* chunk = find_chunk_data(neighbor_coord);
+        if (chunk == nullptr) {
+            return std::nullopt;
+        }
+
+        ChunkSideBorderZ border {};
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                border.blocks[static_cast<std::size_t>(x + y * kChunkWidth)] = chunk->get(x, y, source_z);
+            }
+        }
+        return border;
+    };
+
+    const auto corner = [&](ChunkCoord neighbor_coord, int source_x, int source_z) -> std::optional<ChunkCornerBorder> {
+        const ChunkData* chunk = find_chunk_data(neighbor_coord);
+        if (chunk == nullptr) {
+            return std::nullopt;
+        }
+
+        ChunkCornerBorder border {};
+        for (int y = 0; y < kChunkHeight; ++y) {
+            border.blocks[static_cast<std::size_t>(y)] = chunk->get(source_x, y, source_z);
+        }
+        return border;
     };
 
     const auto chunk_it = chunks_.find(coord);
@@ -606,14 +700,14 @@ std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snap
         chunk_it->second.version,
         leaves_render_mode_,
         *chunk_it->second.data,
-        chunk_data({coord.x - 1, coord.z}),
-        chunk_data({coord.x + 1, coord.z}),
-        chunk_data({coord.x, coord.z - 1}),
-        chunk_data({coord.x, coord.z + 1}),
-        chunk_data({coord.x - 1, coord.z - 1}),
-        chunk_data({coord.x + 1, coord.z - 1}),
-        chunk_data({coord.x - 1, coord.z + 1}),
-        chunk_data({coord.x + 1, coord.z + 1})
+        side_x({coord.x - 1, coord.z}, kChunkWidth - 1),
+        side_x({coord.x + 1, coord.z}, 0),
+        side_z({coord.x, coord.z - 1}, kChunkDepth - 1),
+        side_z({coord.x, coord.z + 1}, 0),
+        corner({coord.x - 1, coord.z - 1}, kChunkWidth - 1, kChunkDepth - 1),
+        corner({coord.x + 1, coord.z - 1}, 0, kChunkDepth - 1),
+        corner({coord.x - 1, coord.z + 1}, kChunkWidth - 1, 0),
+        corner({coord.x + 1, coord.z + 1}, 0, 0)
     };
 }
 

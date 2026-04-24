@@ -91,6 +91,7 @@ add_executable(minecraft_legacy
     src/main.cpp
     src/app/application.cpp
     src/platform/platform_app.cpp
+    src/platform/stb_vorbis_impl.cpp
     src/render/renderer.cpp
     src/game/block.cpp
     src/game/world_generator.cpp
@@ -98,6 +99,12 @@ add_executable(minecraft_legacy
     src/game/debug_camera.cpp
     src/game/player_controller.cpp
 )
+
+if(MSVC)
+    set_source_files_properties(src/platform/stb_vorbis_impl.cpp PROPERTIES
+        COMPILE_OPTIONS "/wd4244;/wd4245;/wd4456;/wd4457;/wd4701"
+    )
+endif()
 
 add_dependencies(minecraft_legacy compile_shaders)
 

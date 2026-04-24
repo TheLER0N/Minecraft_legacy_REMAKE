@@ -36,6 +36,7 @@ public:
 
     bool initialize(const PlatformWindow& window, const std::string& shader_directory);
     void begin_frame(const CameraFrameData& camera);
+    void draw_startup_splash(float time_seconds, float fade_multiplier);
     void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
     void upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh);
     void unload_chunk_mesh(ChunkCoord coord);
@@ -141,6 +142,7 @@ private:
     bool create_command_buffers();
     bool create_sync_objects();
     void destroy_swapchain_objects();
+    VkExtent2D current_surface_extent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     bool recreate_swapchain_if_needed();
     void defer_destroy_chunk_buffers(ChunkRenderData&& render_data);
     void retire_deferred_chunk_buffers();
@@ -164,6 +166,7 @@ private:
     void draw_hotbar(const FrameResources& frame);
     void update_debug_hud_buffer();
     void draw_debug_hud(const FrameResources& frame);
+    void update_startup_splash_buffers(float time_seconds, float fade_multiplier);
     void update_main_menu_buffers(float time_seconds, bool use_night_panorama, int hovered_button);
     void draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set);
     void draw_colored_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkPipeline pipeline);
@@ -181,6 +184,7 @@ private:
     void append_menu_font_text(std::vector<Vertex>& vertices, const std::string& text, float x, float y, float pixel_height, float width, float height, Vec3 color, float rotation_radians = 0.0f) const;
 
     VkInstance instance_ {VK_NULL_HANDLE};
+    SDL_Window* window_handle_ {nullptr};
     VkPhysicalDevice physical_device_ {VK_NULL_HANDLE};
     VkDevice device_ {VK_NULL_HANDLE};
     VkQueue graphics_queue_ {VK_NULL_HANDLE};
@@ -240,6 +244,9 @@ private:
     MenuTexture menu_button_ {};
     MenuTexture menu_button_highlighted_ {};
     MenuTexture menu_logo_ {};
+    MenuTexture startup_pic_ {};
+    MenuTexture startup_mojang_ {};
+    MenuTexture startup_king_ {};
     MenuFont menu_font_ {};
 
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHasher> chunk_buffers_;
@@ -272,6 +279,11 @@ private:
     std::uint32_t menu_text_vertex_count_ {0};
     GpuBuffer menu_font_vertex_buffer_ {};
     std::uint32_t menu_font_vertex_count_ {0};
+    GpuBuffer startup_splash_vertex_buffer_ {};
+    std::uint32_t startup_splash_vertex_count_ {0};
+    GpuBuffer startup_splash_background_vertex_buffer_ {};
+    std::uint32_t startup_splash_background_vertex_count_ {0};
+    std::uint32_t startup_splash_texture_index_ {0};
     VkViewport viewport_ {};
     VkRect2D scissor_ {};
     VkExtent2D dynamic_hud_extent_ {};

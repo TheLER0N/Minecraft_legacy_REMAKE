@@ -23,6 +23,7 @@ public:
 
 private:
     enum class AppState {
+        StartupSplash,
         MainMenu,
         InWorld
     };
@@ -49,10 +50,16 @@ private:
     DebugCamera camera_;
     PlayerController player_;
     std::unique_ptr<WorldStreamer> world_streamer_;
-    AppState app_state_ {AppState::MainMenu};
+    AppState app_state_ {AppState::StartupSplash};
     bool menu_uses_night_panorama_ {false};
+    bool menu_exit_requested_ {false};
+    bool startup_skip_requested_ {false};
+    float startup_splash_seconds_ {0.0f};
+    float startup_skip_fade_seconds_ {0.0f};
     float menu_time_seconds_ {0.0f};
+    float menu_exit_delay_seconds_ {0.0f};
     int last_hovered_menu_button_ {-1};
+    int selected_menu_button_ {0};
     std::optional<BlockHit> hovered_block_;
     BlockBreakState block_break_ {};
     LeavesRenderMode leaves_render_mode_ {LeavesRenderMode::Fancy};

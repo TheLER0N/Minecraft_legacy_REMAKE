@@ -44,6 +44,8 @@ public:
     SetBlockResult set_block_at_world(int x, int y, int z, BlockId block);
     void set_leaves_render_mode(LeavesRenderMode mode);
     LeavesRenderMode leaves_render_mode() const;
+    int chunk_radius() const;
+    void set_chunk_radius(int radius);
 
 private:
     enum class ChunkJobType {
@@ -55,19 +57,20 @@ private:
         std::uint64_t version {0};
         LeavesRenderMode leaves_mode {LeavesRenderMode::Fancy};
         ChunkData chunk {};
-        std::optional<ChunkData> west {};
-        std::optional<ChunkData> east {};
-        std::optional<ChunkData> north {};
-        std::optional<ChunkData> south {};
-        std::optional<ChunkData> northwest {};
-        std::optional<ChunkData> northeast {};
-        std::optional<ChunkData> southwest {};
-        std::optional<ChunkData> southeast {};
+        std::optional<ChunkSideBorderX> west {};
+        std::optional<ChunkSideBorderX> east {};
+        std::optional<ChunkSideBorderZ> north {};
+        std::optional<ChunkSideBorderZ> south {};
+        std::optional<ChunkCornerBorder> northwest {};
+        std::optional<ChunkCornerBorder> northeast {};
+        std::optional<ChunkCornerBorder> southwest {};
+        std::optional<ChunkCornerBorder> southeast {};
     };
 
     struct ChunkJob {
         ChunkCoord coord {};
         std::uint64_t version {0};
+        std::uint64_t rebuild_serial {0};
         ChunkJobType type {ChunkJobType::GenerateChunk};
         std::optional<ChunkMeshSnapshot> snapshot {};
     };
@@ -76,6 +79,7 @@ private:
         ChunkCoord coord {};
         std::uint64_t version {0};
         ChunkJobType type {ChunkJobType::GenerateChunk};
+        bool stale_rebuild {false};
         std::optional<ChunkData> chunk_data {};
         ChunkMesh mesh {};
     };
@@ -94,6 +98,7 @@ private:
     struct RebuildState {
         bool queued {false};
         bool dirty {false};
+        std::uint64_t serial {0};
     };
 
     void worker_loop();
@@ -130,6 +135,7 @@ private:
     Vec3 observer_position_ {};
     Vec3 observer_forward_ {0.0f, 0.0f, -1.0f};
     std::uint64_t next_chunk_version_ {1};
+    std::uint64_t next_rebuild_serial_ {1};
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
 };

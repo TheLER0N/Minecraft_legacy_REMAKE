@@ -121,14 +121,14 @@ VkPresentModeKHR choose_present_mode(const std::vector<VkPresentModeKHR>& modes)
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
-VkExtent2D choose_extent(const VkSurfaceCapabilitiesKHR& capabilities) {
+VkExtent2D choose_extent(const VkSurfaceCapabilitiesKHR& capabilities, std::uint32_t preferred_width, std::uint32_t preferred_height) {
     if (capabilities.currentExtent.width != std::numeric_limits<std::uint32_t>::max()) {
         return capabilities.currentExtent;
     }
 
     return {
-        std::clamp(1600u, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
-        std::clamp(900u, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
+        std::clamp(preferred_width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+        std::clamp(preferred_height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
     };
 }
 
@@ -244,12 +244,12 @@ void append_hud_textured_quad(
     float u0,
     float v0,
     float u1,
-    float v1) {
+    float v1,
+    Vec3 color = {1.0f, 1.0f, 1.0f}) {
     const float x0 = screen_x_to_ndc(left, width);
     const float x1 = screen_x_to_ndc(right, width);
     const float y0 = screen_y_to_ndc(top, height);
     const float y1 = screen_y_to_ndc(bottom, height);
-    const Vec3 color {1.0f, 1.0f, 1.0f};
 
     vertices.push_back({{x0, y0, 0.0f}, color, {u0, v0}, 0});
     vertices.push_back({{x0, y1, 0.0f}, color, {u0, v1}, 0});
@@ -448,9 +448,56 @@ float ping_pong_offset(float time_seconds, float speed, float travel, float star
     return clamp(offset, 0.0f, travel);
 }
 
-float menu_integer_scale(float width, float height) {
-    const float fit_scale = std::min(width / 640.0f, height / 360.0f);
-    return std::max(1.0f, std::floor(fit_scale));
+constexpr float kMenuVirtualWidth = 640.0f;
+constexpr float kMenuVirtualHeight = 360.0f;
+constexpr float kMenuLogoWidth = 300.0f;
+constexpr float kMenuLogoTop = 28.0f;
+constexpr float kMenuButtonWidth = 224.0f;
+constexpr float kMenuButtonHeight = 20.0f;
+constexpr float kMenuButtonGap = 5.0f;
+constexpr float kMenuFirstButtonTop = 126.0f;
+constexpr float kStartupSplashIntroBlackSeconds = 0.8f;
+constexpr float kStartupSplashFirstImageSeconds = 5.0f;
+constexpr float kStartupSplashOtherImageSeconds = 3.0f;
+constexpr float kStartupSplashFadeSeconds = 0.5f;
+
+float menu_layout_scale(float width, float height) {
+    const float fit_scale = std::min(width / kMenuVirtualWidth, height / kMenuVirtualHeight);
+    return std::max(1.0f, fit_scale);
+}
+
+float startup_splash_brightness(float local_time, float image_duration) {
+    if (local_time < kStartupSplashFadeSeconds) {
+        return clamp(local_time / kStartupSplashFadeSeconds, 0.0f, 1.0f);
+    }
+    if (local_time > image_duration - kStartupSplashFadeSeconds) {
+        return clamp((image_duration - local_time) / kStartupSplashFadeSeconds, 0.0f, 1.0f);
+    }
+    return 1.0f;
+}
+
+int startup_splash_image_index(float sequence_time) {
+    if (sequence_time < kStartupSplashFirstImageSeconds) {
+        return 0;
+    }
+    if (sequence_time < kStartupSplashFirstImageSeconds + kStartupSplashOtherImageSeconds) {
+        return 1;
+    }
+    return 2;
+}
+
+float startup_splash_local_time(float sequence_time, int image_index) {
+    if (image_index == 0) {
+        return sequence_time;
+    }
+    if (image_index == 1) {
+        return sequence_time - kStartupSplashFirstImageSeconds;
+    }
+    return sequence_time - kStartupSplashFirstImageSeconds - kStartupSplashOtherImageSeconds;
+}
+
+float startup_splash_image_duration(int image_index) {
+    return image_index == 0 ? kStartupSplashFirstImageSeconds : kStartupSplashOtherImageSeconds;
 }
 
 void append_pixel_text(
@@ -505,6 +552,7 @@ Renderer::~Renderer() {
 }
 
 bool Renderer::initialize(const PlatformWindow& window, const std::string& shader_directory) {
+    window_handle_ = window.handle;
     log_message(LogLevel::Info, "Renderer: create_instance");
     if (!create_instance()) {
         log_message(LogLevel::Error, "Renderer: create_instance failed");
@@ -698,6 +746,25 @@ void Renderer::draw_main_menu(float time_seconds, bool use_night_panorama, int h
     draw_colored_buffer(frame, menu_text_vertex_buffer_, menu_text_vertex_count_, hotbar_fill_pipeline_);
 }
 
+void Renderer::draw_startup_splash(float time_seconds, float fade_multiplier) {
+    if (!frame_started_) {
+        return;
+    }
+
+    update_startup_splash_buffers(time_seconds, fade_multiplier);
+
+    const FrameResources& frame = frames_[current_frame_];
+    draw_colored_buffer(frame, startup_splash_background_vertex_buffer_, startup_splash_background_vertex_count_, hotbar_fill_pipeline_);
+
+    const MenuTexture* texture = &startup_pic_;
+    if (startup_splash_texture_index_ == 1) {
+        texture = &startup_mojang_;
+    } else if (startup_splash_texture_index_ == 2) {
+        texture = &startup_king_;
+    }
+    draw_textured_buffer(frame, startup_splash_vertex_buffer_, startup_splash_vertex_count_, texture->descriptor_set);
+}
+
 void Renderer::unload_chunk_mesh(ChunkCoord coord) {
     auto existing = chunk_buffers_.find(coord);
     if (existing == chunk_buffers_.end()) {
@@ -885,6 +952,8 @@ void Renderer::shutdown() {
     destroy_buffer(menu_overlay_vertex_buffer_);
     destroy_buffer(menu_text_vertex_buffer_);
     destroy_buffer(menu_font_vertex_buffer_);
+    destroy_buffer(startup_splash_vertex_buffer_);
+    destroy_buffer(startup_splash_background_vertex_buffer_);
 
     for (auto& frame : frames_) {
         if (frame.image_available != VK_NULL_HANDLE) {
@@ -1149,7 +1218,7 @@ bool Renderer::create_swapchain() {
 
     const VkSurfaceFormatKHR surface_format = choose_surface_format(formats);
     const VkPresentModeKHR present_mode = choose_present_mode(present_modes);
-    const VkExtent2D extent = choose_extent(capabilities);
+    const VkExtent2D extent = current_surface_extent(capabilities);
 
     std::uint32_t image_count = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount) {
@@ -1720,10 +1789,47 @@ void Renderer::destroy_swapchain_objects() {
     }
 }
 
+VkExtent2D Renderer::current_surface_extent(const VkSurfaceCapabilitiesKHR& capabilities) const {
+    std::uint32_t preferred_width = 1600;
+    std::uint32_t preferred_height = 900;
+    if (window_handle_ != nullptr) {
+        int pixel_width = 0;
+        int pixel_height = 0;
+        if (SDL_GetWindowSizeInPixels(window_handle_, &pixel_width, &pixel_height) && pixel_width > 0 && pixel_height > 0) {
+            preferred_width = static_cast<std::uint32_t>(pixel_width);
+            preferred_height = static_cast<std::uint32_t>(pixel_height);
+        }
+    }
+    return choose_extent(capabilities, preferred_width, preferred_height);
+}
+
 bool Renderer::recreate_swapchain_if_needed() {
-    if (swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+    if (device_ == VK_NULL_HANDLE || surface_ == VK_NULL_HANDLE) {
         return false;
     }
+
+    VkSurfaceCapabilitiesKHR capabilities {};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device_, surface_, &capabilities);
+    const VkExtent2D desired_extent = current_surface_extent(capabilities);
+    if (desired_extent.width == 0 || desired_extent.height == 0) {
+        return false;
+    }
+    if (desired_extent.width == swapchain_extent_.width && desired_extent.height == swapchain_extent_.height) {
+        return true;
+    }
+
+    vkDeviceWaitIdle(device_);
+    destroy_swapchain_objects();
+    if (!create_swapchain() || !create_image_views() || !create_depth_resources() || !create_framebuffers()) {
+        log_message(LogLevel::Error, "Renderer: failed to recreate swapchain");
+        return false;
+    }
+    dynamic_hud_extent_ = {};
+    mark_dynamic_hud_dirty();
+    log_message(
+        LogLevel::Info,
+        std::string("Renderer: swapchain resized to ") + std::to_string(swapchain_extent_.width) + "x" + std::to_string(swapchain_extent_.height)
+    );
     return true;
 }
 
@@ -2257,6 +2363,77 @@ void Renderer::draw_crosshair(const FrameResources& frame) {
     vkCmdDraw(frame.command_buffer, crosshair_vertex_count_, 1, 0, 0);
 }
 
+void Renderer::update_startup_splash_buffers(float time_seconds, float fade_multiplier) {
+    startup_splash_vertex_count_ = 0;
+    startup_splash_background_vertex_count_ = 0;
+    if (swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+        return;
+    }
+
+    const float width = static_cast<float>(swapchain_extent_.width);
+    const float height = static_cast<float>(swapchain_extent_.height);
+
+    std::vector<Vertex> background_vertices;
+    background_vertices.reserve(6);
+    append_hud_rect_fill(background_vertices, 0.0f, 0.0f, width, height, width, height, {0.0f, 0.0f, 0.0f});
+    startup_splash_background_vertex_count_ = static_cast<std::uint32_t>(background_vertices.size());
+    upload_dynamic_buffer(startup_splash_background_vertex_buffer_, background_vertices);
+
+    const float sequence_time = time_seconds - kStartupSplashIntroBlackSeconds;
+    if (sequence_time < 0.0f) {
+        return;
+    }
+
+    const int image_index = startup_splash_image_index(sequence_time);
+    startup_splash_texture_index_ = static_cast<std::uint32_t>(image_index);
+    const float local_time = startup_splash_local_time(sequence_time, image_index);
+    const float brightness = clamp(startup_splash_brightness(local_time, startup_splash_image_duration(image_index)) * fade_multiplier, 0.0f, 1.0f);
+
+    const MenuTexture* texture = &startup_pic_;
+    if (image_index == 1) {
+        texture = &startup_mojang_;
+    } else if (image_index == 2) {
+        texture = &startup_king_;
+    }
+
+    if (texture->width == 0 || texture->height == 0 || brightness <= 0.0f) {
+        return;
+    }
+
+    const float image_ratio = static_cast<float>(texture->width) / static_cast<float>(texture->height);
+    const float screen_ratio = width / height;
+    float draw_width = width;
+    float draw_height = height;
+    if (image_ratio > screen_ratio) {
+        draw_height = height;
+        draw_width = draw_height * image_ratio;
+    } else {
+        draw_width = width;
+        draw_height = draw_width / image_ratio;
+    }
+    const float left = (width - draw_width) * 0.5f;
+    const float top = (height - draw_height) * 0.5f;
+
+    std::vector<Vertex> image_vertices;
+    image_vertices.reserve(6);
+    append_hud_textured_quad(
+        image_vertices,
+        left,
+        top,
+        left + draw_width,
+        top + draw_height,
+        width,
+        height,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        {brightness, brightness, brightness}
+    );
+    startup_splash_vertex_count_ = static_cast<std::uint32_t>(image_vertices.size());
+    upload_dynamic_buffer(startup_splash_vertex_buffer_, image_vertices);
+}
+
 void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panorama, int hovered_button) {
     menu_panorama_vertex_count_ = 0;
     menu_logo_vertex_count_ = 0;
@@ -2271,7 +2448,9 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
 
     const float width = static_cast<float>(swapchain_extent_.width);
     const float height = static_cast<float>(swapchain_extent_.height);
-    const float scale = menu_integer_scale(width, height);
+    const float scale = menu_layout_scale(width, height);
+    const float ui_origin_x = (width - kMenuVirtualWidth * scale) * 0.5f;
+    const float ui_origin_y = (height - kMenuVirtualHeight * scale) * 0.5f;
     const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
 
     std::vector<Vertex> panorama_vertices;
@@ -2291,10 +2470,10 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
 
     std::vector<Vertex> logo_vertices;
     logo_vertices.reserve(6);
-    const float logo_width = std::min(width * 0.46f, 857.0f * scale * 0.32f);
+    const float logo_width = kMenuLogoWidth * scale;
     const float logo_height = logo_width * (207.0f / 857.0f);
-    const float logo_left = (width - logo_width) * 0.5f;
-    const float logo_top = height * 0.075f;
+    const float logo_left = ui_origin_x + (kMenuVirtualWidth * scale - logo_width) * 0.5f;
+    const float logo_top = ui_origin_y + kMenuLogoTop * scale;
     append_hud_textured_quad(logo_vertices, logo_left, logo_top, logo_left + logo_width, logo_top + logo_height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
     menu_logo_vertex_count_ = static_cast<std::uint32_t>(logo_vertices.size());
     upload_dynamic_buffer(menu_logo_vertex_buffer_, logo_vertices);
@@ -2305,19 +2484,19 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
         "Leaderboards",
         "Help & Options",
         "Minecraft Store",
-        "Launch New Minecraft"
+        "Exit Game"
     }};
-    const float button_width = 200.0f * scale;
-    const float button_height = 20.0f * scale;
-    const float gap = 5.0f * scale;
-    const float left = (width - button_width) * 0.5f;
-    const float first_top = height * 0.35f;
+    const float button_width = kMenuButtonWidth * scale;
+    const float button_height = kMenuButtonHeight * scale;
+    const float gap = kMenuButtonGap * scale;
+    const float left = ui_origin_x + (kMenuVirtualWidth - kMenuButtonWidth) * 0.5f * scale;
+    const float first_top = ui_origin_y + kMenuFirstButtonTop * scale;
 
     std::vector<Vertex> button_vertices;
     std::vector<Vertex> button_highlight_vertices;
     std::vector<Vertex> text_vertices;
     std::vector<Vertex> font_vertices;
-    button_vertices.reserve(6 * 5);
+    button_vertices.reserve(6 * labels.size());
     button_highlight_vertices.reserve(6);
     text_vertices.reserve(6000);
     font_vertices.reserve(6000);
@@ -2328,7 +2507,7 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
         append_hud_textured_quad(target, left, top, left + button_width, top + button_height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
 
         const std::string label = labels[i];
-        const float preferred_text_scale = std::max(1.2f, scale * 1.12f);
+        const float preferred_text_scale = std::max(1.0f, scale);
         const float text_scale = std::max(1.0f, std::min(preferred_text_scale, (button_width * 0.82f) / pixel_text_width(label, 1.0f)));
         const float font_pixel_height = 8.0f * preferred_text_scale;
         const float text_width = menu_font_.loaded ? menu_font_text_width(label, font_pixel_height) : pixel_text_width(label, text_scale);
@@ -2342,29 +2521,51 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
         const float text_left = left + (button_width - actual_text_width) * 0.5f;
         const float text_top = top + (button_height - actual_pixel_height) * 0.5f;
         const Vec3 text_color = static_cast<int>(i) == hovered_button ? Vec3 {1.0f, 1.0f, 0.25f} : Vec3 {1.0f, 1.0f, 1.0f};
+        const float outline = std::max(1.0f, scale * 0.55f);
+        const std::array<Vec2, 8> outline_offsets {{
+            {-outline, 0.0f},
+            {outline, 0.0f},
+            {0.0f, -outline},
+            {0.0f, outline},
+            {-outline, -outline},
+            {outline, -outline},
+            {-outline, outline},
+            {outline, outline}
+        }};
         
         if (menu_font_.loaded) {
-            append_menu_font_text(font_vertices, label, text_left + std::max(1.0f, scale * 0.4f), text_top + std::max(1.0f, scale * 0.4f), actual_pixel_height, width, height, {0.0f, 0.0f, 0.0f});
+            for (const Vec2& offset : outline_offsets) {
+                append_menu_font_text(font_vertices, label, text_left + offset.x, text_top + offset.y, actual_pixel_height, width, height, {0.0f, 0.0f, 0.0f});
+            }
             append_menu_font_text(font_vertices, label, text_left, text_top, actual_pixel_height, width, height, text_color);
         } else {
-            append_pixel_text(text_vertices, label, text_left + std::max(1.0f, scale * 0.4f), text_top + std::max(1.0f, scale * 0.4f), text_scale, width, height, {0.0f, 0.0f, 0.0f});
+            for (const Vec2& offset : outline_offsets) {
+                append_pixel_text(text_vertices, label, text_left + offset.x, text_top + offset.y, text_scale, width, height, {0.0f, 0.0f, 0.0f});
+            }
             append_pixel_text(text_vertices, label, text_left, text_top, text_scale, width, height, text_color);
         }
     }
 
-    const std::string splash = "WHAT DOES THE FOX SAY?";
-    const float splash_scale = std::max(1.5f, std::min(scale * 1.45f, (width * 0.30f) / pixel_text_width(splash, 1.0f)));
-    const float splash_font_height = 12.0f * splash_scale;
-    const float splash_actual_width = menu_font_.loaded ? menu_font_text_width(splash, splash_font_height) : pixel_text_width(splash, splash_scale);
-    const float splash_left = std::min(width * 0.54f, width - splash_actual_width - width * 0.08f);
-    const float splash_top = logo_top + logo_height * 0.42f;
+    const std::string splash = "Make me a table, a funky table!";
+    const float splash_max_width = 190.0f * scale;
+    float splash_font_height = 10.0f * scale;
+    float splash_text_scale = scale;
+    const float splash_width = menu_font_.loaded ? menu_font_text_width(splash, splash_font_height) : pixel_text_width(splash, splash_text_scale);
+    if (splash_width > splash_max_width) {
+        const float shrink = splash_max_width / splash_width;
+        splash_font_height *= shrink;
+        splash_text_scale *= shrink;
+    }
+    const float splash_left = ui_origin_x + 350.0f * scale;
+    const float splash_top = ui_origin_y + 88.0f * scale;
+    constexpr float kSplashRotation = -0.23f;
     
     if (menu_font_.loaded) {
-        append_menu_font_text(font_vertices, splash, splash_left + 2.0f, splash_top + 2.0f, splash_font_height, width, height, {0.25f, 0.25f, 0.0f}, -0.34f);
-        append_menu_font_text(font_vertices, splash, splash_left, splash_top, splash_font_height, width, height, {1.0f, 1.0f, 0.0f}, -0.34f);
+        append_menu_font_text(font_vertices, splash, splash_left + 1.0f * scale, splash_top + 1.0f * scale, splash_font_height, width, height, {0.25f, 0.25f, 0.0f}, kSplashRotation);
+        append_menu_font_text(font_vertices, splash, splash_left, splash_top, splash_font_height, width, height, {1.0f, 1.0f, 0.0f}, kSplashRotation);
     } else {
-        append_pixel_text(text_vertices, splash, splash_left + 2.0f, splash_top + 2.0f, splash_scale, width, height, {0.25f, 0.25f, 0.0f}, -0.34f);
-        append_pixel_text(text_vertices, splash, splash_left, splash_top, splash_scale, width, height, {1.0f, 1.0f, 0.0f}, -0.34f);
+        append_pixel_text(text_vertices, splash, splash_left + 1.0f * scale, splash_top + 1.0f * scale, splash_text_scale, width, height, {0.25f, 0.25f, 0.0f}, kSplashRotation);
+        append_pixel_text(text_vertices, splash, splash_left, splash_top, splash_text_scale, width, height, {1.0f, 1.0f, 0.0f}, kSplashRotation);
     }
 
     menu_button_vertex_count_ = static_cast<std::uint32_t>(button_vertices.size());
@@ -2882,7 +3083,10 @@ bool Renderer::load_menu_textures() {
         load_menu_texture("assets/panorama/panorama_tu69_night.png", false, false, menu_panorama_night_) &&
         load_menu_texture("assets/button/button.png", false, true, menu_button_) &&
         load_menu_texture("assets/button/button_highlighted.png", false, true, menu_button_highlighted_) &&
-        load_menu_texture("assets/sound/ui/logo/legacy_console_edition_logo.png.png", false, true, menu_logo_);
+        load_menu_texture("assets/sound/ui/logo/legacy_console_edition_logo.png.png", false, true, menu_logo_) &&
+        load_menu_texture("assets/photo/pic.png", false, false, startup_pic_) &&
+        load_menu_texture("assets/photo/mojang.png", false, false, startup_mojang_) &&
+        load_menu_texture("assets/photo/KING.png", false, false, startup_king_);
 }
 
 bool Renderer::load_menu_texture(const std::string& path, bool repeat, bool pixelated, MenuTexture& texture) {
@@ -3120,6 +3324,9 @@ void Renderer::destroy_textures() {
     destroy_menu_texture(menu_button_);
     destroy_menu_texture(menu_button_highlighted_);
     destroy_menu_texture(menu_logo_);
+    destroy_menu_texture(startup_pic_);
+    destroy_menu_texture(startup_mojang_);
+    destroy_menu_texture(startup_king_);
 
     if (ui_descriptor_pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device_, ui_descriptor_pool_, nullptr);

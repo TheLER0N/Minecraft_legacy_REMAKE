@@ -3,6 +3,9 @@
 #include "game/block.hpp"
 #include "game/world_types.hpp"
 
+#include <array>
+#include <cstddef>
+
 namespace ml {
 
 enum class LeavesRenderMode : std::uint8_t {
@@ -28,15 +31,39 @@ private:
     const BlockRegistry& block_registry_;
 };
 
+struct ChunkSideBorderX {
+    std::array<BlockId, static_cast<std::size_t>(kChunkDepth * kChunkHeight)> blocks {};
+
+    BlockId get(int y, int z) const {
+        return blocks[static_cast<std::size_t>(z + y * kChunkDepth)];
+    }
+};
+
+struct ChunkSideBorderZ {
+    std::array<BlockId, static_cast<std::size_t>(kChunkWidth * kChunkHeight)> blocks {};
+
+    BlockId get(int x, int y) const {
+        return blocks[static_cast<std::size_t>(x + y * kChunkWidth)];
+    }
+};
+
+struct ChunkCornerBorder {
+    std::array<BlockId, static_cast<std::size_t>(kChunkHeight)> blocks {};
+
+    BlockId get(int y) const {
+        return blocks[static_cast<std::size_t>(y)];
+    }
+};
+
 struct ChunkMeshNeighbors {
-    const ChunkData* west {nullptr};
-    const ChunkData* east {nullptr};
-    const ChunkData* north {nullptr};
-    const ChunkData* south {nullptr};
-    const ChunkData* northwest {nullptr};
-    const ChunkData* northeast {nullptr};
-    const ChunkData* southwest {nullptr};
-    const ChunkData* southeast {nullptr};
+    const ChunkSideBorderX* west {nullptr};
+    const ChunkSideBorderX* east {nullptr};
+    const ChunkSideBorderZ* north {nullptr};
+    const ChunkSideBorderZ* south {nullptr};
+    const ChunkCornerBorder* northwest {nullptr};
+    const ChunkCornerBorder* northeast {nullptr};
+    const ChunkCornerBorder* southwest {nullptr};
+    const ChunkCornerBorder* southeast {nullptr};
 };
 
 ChunkMesh build_chunk_mesh(

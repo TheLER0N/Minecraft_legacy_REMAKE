@@ -35,8 +35,13 @@ struct InputState {
     bool break_block_held {false};
     bool left_click_pressed {false};
     bool place_block_pressed {false};
+    bool menu_up_pressed {false};
+    bool menu_down_pressed {false};
+    bool menu_confirm_pressed {false};
+    bool gamepad_start_pressed {false};
     int selected_hotbar_slot {-1};
     int hotbar_scroll_delta {0};
+    int render_distance_delta {0};
     bool close_requested {false};
 
     bool pressed(Key key) const {

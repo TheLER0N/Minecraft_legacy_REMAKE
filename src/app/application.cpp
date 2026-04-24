@@ -22,10 +22,21 @@ constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 constexpr std::size_t kMaxChunkUploadsPerFrame = 2;
 constexpr int kPlayGameButtonIndex = 0;
+constexpr int kExitGameButtonIndex = 5;
+constexpr float kMenuExitDelaySeconds = 0.18f;
+constexpr float kStartupSplashTotalSeconds = 11.8f;
+constexpr float kStartupSplashSkipFadeSeconds = 0.25f;
 
-float menu_integer_scale(float width, float height) {
-    const float fit_scale = std::min(width / 640.0f, height / 360.0f);
-    return std::max(1.0f, std::floor(fit_scale));
+constexpr float kMenuVirtualWidth = 640.0f;
+constexpr float kMenuVirtualHeight = 360.0f;
+constexpr float kMenuButtonWidth = 224.0f;
+constexpr float kMenuButtonHeight = 20.0f;
+constexpr float kMenuButtonGap = 5.0f;
+constexpr float kMenuFirstButtonTop = 126.0f;
+
+float menu_layout_scale(float width, float height) {
+    const float fit_scale = std::min(width / kMenuVirtualWidth, height / kMenuVirtualHeight);
+    return std::max(1.0f, fit_scale);
 }
 
 const char* leaves_render_mode_name(LeavesRenderMode mode) {
@@ -142,6 +153,7 @@ bool Application::initialize() {
     }
     player_.set_body_position({32.0f, 100.0f, 80.0f});
     player_.set_view_from_forward(camera_.forward());
+    platform_.start_menu_music();
     return true;
 }
 
@@ -152,6 +164,7 @@ void Application::start_world() {
         log_message(LogLevel::Info, "Application: world streamer created");
     }
     platform_.set_mouse_capture(true);
+    platform_.enter_world_music();
     app_state_ = AppState::InWorld;
 }
 
@@ -159,12 +172,14 @@ std::array<Application::MenuButton, 6> Application::menu_buttons() const {
     const PlatformWindow& window = platform_.window();
     const float width = static_cast<float>(window.width);
     const float height = static_cast<float>(window.height == 0 ? 1 : window.height);
-    const float scale = menu_integer_scale(width, height);
-    const float button_width = 200.0f * scale;
-    const float button_height = 20.0f * scale;
-    const float gap = 5.0f * scale;
-    const float left = (width - button_width) * 0.5f;
-    const float first_top = height * 0.35f;
+    const float scale = menu_layout_scale(width, height);
+    const float origin_x = (width - kMenuVirtualWidth * scale) * 0.5f;
+    const float origin_y = (height - kMenuVirtualHeight * scale) * 0.5f;
+    const float button_width = kMenuButtonWidth * scale;
+    const float button_height = kMenuButtonHeight * scale;
+    const float gap = kMenuButtonGap * scale;
+    const float left = origin_x + (kMenuVirtualWidth - kMenuButtonWidth) * 0.5f * scale;
+    const float first_top = origin_y + kMenuFirstButtonTop * scale;
 
     std::array<MenuButton, 6> buttons {};
     for (std::size_t i = 0; i < buttons.size(); ++i) {
@@ -196,18 +211,78 @@ int Application::run() {
         platform_.pump_events();
         const InputState& input = platform_.current_input();
         const float dt = platform_.frame_delta_seconds();
+        platform_.update_music(dt);
+
+        if (app_state_ == AppState::StartupSplash) {
+            platform_.set_mouse_capture(false);
+            startup_splash_seconds_ += dt;
+            if (input.jump_pressed) {
+                startup_skip_requested_ = true;
+            }
+            float fade_multiplier = 1.0f;
+            if (startup_skip_requested_) {
+                startup_skip_fade_seconds_ += dt;
+                fade_multiplier = std::max(0.0f, 1.0f - startup_skip_fade_seconds_ / kStartupSplashSkipFadeSeconds);
+            }
+
+            if (startup_splash_seconds_ >= kStartupSplashTotalSeconds || startup_skip_fade_seconds_ >= kStartupSplashSkipFadeSeconds) {
+                app_state_ = AppState::MainMenu;
+                menu_time_seconds_ = 0.0f;
+                continue;
+            }
+
+            const CameraFrameData splash_camera {
+                Mat4::identity(),
+                Mat4::identity(),
+                Mat4::identity(),
+                {},
+                {0.0f, 0.0f, -1.0f},
+                {1.0f, 0.0f, 0.0f},
+                {0.0f, 1.0f, 0.0f}
+            };
+            renderer_.begin_frame(splash_camera);
+            renderer_.draw_startup_splash(startup_splash_seconds_, fade_multiplier);
+            renderer_.end_frame();
+            continue;
+        }
 
         if (app_state_ == AppState::MainMenu) {
             platform_.set_mouse_capture(false);
             menu_time_seconds_ += dt;
+            if (menu_exit_requested_) {
+                menu_exit_delay_seconds_ -= dt;
+                if (menu_exit_delay_seconds_ <= 0.0f) {
+                    return 0;
+                }
+            }
             const int hovered_button = hovered_menu_button(input);
-            if (hovered_button != -1 && hovered_button != last_hovered_menu_button_) {
+            const int previous_selected_menu_button = selected_menu_button_;
+            if (hovered_button != -1) {
+                selected_menu_button_ = hovered_button;
+            }
+            if (input.menu_up_pressed) {
+                selected_menu_button_ = (selected_menu_button_ + 5) % 6;
+            }
+            if (input.menu_down_pressed) {
+                selected_menu_button_ = (selected_menu_button_ + 1) % 6;
+            }
+            if (selected_menu_button_ != previous_selected_menu_button ||
+                (hovered_button != -1 && hovered_button != last_hovered_menu_button_)) {
                 platform_.play_ui_focus_sound();
             }
             last_hovered_menu_button_ = hovered_button;
-            if (hovered_button == kPlayGameButtonIndex && input.left_click_pressed) {
-                platform_.play_ui_press_sound();
-                start_world();
+            const int activated_button = input.left_click_pressed && hovered_button != -1
+                ? hovered_button
+                : (input.menu_confirm_pressed ? selected_menu_button_ : -1);
+            if (!menu_exit_requested_ && activated_button != -1) {
+                if (activated_button == kPlayGameButtonIndex) {
+                    platform_.play_ui_press_sound();
+                    start_world();
+                } else if (activated_button == kExitGameButtonIndex) {
+                    platform_.play_ui_press_sound();
+                    menu_exit_requested_ = true;
+                    menu_exit_delay_seconds_ = kMenuExitDelaySeconds;
+                }
             }
 
             const PlatformWindow& window = platform_.window();
@@ -223,11 +298,14 @@ int Application::run() {
             };
             (void)aspect_ratio;
             renderer_.begin_frame(menu_camera);
-            renderer_.draw_main_menu(menu_time_seconds_, menu_uses_night_panorama_, hovered_button);
+            renderer_.draw_main_menu(menu_time_seconds_, menu_uses_night_panorama_, selected_menu_button_);
             renderer_.end_frame();
             continue;
         }
 
+        if (input.gamepad_start_pressed) {
+            platform_.set_mouse_capture(!input.capture_mouse);
+        }
         if (platform_.current_input().toggle_wireframe_pressed) {
             renderer_.toggle_wireframe();
         }
@@ -246,7 +324,10 @@ int Application::run() {
                 LogLevel::Info,
                 std::string("Application: leaves render mode switched to ") + leaves_render_mode_name(leaves_render_mode_) +
                     " [hotkey=F4]"
-            );
+                );
+        }
+        if (input.render_distance_delta != 0) {
+            world_streamer_->set_chunk_radius(world_streamer_->chunk_radius() + input.render_distance_delta);
         }
         const bool debug_hud_toggled = input.toggle_debug_hud_pressed || input.toggle_leaves_render_mode_pressed;
         if (input.toggle_debug_fly_pressed) {
