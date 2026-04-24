@@ -6,6 +6,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -124,30 +125,124 @@ bool can_replace_surface_with_gravel(BlockId block) {
     return block == BlockId::Sand || block == BlockId::Dirt || block == BlockId::Grass;
 }
 
-bool should_emit_face(BlockId block, BlockId neighbor, const BlockRegistry& block_registry) {
+bool is_greedy_opaque_block(BlockId block, const BlockRegistry& block_registry) {
+    return block_registry.render_type(block) == BlockRenderType::Opaque && block_registry.is_solid(block);
+}
+
+bool is_greedy_cutout_block(BlockId block, const BlockRegistry& block_registry) {
+    return block_registry.render_type(block) == BlockRenderType::Cutout;
+}
+
+bool preserves_internal_cutout_faces(BlockId block, LeavesRenderMode leaves_mode) {
+    return block == BlockId::OakLeaves && leaves_mode == LeavesRenderMode::Fancy;
+}
+
+bool uses_greedy_cutout_meshing(BlockId block, const BlockRegistry& block_registry, LeavesRenderMode leaves_mode) {
+    if (!is_greedy_cutout_block(block, block_registry)) {
+        return false;
+    }
+    return !preserves_internal_cutout_faces(block, leaves_mode);
+}
+
+bool is_water_block(BlockId block, const BlockRegistry& block_registry) {
+    return block_registry.render_type(block) == BlockRenderType::Transparent;
+}
+
+bool should_emit_opaque_face(BlockId block, BlockId neighbor, const BlockRegistry& block_registry) {
     if (!block_registry.is_renderable(neighbor)) {
         return true;
     }
-
-    if (block == BlockId::OakLeaves) {
-        return !block_registry.is_opaque(neighbor);
-    }
-
     if (neighbor == block) {
         return false;
     }
-
-    return block_registry.is_opaque(neighbor) != block_registry.is_opaque(block);
+    return block_registry.render_type(neighbor) != BlockRenderType::Opaque;
 }
 
-bool is_greedy_mesh_block(BlockId block, const BlockRegistry& block_registry) {
-    return block_registry.is_opaque(block) && block_registry.is_solid(block);
+bool should_emit_cutout_face(BlockId block, BlockId neighbor, const BlockRegistry& block_registry, LeavesRenderMode leaves_mode) {
+    if (!block_registry.is_renderable(neighbor)) {
+        return true;
+    }
+    if (neighbor == block) {
+        return preserves_internal_cutout_faces(block, leaves_mode);
+    }
+    return !block_registry.is_opaque(neighbor);
+}
+
+bool should_emit_water_face(BlockId block, BlockId neighbor, const BlockRegistry& block_registry, int face_index) {
+    if (face_index == 1) {
+        return false;
+    }
+    if (!block_registry.is_renderable(neighbor)) {
+        return true;
+    }
+    if (neighbor == block || block_registry.render_type(neighbor) == BlockRenderType::Transparent) {
+        return false;
+    }
+    return true;
+}
+
+bool should_emit_face(BlockId block, BlockId neighbor, const BlockRegistry& block_registry, int face_index, LeavesRenderMode leaves_mode) {
+    switch (block_registry.render_type(block)) {
+    case BlockRenderType::Opaque:
+        return should_emit_opaque_face(block, neighbor, block_registry);
+    case BlockRenderType::Cutout:
+        return should_emit_cutout_face(block, neighbor, block_registry, leaves_mode);
+    case BlockRenderType::Transparent:
+        return should_emit_water_face(block, neighbor, block_registry, face_index);
+    default:
+        return false;
+    }
 }
 
 struct FaceKey {
     BlockId block {BlockId::Air};
     std::uint32_t texture_index {0};
     Vec3 color {1.0f, 1.0f, 1.0f};
+};
+
+struct FaceLighting {
+    std::array<Vec3, 4> colors {};
+};
+
+struct LightNode {
+    int x {0};
+    int y {0};
+    int z {0};
+};
+
+struct ChunkLightData {
+    static constexpr int kBorder = 1;
+    static constexpr int kWidth = kChunkWidth + kBorder * 2;
+    static constexpr int kDepth = kChunkDepth + kBorder * 2;
+
+    std::array<std::uint8_t, static_cast<std::size_t>(kWidth * kDepth * kChunkHeight)> sky_light {};
+
+    static std::size_t index(int x, int y, int z) {
+        const int storage_x = x + kBorder;
+        const int storage_z = z + kBorder;
+        return static_cast<std::size_t>(storage_x + storage_z * kWidth + y * kWidth * kDepth);
+    }
+
+    static bool contains(int x, int y, int z) {
+        return x >= -kBorder && x < kChunkWidth + kBorder &&
+            y >= 0 && y < kChunkHeight &&
+            z >= -kBorder && z < kChunkDepth + kBorder;
+    }
+
+    std::uint8_t get(int x, int y, int z) const {
+        if (y >= kChunkHeight) {
+            return 15;
+        }
+        if (!contains(x, y, z)) {
+            return 0;
+        }
+        return sky_light[index(x, y, z)];
+    }
+
+    void set(int x, int y, int z, std::uint8_t value) {
+        assert(contains(x, y, z));
+        sky_light[index(x, y, z)] = value;
+    }
 };
 
 struct MaskCell {
@@ -164,6 +259,271 @@ bool same_mask_cell(const MaskCell& lhs, const MaskCell& rhs) {
         lhs.key.block == rhs.key.block &&
         lhs.key.texture_index == rhs.key.texture_index &&
         same_color(lhs.key.color, rhs.key.color);
+}
+
+MeshSection& mesh_section_for_block(ChunkMesh& mesh, BlockId block, const BlockRegistry& block_registry) {
+    switch (block_registry.render_type(block)) {
+    case BlockRenderType::Opaque:
+        return mesh.opaque_mesh;
+    case BlockRenderType::Cutout:
+        return mesh.cutout_mesh;
+    case BlockRenderType::Transparent:
+        return mesh.transparent_mesh;
+    default:
+        return mesh.opaque_mesh;
+    }
+}
+
+float face_shade(int face_index) {
+    switch (face_index) {
+    case 0: return 1.00f; // top
+    case 1: return 0.50f; // bottom
+    case 2: return 0.82f; // east
+    case 3: return 0.82f; // west
+    case 4: return 0.68f; // south
+    case 5: return 0.68f; // north
+    default: return 1.0f;
+    }
+}
+
+bool is_ao_occluder(BlockId block, const BlockRegistry& block_registry) {
+    return block_registry.is_opaque(block) && block_registry.is_solid(block);
+}
+
+bool transmits_sky_light(BlockId block, const BlockRegistry& block_registry) {
+    return block == BlockId::Air ||
+        block_registry.render_type(block) == BlockRenderType::Transparent ||
+        block_registry.render_type(block) == BlockRenderType::Cutout;
+}
+
+float vertex_ao(bool side_a, bool side_b, bool corner) {
+    if (side_a && side_b) {
+        return 0.45f;
+    }
+    const int occlusion = (side_a ? 1 : 0) + (side_b ? 1 : 0) + (corner ? 1 : 0);
+    switch (occlusion) {
+    case 0: return 1.00f;
+    case 1: return 0.82f;
+    case 2: return 0.64f;
+    default: return 0.52f;
+    }
+}
+
+float light_level_to_brightness(std::uint8_t level) {
+    const float normalized = static_cast<float>(std::min<std::uint8_t>(level, 15)) / 15.0f;
+    return 0.055f + std::pow(normalized, 1.55f) * 0.945f;
+}
+
+template <typename SampleFn>
+ChunkLightData build_sky_light_map(SampleFn&& sample, const BlockRegistry& block_registry) {
+    ChunkLightData light {};
+    std::vector<LightNode> queue;
+    queue.reserve(static_cast<std::size_t>(kChunkWidth * kChunkDepth * 8));
+
+    const auto push_if_brighter = [&](int x, int y, int z, std::uint8_t value) {
+        if (!ChunkLightData::contains(x, y, z)) {
+            return;
+        }
+        if (!transmits_sky_light(sample(x, y, z), block_registry)) {
+            return;
+        }
+        if (light.get(x, y, z) >= value) {
+            return;
+        }
+        light.set(x, y, z, value);
+        queue.push_back({x, y, z});
+    };
+
+    for (int z = -ChunkLightData::kBorder; z < kChunkDepth + ChunkLightData::kBorder; ++z) {
+        for (int x = -ChunkLightData::kBorder; x < kChunkWidth + ChunkLightData::kBorder; ++x) {
+            bool open_to_sky = true;
+            for (int y = kChunkHeight - 1; y >= 0; --y) {
+                const BlockId block = sample(x, y, z);
+                if (!transmits_sky_light(block, block_registry)) {
+                    open_to_sky = false;
+                }
+                if (!open_to_sky) {
+                    continue;
+                }
+                light.set(x, y, z, 15);
+                queue.push_back({x, y, z});
+            }
+        }
+    }
+
+    for (std::size_t read = 0; read < queue.size(); ++read) {
+        const LightNode node = queue[read];
+        const std::uint8_t current = light.get(node.x, node.y, node.z);
+        if (current <= 1) {
+            continue;
+        }
+        const std::uint8_t next = static_cast<std::uint8_t>(current - 1);
+        push_if_brighter(node.x + 1, node.y, node.z, next);
+        push_if_brighter(node.x - 1, node.y, node.z, next);
+        push_if_brighter(node.x, node.y, node.z + 1, next);
+        push_if_brighter(node.x, node.y, node.z - 1, next);
+        push_if_brighter(node.x, node.y + 1, node.z, next);
+        push_if_brighter(node.x, node.y - 1, node.z, next);
+    }
+
+    return light;
+}
+
+std::uint8_t face_vertex_light_level(const ChunkLightData& light, int face_index, const Vec3& local, int origin_x, int origin_y, int origin_z) {
+    int x = origin_x + (local.x > 0.5f ? 1 : 0);
+    int y = origin_y + (local.y > 0.5f ? 1 : 0);
+    int z = origin_z + (local.z > 0.5f ? 1 : 0);
+
+    switch (face_index) {
+    case 0: y = origin_y + 1; break;
+    case 1: y = origin_y - 1; break;
+    case 2: x = origin_x + 1; break;
+    case 3: x = origin_x - 1; break;
+    case 4: z = origin_z + 1; break;
+    case 5: z = origin_z - 1; break;
+    default: break;
+    }
+
+    return light.get(x, y, z);
+}
+
+std::uint8_t greedy_face_vertex_light_level(const ChunkLightData& light, int face_index, const Vec3& vertex, const Vec3& center) {
+    const auto axis_cell = [](float value, float center_value) {
+        const float adjusted = value > center_value ? value - 0.001f : value;
+        return static_cast<int>(std::floor(adjusted));
+    };
+
+    int x = axis_cell(vertex.x, center.x);
+    int y = axis_cell(vertex.y, center.y);
+    int z = axis_cell(vertex.z, center.z);
+
+    switch (face_index) {
+    case 0: y = static_cast<int>(std::floor(vertex.y)); break;
+    case 1: y = static_cast<int>(std::floor(vertex.y)) - 1; break;
+    case 2: x = static_cast<int>(std::floor(vertex.x)); break;
+    case 3: x = static_cast<int>(std::floor(vertex.x)) - 1; break;
+    case 4: z = static_cast<int>(std::floor(vertex.z)); break;
+    case 5: z = static_cast<int>(std::floor(vertex.z)) - 1; break;
+    default: break;
+    }
+
+    return light.get(x, y, z);
+}
+
+std::array<Int3, 3> ao_offsets_for_vertex(int face_index, const Vec3& vertex) {
+    const int sx = vertex.x > 0.5f ? 1 : -1;
+    const int sy = vertex.y > 0.5f ? 1 : -1;
+    const int sz = vertex.z > 0.5f ? 1 : -1;
+
+    switch (face_index) {
+    case 0:
+    case 1:
+        return {{{sx, 0, 0}, {0, 0, sz}, {sx, 0, sz}}};
+    case 2:
+    case 3:
+        return {{{0, sy, 0}, {0, 0, sz}, {0, sy, sz}}};
+    case 4:
+    case 5:
+        return {{{sx, 0, 0}, {0, sy, 0}, {sx, sy, 0}}};
+    default:
+        return {{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}};
+    }
+}
+
+template <typename SampleFn>
+FaceLighting make_face_lighting(
+    SampleFn&& sample,
+    const BlockRegistry& block_registry,
+    const ChunkLightData& light,
+    BlockId block,
+    int face_index,
+    const std::array<Vec3, 4>& local_vertices,
+    const Vec3& tint,
+    int origin_x,
+    int origin_y,
+    int origin_z) {
+    FaceLighting lighting {};
+    const float shade = face_shade(face_index);
+    const bool water = block_registry.render_type(block) == BlockRenderType::Transparent;
+
+    for (std::size_t i = 0; i < local_vertices.size(); ++i) {
+        const Vec3& local = local_vertices[i];
+        const auto offsets = ao_offsets_for_vertex(face_index, local);
+        const bool side_a = is_ao_occluder(sample(origin_x + offsets[0].x, origin_y + offsets[0].y, origin_z + offsets[0].z), block_registry);
+        const bool side_b = is_ao_occluder(sample(origin_x + offsets[1].x, origin_y + offsets[1].y, origin_z + offsets[1].z), block_registry);
+        const bool corner = is_ao_occluder(sample(origin_x + offsets[2].x, origin_y + offsets[2].y, origin_z + offsets[2].z), block_registry);
+        const float ao = water ? 1.0f : vertex_ao(side_a, side_b, corner);
+        const std::uint8_t light_level = face_vertex_light_level(light, face_index, local, origin_x, origin_y, origin_z);
+        const float sky = light_level_to_brightness(light_level);
+        const float brightness = std::clamp(sky * shade * ao, 0.035f, 1.0f);
+        lighting.colors[i] = {tint.x * brightness, tint.y * brightness, tint.z * brightness};
+    }
+
+    return lighting;
+}
+
+template <typename SampleFn>
+FaceLighting make_greedy_face_lighting(
+    SampleFn&& sample,
+    const BlockRegistry& block_registry,
+    const ChunkLightData& light,
+    BlockId block,
+    int face_index,
+    const std::array<Vec3, 4>& vertices,
+    const Vec3& tint) {
+    FaceLighting lighting {};
+    const float shade = face_shade(face_index);
+    const bool water = block_registry.render_type(block) == BlockRenderType::Transparent;
+
+    Vec3 center {};
+    for (const Vec3& vertex : vertices) {
+        center += vertex;
+    }
+    center = center / static_cast<float>(vertices.size());
+
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        const Vec3& vertex = vertices[i];
+        const int sx = vertex.x >= center.x ? 1 : -1;
+        const int sy = vertex.y >= center.y ? 1 : -1;
+        const int sz = vertex.z >= center.z ? 1 : -1;
+        const int bx = static_cast<int>(std::floor(vertex.x)) - (sx < 0 ? 1 : 0);
+        const int by = static_cast<int>(std::floor(vertex.y)) - (sy < 0 ? 1 : 0);
+        const int bz = static_cast<int>(std::floor(vertex.z)) - (sz < 0 ? 1 : 0);
+
+        bool side_a = false;
+        bool side_b = false;
+        bool corner = false;
+        switch (face_index) {
+        case 0:
+        case 1:
+            side_a = is_ao_occluder(sample(bx + sx, by, bz), block_registry);
+            side_b = is_ao_occluder(sample(bx, by, bz + sz), block_registry);
+            corner = is_ao_occluder(sample(bx + sx, by, bz + sz), block_registry);
+            break;
+        case 2:
+        case 3:
+            side_a = is_ao_occluder(sample(bx, by + sy, bz), block_registry);
+            side_b = is_ao_occluder(sample(bx, by, bz + sz), block_registry);
+            corner = is_ao_occluder(sample(bx, by + sy, bz + sz), block_registry);
+            break;
+        case 4:
+        case 5:
+            side_a = is_ao_occluder(sample(bx + sx, by, bz), block_registry);
+            side_b = is_ao_occluder(sample(bx, by + sy, bz), block_registry);
+            corner = is_ao_occluder(sample(bx + sx, by + sy, bz), block_registry);
+            break;
+        default:
+            break;
+        }
+
+        const float ao = water ? 1.0f : vertex_ao(side_a, side_b, corner);
+        const std::uint8_t light_level = greedy_face_vertex_light_level(light, face_index, vertex, center);
+        const float sky = light_level_to_brightness(light_level);
+        const float brightness = std::clamp(sky * shade * ao, 0.035f, 1.0f);
+        lighting.colors[i] = {tint.x * brightness, tint.y * brightness, tint.z * brightness};
+    }
+
+    return lighting;
 }
 
 float smooth_noise(float x, float z, WorldSeed seed) {
@@ -189,10 +549,24 @@ float smooth_noise(float x, float z, WorldSeed seed) {
     return nx0 + tz * (nx1 - nx0);
 }
 
-void append_face(ChunkMesh& mesh, const Vec3& color, const std::array<Vec3, 4>& vertices, const std::array<Vec2, 4>& uvs, std::uint32_t tex_index) {
+void append_face(MeshSection& mesh, const Vec3& color, const std::array<Vec3, 4>& vertices, const std::array<Vec2, 4>& uvs, std::uint32_t tex_index) {
     const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
     for (std::size_t i = 0; i < vertices.size(); ++i) {
         mesh.vertices.push_back({vertices[i], color, uvs[i], tex_index});
+    }
+
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 1);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 3);
+    mesh.indices.push_back(base + 0);
+}
+
+void append_lit_face(MeshSection& mesh, const FaceLighting& lighting, const std::array<Vec3, 4>& vertices, const std::array<Vec2, 4>& uvs, std::uint32_t tex_index) {
+    const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        mesh.vertices.push_back({vertices[i], lighting.colors[i], uvs[i], tex_index});
     }
 
     mesh.indices.push_back(base + 0);
@@ -207,6 +581,9 @@ FaceKey make_face_key(BlockId block, const FaceTemplate& face, const BlockRegist
     FaceKey key {};
     key.block = block;
     key.color = {1.0f, 1.0f, 1.0f};
+    if (block_registry.render_type(block) == BlockRenderType::Transparent) {
+        key.color = block_registry.get(block).debug_color;
+    }
 
     if (face.neighbor_y == 1) {
         key.texture_index = block_registry.get(block).tex_top;
@@ -222,9 +599,12 @@ FaceKey make_face_key(BlockId block, const FaceTemplate& face, const BlockRegist
     return key;
 }
 
+template <typename SampleFn>
 void append_greedy_face(
     ChunkMesh& mesh,
-    ChunkCoord coord,
+    SampleFn&& sample,
+    const BlockRegistry& block_registry,
+    const ChunkLightData& light,
     int face_index,
     int slice,
     int u,
@@ -232,52 +612,50 @@ void append_greedy_face(
     int width,
     int height,
     const FaceKey& key) {
-    const float chunk_x = static_cast<float>(coord.x * kChunkWidth);
-    const float chunk_z = static_cast<float>(coord.z * kChunkDepth);
     const float fw = static_cast<float>(width);
     const float fh = static_cast<float>(height);
 
     std::array<Vec3, 4> vertices {};
     switch (face_index) {
     case 0: { // top: u=x, v=z, slice=y
-        const float x = chunk_x + static_cast<float>(u);
+        const float x = static_cast<float>(u);
         const float y = static_cast<float>(slice + 1);
-        const float z = chunk_z + static_cast<float>(v);
+        const float z = static_cast<float>(v);
         vertices = {{{x, y, z}, {x, y, z + fh}, {x + fw, y, z + fh}, {x + fw, y, z}}};
         break;
     }
     case 1: { // bottom: u=x, v=z, slice=y
-        const float x = chunk_x + static_cast<float>(u);
+        const float x = static_cast<float>(u);
         const float y = static_cast<float>(slice);
-        const float z = chunk_z + static_cast<float>(v);
+        const float z = static_cast<float>(v);
         vertices = {{{x, y, z}, {x + fw, y, z}, {x + fw, y, z + fh}, {x, y, z + fh}}};
         break;
     }
     case 2: { // east: u=z, v=y, slice=x
-        const float x = chunk_x + static_cast<float>(slice + 1);
+        const float x = static_cast<float>(slice + 1);
         const float y = static_cast<float>(v);
-        const float z = chunk_z + static_cast<float>(u);
+        const float z = static_cast<float>(u);
         vertices = {{{x, y, z}, {x, y + fh, z}, {x, y + fh, z + fw}, {x, y, z + fw}}};
         break;
     }
     case 3: { // west: u=z, v=y, slice=x
-        const float x = chunk_x + static_cast<float>(slice);
+        const float x = static_cast<float>(slice);
         const float y = static_cast<float>(v);
-        const float z = chunk_z + static_cast<float>(u);
+        const float z = static_cast<float>(u);
         vertices = {{{x, y, z + fw}, {x, y + fh, z + fw}, {x, y + fh, z}, {x, y, z}}};
         break;
     }
     case 4: { // south: u=x, v=y, slice=z
-        const float x = chunk_x + static_cast<float>(u);
+        const float x = static_cast<float>(u);
         const float y = static_cast<float>(v);
-        const float z = chunk_z + static_cast<float>(slice + 1);
+        const float z = static_cast<float>(slice + 1);
         vertices = {{{x + fw, y, z}, {x + fw, y + fh, z}, {x, y + fh, z}, {x, y, z}}};
         break;
     }
     case 5: { // north: u=x, v=y, slice=z
-        const float x = chunk_x + static_cast<float>(u);
+        const float x = static_cast<float>(u);
         const float y = static_cast<float>(v);
-        const float z = chunk_z + static_cast<float>(slice);
+        const float z = static_cast<float>(slice);
         vertices = {{{x, y, z}, {x, y + fh, z}, {x + fw, y + fh, z}, {x + fw, y, z}}};
         break;
     }
@@ -301,13 +679,19 @@ void append_greedy_face(
             {0.0f, fh}
         }};
     }
-    append_face(mesh, key.color, vertices, uvs, key.texture_index);
+    const FaceLighting lighting = make_greedy_face_lighting(sample, block_registry, light, key.block, face_index, vertices, key.color);
+    append_lit_face(mesh_section_for_block(mesh, key.block, block_registry), lighting, vertices, uvs, key.texture_index);
 }
 
 template <typename SampleFn>
-ChunkMesh build_mesh_from_sampler(SampleFn&& sample, ChunkCoord coord, const BlockRegistry& block_registry, std::size_t* face_count_out = nullptr) {
+ChunkMesh build_mesh_from_sampler(
+    SampleFn&& sample,
+    const BlockRegistry& block_registry,
+    LeavesRenderMode leaves_mode,
+    std::size_t* face_count_out = nullptr) {
     ChunkMesh mesh {};
     std::size_t face_count = 0;
+    const ChunkLightData light = build_sky_light_map(sample, block_registry);
 
     const auto emit_greedy_mask = [&](int face_index, int slice, int mask_width, int mask_height, std::vector<MaskCell>& mask) {
         for (int v = 0; v < mask_height; ++v) {
@@ -342,7 +726,7 @@ ChunkMesh build_mesh_from_sampler(SampleFn&& sample, ChunkCoord coord, const Blo
                     }
                 }
 
-                append_greedy_face(mesh, coord, face_index, slice, u, v, width, height, mask[static_cast<std::size_t>(index)].key);
+                append_greedy_face(mesh, sample, block_registry, light, face_index, slice, u, v, width, height, mask[static_cast<std::size_t>(index)].key);
                 ++face_count;
 
                 for (int clear_v = 0; clear_v < height; ++clear_v) {
@@ -355,89 +739,115 @@ ChunkMesh build_mesh_from_sampler(SampleFn&& sample, ChunkCoord coord, const Blo
         }
     };
 
-    const auto make_mask_cell = [&](BlockId block, BlockId neighbor, int face_index) {
+    const auto make_mask_cell = [&](BlockId block, BlockId neighbor, int face_index, auto&& eligible) {
         MaskCell cell {};
-        if (is_greedy_mesh_block(block, block_registry) && should_emit_face(block, neighbor, block_registry)) {
+        if (eligible(block, block_registry) && should_emit_face(block, neighbor, block_registry, face_index, leaves_mode)) {
             cell.valid = true;
             cell.key = make_face_key(block, kFaceTemplates[static_cast<std::size_t>(face_index)], block_registry);
         }
         return cell;
     };
 
+    const auto build_greedy_faces = [&](auto&& eligible, bool water_only) {
+        std::vector<MaskCell> mask {};
+        mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkDepth));
+        for (int y = 0; y < kChunkHeight; ++y) {
+            if (!water_only) {
+                std::fill(mask.begin(), mask.end(), MaskCell {});
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    for (int x = 0; x < kChunkWidth; ++x) {
+                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y + 1, z), 0, eligible);
+                    }
+                }
+                emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
+
+                std::fill(mask.begin(), mask.end(), MaskCell {});
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    for (int x = 0; x < kChunkWidth; ++x) {
+                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y - 1, z), 1, eligible);
+                    }
+                }
+                emit_greedy_mask(1, y, kChunkWidth, kChunkDepth, mask);
+            } else {
+                std::fill(mask.begin(), mask.end(), MaskCell {});
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    for (int x = 0; x < kChunkWidth; ++x) {
+                        mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y + 1, z), 0, eligible);
+                    }
+                }
+                emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
+            }
+        }
+
+        mask.resize(static_cast<std::size_t>(kChunkDepth * kChunkHeight));
+        for (int x = 0; x < kChunkWidth; ++x) {
+            std::fill(mask.begin(), mask.end(), MaskCell {});
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x + 1, y, z), 2, eligible);
+                }
+            }
+            emit_greedy_mask(2, x, kChunkDepth, kChunkHeight, mask);
+
+            std::fill(mask.begin(), mask.end(), MaskCell {});
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x - 1, y, z), 3, eligible);
+                }
+            }
+            emit_greedy_mask(3, x, kChunkDepth, kChunkHeight, mask);
+        }
+
+        mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkHeight));
+        for (int z = 0; z < kChunkDepth; ++z) {
+            std::fill(mask.begin(), mask.end(), MaskCell {});
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int x = 0; x < kChunkWidth; ++x) {
+                    mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z + 1), 4, eligible);
+                }
+            }
+            emit_greedy_mask(4, z, kChunkWidth, kChunkHeight, mask);
+
+            std::fill(mask.begin(), mask.end(), MaskCell {});
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int x = 0; x < kChunkWidth; ++x) {
+                    mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z - 1), 5, eligible);
+                }
+            }
+            emit_greedy_mask(5, z, kChunkWidth, kChunkHeight, mask);
+        }
+    };
+
+    build_greedy_faces(is_greedy_opaque_block, false);
+    build_greedy_faces(
+        [&](BlockId block, const BlockRegistry& registry) {
+            return uses_greedy_cutout_meshing(block, registry, leaves_mode);
+        },
+        false
+    );
+    build_greedy_faces(is_water_block, true);
+
     std::vector<MaskCell> mask {};
-
-    mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkDepth));
-    for (int y = 0; y < kChunkHeight; ++y) {
-        std::fill(mask.begin(), mask.end(), MaskCell {});
-        for (int z = 0; z < kChunkDepth; ++z) {
-            for (int x = 0; x < kChunkWidth; ++x) {
-                mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y + 1, z), 0);
-            }
-        }
-        emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
-
-        std::fill(mask.begin(), mask.end(), MaskCell {});
-        for (int z = 0; z < kChunkDepth; ++z) {
-            for (int x = 0; x < kChunkWidth; ++x) {
-                mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y - 1, z), 1);
-            }
-        }
-        emit_greedy_mask(1, y, kChunkWidth, kChunkDepth, mask);
-    }
-
-    mask.resize(static_cast<std::size_t>(kChunkDepth * kChunkHeight));
-    for (int x = 0; x < kChunkWidth; ++x) {
-        std::fill(mask.begin(), mask.end(), MaskCell {});
-        for (int y = 0; y < kChunkHeight; ++y) {
-            for (int z = 0; z < kChunkDepth; ++z) {
-                mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x + 1, y, z), 2);
-            }
-        }
-        emit_greedy_mask(2, x, kChunkDepth, kChunkHeight, mask);
-
-        std::fill(mask.begin(), mask.end(), MaskCell {});
-        for (int y = 0; y < kChunkHeight; ++y) {
-            for (int z = 0; z < kChunkDepth; ++z) {
-                mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(sample(x, y, z), sample(x - 1, y, z), 3);
-            }
-        }
-        emit_greedy_mask(3, x, kChunkDepth, kChunkHeight, mask);
-    }
-
-    mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkHeight));
-    for (int z = 0; z < kChunkDepth; ++z) {
-        std::fill(mask.begin(), mask.end(), MaskCell {});
-        for (int y = 0; y < kChunkHeight; ++y) {
-            for (int x = 0; x < kChunkWidth; ++x) {
-                mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z + 1), 4);
-            }
-        }
-        emit_greedy_mask(4, z, kChunkWidth, kChunkHeight, mask);
-
-        std::fill(mask.begin(), mask.end(), MaskCell {});
-        for (int y = 0; y < kChunkHeight; ++y) {
-            for (int x = 0; x < kChunkWidth; ++x) {
-                mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(sample(x, y, z), sample(x, y, z - 1), 5);
-            }
-        }
-        emit_greedy_mask(5, z, kChunkWidth, kChunkHeight, mask);
-    }
 
     for (int y = 0; y < kChunkHeight; ++y) {
         for (int z = 0; z < kChunkDepth; ++z) {
             for (int x = 0; x < kChunkWidth; ++x) {
                 const BlockId block = sample(x, y, z);
-                if (!block_registry.is_renderable(block) || is_greedy_mesh_block(block, block_registry)) {
+                if (!block_registry.is_renderable(block) ||
+                    is_greedy_opaque_block(block, block_registry) ||
+                    uses_greedy_cutout_meshing(block, block_registry, leaves_mode) ||
+                    is_water_block(block, block_registry)) {
                     continue;
                 }
 
-                const float world_x = static_cast<float>(coord.x * kChunkWidth + x);
+                const float world_x = static_cast<float>(x);
                 const float world_y = static_cast<float>(y);
-                const float world_z = static_cast<float>(coord.z * kChunkDepth + z);
+                const float world_z = static_cast<float>(z);
 
                 for (const FaceTemplate& face : kFaceTemplates) {
+                    const int face_index = static_cast<int>(&face - kFaceTemplates.data());
                     const BlockId neighbor = sample(x + face.neighbor_x, y + face.neighbor_y, z + face.neighbor_z);
-                    if (!should_emit_face(block, neighbor, block_registry)) {
+                    if (!should_emit_face(block, neighbor, block_registry, face_index, leaves_mode)) {
                         continue;
                     }
 
@@ -479,7 +889,19 @@ ChunkMesh build_mesh_from_sampler(SampleFn&& sample, ChunkCoord coord, const Blo
                         tex_index = block_registry.get(block).tex_side;
                     }
 
-                    append_face(mesh, face_color, vertices, uvs, tex_index);
+                    const FaceLighting lighting = make_face_lighting(
+                        sample,
+                        block_registry,
+                        light,
+                        block,
+                        face_index,
+                        face.vertices,
+                        face_color,
+                        x,
+                        y,
+                        z
+                    );
+                    append_lit_face(mesh_section_for_block(mesh, block, block_registry), lighting, vertices, uvs, tex_index);
                     ++face_count;
                 }
             }
@@ -509,10 +931,10 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         return single_block.get(x, y, z);
     };
     std::size_t single_faces = 0;
-    const ChunkMesh single_mesh = build_mesh_from_sampler(single_sample, {}, block_registry, &single_faces);
+    const ChunkMesh single_mesh = build_mesh_from_sampler(single_sample, block_registry, LeavesRenderMode::Fancy, &single_faces);
     assert(single_faces == 6);
-    assert(single_mesh.vertices.size() == 24);
-    assert(single_mesh.indices.size() == 36);
+    assert(single_mesh.opaque_mesh.vertices.size() == 24);
+    assert(single_mesh.opaque_mesh.indices.size() == 36);
 
     ChunkData two_blocks {};
     two_blocks.set(0, 0, 0, BlockId::Stone);
@@ -524,10 +946,10 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         return two_blocks.get(x, y, z);
     };
     std::size_t double_faces = 0;
-    const ChunkMesh double_mesh = build_mesh_from_sampler(double_sample, {}, block_registry, &double_faces);
+    const ChunkMesh double_mesh = build_mesh_from_sampler(double_sample, block_registry, LeavesRenderMode::Fancy, &double_faces);
     assert(double_faces == 6);
-    assert(double_mesh.vertices.size() == 24);
-    assert(double_mesh.indices.size() == 36);
+    assert(double_mesh.opaque_mesh.vertices.size() == 24);
+    assert(double_mesh.opaque_mesh.indices.size() == 36);
 
     ChunkData slab {};
     for (int z = 0; z < 2; ++z) {
@@ -542,16 +964,16 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         return slab.get(x, y, z);
     };
     std::size_t slab_faces = 0;
-    const ChunkMesh slab_mesh = build_mesh_from_sampler(slab_sample, {}, block_registry, &slab_faces);
+    const ChunkMesh slab_mesh = build_mesh_from_sampler(slab_sample, block_registry, LeavesRenderMode::Fancy, &slab_faces);
     assert(slab_faces == 6);
-    assert(slab_mesh.vertices.size() == 24);
-    assert(slab_mesh.indices.size() == 36);
+    assert(slab_mesh.opaque_mesh.vertices.size() == 24);
+    assert(slab_mesh.opaque_mesh.indices.size() == 36);
     bool found_tiled_bottom = false;
-    for (std::size_t i = 0; i + 3 < slab_mesh.vertices.size(); i += 4) {
-        const Vertex& a = slab_mesh.vertices[i + 0];
-        const Vertex& b = slab_mesh.vertices[i + 1];
-        const Vertex& c = slab_mesh.vertices[i + 2];
-        const Vertex& d = slab_mesh.vertices[i + 3];
+    for (std::size_t i = 0; i + 3 < slab_mesh.opaque_mesh.vertices.size(); i += 4) {
+        const Vertex& a = slab_mesh.opaque_mesh.vertices[i + 0];
+        const Vertex& b = slab_mesh.opaque_mesh.vertices[i + 1];
+        const Vertex& c = slab_mesh.opaque_mesh.vertices[i + 2];
+        const Vertex& d = slab_mesh.opaque_mesh.vertices[i + 3];
         if (a.position.y == 0.0f && b.position.y == 0.0f && c.position.y == 0.0f && d.position.y == 0.0f) {
             const float uv_width = std::max({a.uv.x, b.uv.x, c.uv.x, d.uv.x}) - std::min({a.uv.x, b.uv.x, c.uv.x, d.uv.x});
             const float uv_height = std::max({a.uv.y, b.uv.y, c.uv.y, d.uv.y}) - std::min({a.uv.y, b.uv.y, c.uv.y, d.uv.y});
@@ -568,7 +990,7 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         }
         return seam_left.get(x, y, z);
     };
-    const ChunkMesh seam_left_mesh = build_mesh_from_sampler(seam_left_sample, {0, 0}, block_registry);
+    const ChunkMesh seam_left_mesh = build_mesh_from_sampler(seam_left_sample, block_registry, LeavesRenderMode::Fancy);
 
     ChunkData seam_right {};
     seam_right.set(0, 0, 0, BlockId::Stone);
@@ -578,15 +1000,20 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         }
         return seam_right.get(x, y, z);
     };
-    const ChunkMesh seam_right_mesh = build_mesh_from_sampler(seam_right_sample, {1, 0}, block_registry);
+    const ChunkMesh seam_right_mesh = build_mesh_from_sampler(seam_right_sample, block_registry, LeavesRenderMode::Fancy);
 
     const auto x_extent = [](const ChunkMesh& mesh) {
         float min_x = std::numeric_limits<float>::max();
         float max_x = std::numeric_limits<float>::lowest();
-        for (const Vertex& vertex : mesh.vertices) {
-            min_x = std::min(min_x, vertex.position.x);
-            max_x = std::max(max_x, vertex.position.x);
-        }
+        const auto accumulate = [&](const MeshSection& section) {
+            for (const Vertex& vertex : section.vertices) {
+                min_x = std::min(min_x, vertex.position.x);
+                max_x = std::max(max_x, vertex.position.x);
+            }
+        };
+        accumulate(mesh.opaque_mesh);
+        accumulate(mesh.cutout_mesh);
+        accumulate(mesh.transparent_mesh);
         return std::array<float, 2> {min_x, max_x};
     };
 
@@ -594,8 +1021,8 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     const auto right_extent = x_extent(seam_right_mesh);
     assert(left_extent[0] == static_cast<float>(kChunkWidth - 1));
     assert(left_extent[1] == static_cast<float>(kChunkWidth));
-    assert(right_extent[0] == static_cast<float>(kChunkWidth));
-    assert(right_extent[1] == static_cast<float>(kChunkWidth + 1));
+    assert(right_extent[0] == 0.0f);
+    assert(right_extent[1] == 1.0f);
 
     const auto seam_left_neighbor_sample = [&](int x, int y, int z) -> BlockId {
         if (y < 0 || y >= kChunkHeight || z < 0 || z >= kChunkDepth) {
@@ -610,10 +1037,28 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         return seam_left.get(x, y, z);
     };
     std::size_t seam_neighbor_faces = 0;
-    const ChunkMesh seam_neighbor_mesh = build_mesh_from_sampler(seam_left_neighbor_sample, {0, 0}, block_registry, &seam_neighbor_faces);
+    const ChunkMesh seam_neighbor_mesh = build_mesh_from_sampler(seam_left_neighbor_sample, block_registry, LeavesRenderMode::Fancy, &seam_neighbor_faces);
     assert(seam_neighbor_faces == 5);
-    assert(seam_neighbor_mesh.vertices.size() == 20);
-    assert(seam_neighbor_mesh.indices.size() == 30);
+    assert(seam_neighbor_mesh.opaque_mesh.vertices.size() == 20);
+    assert(seam_neighbor_mesh.opaque_mesh.indices.size() == 30);
+
+    ChunkData leaves_pair {};
+    leaves_pair.set(0, 0, 0, BlockId::OakLeaves);
+    leaves_pair.set(1, 0, 0, BlockId::OakLeaves);
+    const auto leaves_pair_sample = [&](int x, int y, int z) -> BlockId {
+        if (x < 0 || x >= kChunkWidth || y < 0 || y >= kChunkHeight || z < 0 || z >= kChunkDepth) {
+            return BlockId::Air;
+        }
+        return leaves_pair.get(x, y, z);
+    };
+    std::size_t leaves_fast_faces = 0;
+    const ChunkMesh leaves_fast_mesh = build_mesh_from_sampler(leaves_pair_sample, block_registry, LeavesRenderMode::Fast, &leaves_fast_faces);
+    std::size_t leaves_fancy_faces = 0;
+    const ChunkMesh leaves_fancy_mesh = build_mesh_from_sampler(leaves_pair_sample, block_registry, LeavesRenderMode::Fancy, &leaves_fancy_faces);
+    assert(leaves_fast_faces == 6);
+    assert(leaves_fast_mesh.cutout_mesh.indices.size() == 36);
+    assert(leaves_fancy_faces == 12);
+    assert(leaves_fancy_mesh.cutout_mesh.indices.size() == 72);
 
     log_message(LogLevel::Info, "WorldGenerator: seam self-check passed, chunk boundary blocks remain 1x1x1");
 }
@@ -961,20 +1406,42 @@ float WorldGenerator::sample_height(int world_x, int world_z, WorldSeed seed) co
     return 30.0f + elevation + roughness + detail;
 }
 
-ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry) {
-    return build_chunk_mesh(chunk_data, coord, block_registry, {});
+ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry, LeavesRenderMode leaves_mode) {
+    return build_chunk_mesh(chunk_data, coord, block_registry, {}, leaves_mode);
 }
 
 ChunkMesh build_chunk_mesh(
     const ChunkData& chunk_data,
     ChunkCoord coord,
     const BlockRegistry& block_registry,
-    const ChunkMeshNeighbors& neighbors) {
+    const ChunkMeshNeighbors& neighbors,
+    LeavesRenderMode leaves_mode) {
+    (void)coord;
     run_mesh_builder_self_check(block_registry);
 
     const auto sample = [&](int x, int y, int z) -> BlockId {
         if (y < 0 || y >= kChunkHeight) {
             return BlockId::Air;
+        }
+        if (x < 0 && z < 0) {
+            return neighbors.northwest != nullptr
+                ? neighbors.northwest->get(kChunkWidth - 1, y, kChunkDepth - 1)
+                : BlockId::Air;
+        }
+        if (x >= kChunkWidth && z < 0) {
+            return neighbors.northeast != nullptr
+                ? neighbors.northeast->get(0, y, kChunkDepth - 1)
+                : BlockId::Air;
+        }
+        if (x < 0 && z >= kChunkDepth) {
+            return neighbors.southwest != nullptr
+                ? neighbors.southwest->get(kChunkWidth - 1, y, 0)
+                : BlockId::Air;
+        }
+        if (x >= kChunkWidth && z >= kChunkDepth) {
+            return neighbors.southeast != nullptr
+                ? neighbors.southeast->get(0, y, 0)
+                : BlockId::Air;
         }
         if (x < 0) {
             return neighbors.west != nullptr && z >= 0 && z < kChunkDepth
@@ -999,7 +1466,7 @@ ChunkMesh build_chunk_mesh(
         return chunk_data.get(x, y, z);
     };
 
-    return build_mesh_from_sampler(sample, coord, block_registry);
+    return build_mesh_from_sampler(sample, block_registry, leaves_mode);
 }
 
 }

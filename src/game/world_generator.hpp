@@ -5,6 +5,11 @@
 
 namespace ml {
 
+enum class LeavesRenderMode : std::uint8_t {
+    Fast,
+    Fancy
+};
+
 class WorldGenerator {
 public:
     explicit WorldGenerator(const BlockRegistry& block_registry);
@@ -28,14 +33,24 @@ struct ChunkMeshNeighbors {
     const ChunkData* east {nullptr};
     const ChunkData* north {nullptr};
     const ChunkData* south {nullptr};
+    const ChunkData* northwest {nullptr};
+    const ChunkData* northeast {nullptr};
+    const ChunkData* southwest {nullptr};
+    const ChunkData* southeast {nullptr};
 };
 
-ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry);
 ChunkMesh build_chunk_mesh(
     const ChunkData& chunk_data,
     ChunkCoord coord,
     const BlockRegistry& block_registry,
-    const ChunkMeshNeighbors& neighbors
+    LeavesRenderMode leaves_mode = LeavesRenderMode::Fancy
+);
+ChunkMesh build_chunk_mesh(
+    const ChunkData& chunk_data,
+    ChunkCoord coord,
+    const BlockRegistry& block_registry,
+    const ChunkMeshNeighbors& neighbors,
+    LeavesRenderMode leaves_mode = LeavesRenderMode::Fancy
 );
 
 }

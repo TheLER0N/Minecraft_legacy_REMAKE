@@ -22,10 +22,26 @@ public:
     int run();
 
 private:
+    enum class AppState {
+        MainMenu,
+        InWorld
+    };
+
+    struct MenuButton {
+        float left {0.0f};
+        float top {0.0f};
+        float right {0.0f};
+        float bottom {0.0f};
+    };
+
     struct BlockBreakState {
         std::optional<Int3> target {};
         float repeat_seconds {0.0f};
     };
+
+    void start_world();
+    int hovered_menu_button(const InputState& input) const;
+    std::array<MenuButton, 6> menu_buttons() const;
 
     PlatformApp platform_;
     Renderer renderer_;
@@ -33,8 +49,13 @@ private:
     DebugCamera camera_;
     PlayerController player_;
     std::unique_ptr<WorldStreamer> world_streamer_;
+    AppState app_state_ {AppState::MainMenu};
+    bool menu_uses_night_panorama_ {false};
+    float menu_time_seconds_ {0.0f};
+    int last_hovered_menu_button_ {-1};
     std::optional<BlockHit> hovered_block_;
     BlockBreakState block_break_ {};
+    LeavesRenderMode leaves_render_mode_ {LeavesRenderMode::Fancy};
     bool debug_fly_enabled_ {false};
     bool debug_hud_enabled_ {false};
     float debug_fps_ {0.0f};

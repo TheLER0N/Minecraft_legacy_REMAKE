@@ -18,6 +18,14 @@ bool nearly_equal(float lhs, float rhs) {
     return std::abs(lhs - rhs) <= kRaycastTieEpsilon;
 }
 
+std::size_t mesh_vertex_count(const ChunkMesh& mesh) {
+    return mesh.opaque_mesh.vertices.size() + mesh.cutout_mesh.vertices.size() + mesh.transparent_mesh.vertices.size();
+}
+
+std::size_t mesh_index_count(const ChunkMesh& mesh) {
+    return mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
+}
+
 }
 
 WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius)
@@ -164,16 +172,20 @@ void WorldStreamer::tick_generation_jobs() {
             queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z});
             queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z - 1});
             queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z + 1});
+            queue_rebuild_job_if_loaded_locked({result.coord.x - 1, result.coord.z - 1});
+            queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z - 1});
+            queue_rebuild_job_if_loaded_locked({result.coord.x - 1, result.coord.z + 1});
+            queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z + 1});
             continue;
         }
 
-        if (result.mesh.vertices.empty() || result.mesh.indices.empty()) {
+        if (result.mesh.empty()) {
             log_message(LogLevel::Warning, "WorldStreamer: rebuilt chunk mesh is empty");
         } else if (logged_ready_chunk_count_ < 8) {
             log_message(
                 LogLevel::Info,
-                std::string("WorldStreamer: chunk ready vertices=") + std::to_string(result.mesh.vertices.size()) +
-                    " indices=" + std::to_string(result.mesh.indices.size())
+                std::string("WorldStreamer: chunk ready vertices=") + std::to_string(mesh_vertex_count(result.mesh)) +
+                    " indices=" + std::to_string(mesh_index_count(result.mesh))
             );
             ++logged_ready_chunk_count_;
         }
@@ -409,20 +421,35 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
 
     chunk.set(local_x, y, local_z, block);
     queue_rebuild_job_if_loaded(chunk_coord);
-    if (local_x == 0) {
-        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
-    }
-    if (local_x == kChunkWidth - 1) {
-        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
-    }
-    if (local_z == 0) {
-        queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z - 1});
-    }
-    if (local_z == kChunkDepth - 1) {
-        queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z + 1});
-    }
+    queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
+    queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
+    queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z - 1});
+    queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z + 1});
+    queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z - 1});
+    queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z - 1});
+    queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z + 1});
+    queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z + 1});
 
     return SetBlockResult::Success;
+}
+
+void WorldStreamer::set_leaves_render_mode(LeavesRenderMode mode) {
+    std::lock_guard lock(mutex_);
+    if (leaves_render_mode_ == mode) {
+        return;
+    }
+
+    leaves_render_mode_ = mode;
+    for (const auto& [coord, record] : chunks_) {
+        if (record.data.has_value()) {
+            queue_rebuild_job_if_loaded_locked(coord);
+        }
+    }
+}
+
+LeavesRenderMode WorldStreamer::leaves_render_mode() const {
+    std::lock_guard lock(mutex_);
+    return leaves_render_mode_;
 }
 
 void WorldStreamer::worker_loop() {
@@ -449,7 +476,7 @@ void WorldStreamer::worker_loop() {
             result.chunk_data = generator_.generate_chunk(job.coord, seed_);
         } else if (job.snapshot.has_value()) {
             const ChunkMeshSnapshot& snapshot = *job.snapshot;
-            result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot));
+            result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), snapshot.leaves_mode);
         }
 
         {
@@ -577,11 +604,16 @@ std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snap
 
     return ChunkMeshSnapshot {
         chunk_it->second.version,
+        leaves_render_mode_,
         *chunk_it->second.data,
         chunk_data({coord.x - 1, coord.z}),
         chunk_data({coord.x + 1, coord.z}),
         chunk_data({coord.x, coord.z - 1}),
-        chunk_data({coord.x, coord.z + 1})
+        chunk_data({coord.x, coord.z + 1}),
+        chunk_data({coord.x - 1, coord.z - 1}),
+        chunk_data({coord.x + 1, coord.z - 1}),
+        chunk_data({coord.x - 1, coord.z + 1}),
+        chunk_data({coord.x + 1, coord.z + 1})
     };
 }
 
@@ -590,7 +622,11 @@ ChunkMeshNeighbors WorldStreamer::neighbors_from_snapshot(const ChunkMeshSnapsho
         snapshot.west.has_value() ? &*snapshot.west : nullptr,
         snapshot.east.has_value() ? &*snapshot.east : nullptr,
         snapshot.north.has_value() ? &*snapshot.north : nullptr,
-        snapshot.south.has_value() ? &*snapshot.south : nullptr
+        snapshot.south.has_value() ? &*snapshot.south : nullptr,
+        snapshot.northwest.has_value() ? &*snapshot.northwest : nullptr,
+        snapshot.northeast.has_value() ? &*snapshot.northeast : nullptr,
+        snapshot.southwest.has_value() ? &*snapshot.southwest : nullptr,
+        snapshot.southeast.has_value() ? &*snapshot.southeast : nullptr
     };
 }
 

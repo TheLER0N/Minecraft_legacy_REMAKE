@@ -25,6 +25,7 @@ public:
         std::size_t uploads_this_frame {0};
         std::size_t queued_rebuilds {0};
         std::size_t drawn_chunks {0};
+        bool fancy_leaves {true};
     };
 
     ~Renderer();
@@ -34,6 +35,7 @@ public:
 
     bool initialize(const PlatformWindow& window, const std::string& shader_directory);
     void begin_frame(const CameraFrameData& camera);
+    void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
     void upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh);
     void unload_chunk_mesh(ChunkCoord coord);
     void draw_visible_chunks(std::span<const ActiveChunk> visible_chunks);
@@ -54,14 +56,24 @@ private:
     };
 
     struct ChunkRenderData {
-        GpuBuffer vertex_buffer;
-        GpuBuffer index_buffer;
-        std::uint32_t index_count {0};
+        GpuBuffer opaque_vertex_buffer;
+        GpuBuffer opaque_index_buffer;
+        std::uint32_t opaque_index_count {0};
+        GpuBuffer cutout_vertex_buffer;
+        GpuBuffer cutout_index_buffer;
+        std::uint32_t cutout_index_count {0};
+        GpuBuffer transparent_vertex_buffer;
+        GpuBuffer transparent_index_buffer;
+        std::uint32_t transparent_index_count {0};
     };
 
     struct DeferredChunkBuffers {
-        GpuBuffer vertex_buffer;
-        GpuBuffer index_buffer;
+        GpuBuffer opaque_vertex_buffer;
+        GpuBuffer opaque_index_buffer;
+        GpuBuffer cutout_vertex_buffer;
+        GpuBuffer cutout_index_buffer;
+        GpuBuffer transparent_vertex_buffer;
+        GpuBuffer transparent_index_buffer;
         std::uint32_t frames_remaining {0};
     };
 
@@ -70,6 +82,17 @@ private:
         VkSemaphore image_available {VK_NULL_HANDLE};
         VkSemaphore render_finished {VK_NULL_HANDLE};
         VkFence in_flight {VK_NULL_HANDLE};
+    };
+
+    struct MenuTexture {
+        VkImage image {VK_NULL_HANDLE};
+        VkDeviceMemory memory {VK_NULL_HANDLE};
+        VkImageView view {VK_NULL_HANDLE};
+        VkSampler sampler {VK_NULL_HANDLE};
+        VkDescriptorPool descriptor_pool {VK_NULL_HANDLE};
+        VkDescriptorSet descriptor_set {VK_NULL_HANDLE};
+        std::uint32_t width {0};
+        std::uint32_t height {0};
     };
 
     bool create_instance();
@@ -102,6 +125,7 @@ private:
     void defer_destroy_chunk_buffers(ChunkRenderData&& render_data);
     void retire_deferred_chunk_buffers();
     void destroy_deferred_chunk_buffers_immediate();
+    void upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count);
     GpuBuffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
     void destroy_buffer(GpuBuffer& buffer);
     std::uint32_t find_memory_type(std::uint32_t type_filter, VkMemoryPropertyFlags properties) const;
@@ -109,6 +133,7 @@ private:
     std::vector<char> read_binary_file(const std::string& path) const;
     Aabb chunk_bounds(ChunkCoord coord) const;
     bool aabb_visible_in_current_frustum(const Aabb& bounds) const;
+    Mat4 chunk_view_proj(ChunkCoord coord) const;
     void update_chunk_outline_buffer(std::span<const ActiveChunk> visible_chunks);
     void draw_chunk_outlines(const FrameResources& frame);
     void update_target_block_outline_buffer();
@@ -119,9 +144,15 @@ private:
     void draw_hotbar(const FrameResources& frame);
     void update_debug_hud_buffer();
     void draw_debug_hud(const FrameResources& frame);
+    void update_main_menu_buffers(float time_seconds, bool use_night_panorama, int hovered_button);
+    void draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set);
+    void draw_colored_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkPipeline pipeline);
     void upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex>& vertices);
     bool load_textures();
     bool load_ui_textures();
+    bool load_menu_textures();
+    bool load_menu_texture(const std::string& path, bool repeat, bool pixelated, MenuTexture& texture);
+    void destroy_menu_texture(MenuTexture& texture);
     void destroy_textures();
     void mark_dynamic_hud_dirty();
 
@@ -143,6 +174,8 @@ private:
     VkPipelineLayout hud_pipeline_layout_ {VK_NULL_HANDLE};
     VkPipelineLayout ui_pipeline_layout_ {VK_NULL_HANDLE};
     VkPipeline fill_pipeline_ {VK_NULL_HANDLE};
+    VkPipeline cutout_pipeline_ {VK_NULL_HANDLE};
+    VkPipeline water_pipeline_ {VK_NULL_HANDLE};
     VkPipeline wireframe_pipeline_ {VK_NULL_HANDLE};
     VkPipeline chunk_outline_pipeline_ {VK_NULL_HANDLE};
     VkPipeline block_outline_pipeline_ {VK_NULL_HANDLE};
@@ -178,6 +211,11 @@ private:
     VkDescriptorSetLayout ui_descriptor_set_layout_ {VK_NULL_HANDLE};
     VkDescriptorPool ui_descriptor_pool_ {VK_NULL_HANDLE};
     VkDescriptorSet ui_descriptor_set_ {VK_NULL_HANDLE};
+    MenuTexture menu_panorama_day_ {};
+    MenuTexture menu_panorama_night_ {};
+    MenuTexture menu_button_ {};
+    MenuTexture menu_button_highlighted_ {};
+    MenuTexture menu_logo_ {};
 
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHasher> chunk_buffers_;
     std::vector<DeferredChunkBuffers> deferred_chunk_buffers_;
@@ -195,6 +233,18 @@ private:
     std::uint32_t crosshair_vertex_count_ {0};
     GpuBuffer debug_hud_vertex_buffer_ {};
     std::uint32_t debug_hud_vertex_count_ {0};
+    GpuBuffer menu_panorama_vertex_buffer_ {};
+    std::uint32_t menu_panorama_vertex_count_ {0};
+    GpuBuffer menu_logo_vertex_buffer_ {};
+    std::uint32_t menu_logo_vertex_count_ {0};
+    GpuBuffer menu_button_vertex_buffer_ {};
+    std::uint32_t menu_button_vertex_count_ {0};
+    GpuBuffer menu_button_highlight_vertex_buffer_ {};
+    std::uint32_t menu_button_highlight_vertex_count_ {0};
+    GpuBuffer menu_overlay_vertex_buffer_ {};
+    std::uint32_t menu_overlay_vertex_count_ {0};
+    GpuBuffer menu_text_vertex_buffer_ {};
+    std::uint32_t menu_text_vertex_count_ {0};
     VkViewport viewport_ {};
     VkRect2D scissor_ {};
     VkExtent2D dynamic_hud_extent_ {};

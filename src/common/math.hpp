@@ -116,6 +116,14 @@ inline Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
     return result;
 }
 
+inline Mat4 translation_matrix(const Vec3& translation) {
+    Mat4 result = Mat4::identity();
+    result.m[12] = translation.x;
+    result.m[13] = translation.y;
+    result.m[14] = translation.z;
+    return result;
+}
+
 inline Mat4 perspective(float fov_y_radians, float aspect_ratio, float near_plane, float far_plane) {
     const float tan_half = std::tan(fov_y_radians * 0.5f);
 

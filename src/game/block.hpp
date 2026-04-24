@@ -26,6 +26,12 @@ enum class BlockFlags : std::uint32_t {
     Solid = 1u << 1u
 };
 
+enum class BlockRenderType : std::uint8_t {
+    Opaque,
+    Cutout,
+    Transparent
+};
+
 inline BlockFlags operator|(BlockFlags lhs, BlockFlags rhs) {
     return static_cast<BlockFlags>(static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs));
 }
@@ -38,6 +44,7 @@ struct BlockDef {
     BlockId id {};
     const char* name {""};
     BlockFlags flags {BlockFlags::None};
+    BlockRenderType render_type {BlockRenderType::Opaque};
     Vec3 debug_color {};
     std::uint32_t tex_top {0};
     std::uint32_t tex_bottom {0};
@@ -53,6 +60,7 @@ public:
     bool is_solid(BlockId id) const;
     bool is_replaceable(BlockId id) const;
     bool is_renderable(BlockId id) const;
+    BlockRenderType render_type(BlockId id) const;
     float hardness(BlockId id) const;
 
 private:

@@ -34,7 +34,7 @@ std::optional<Key> PlatformApp::map_scancode(SDL_Scancode scancode) {
 }
 
 bool PlatformApp::initialize() {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO)) {
         log_message(LogLevel::Error, SDL_GetError());
         return false;
     }
@@ -57,8 +57,9 @@ bool PlatformApp::initialize() {
     }
 
     last_counter_ = SDL_GetPerformanceCounter();
-    input_.capture_mouse = true;
+    input_.capture_mouse = false;
     update_relative_mouse_mode();
+    initialize_audio();
     return true;
 }
 
@@ -69,10 +70,13 @@ void PlatformApp::pump_events() {
     input_.toggle_wireframe_textures_pressed = false;
     input_.toggle_debug_hud_pressed = false;
     input_.toggle_debug_fly_pressed = false;
+    input_.toggle_leaves_render_mode_pressed = false;
     input_.jump_pressed = false;
     input_.break_block_pressed = false;
+    input_.left_click_pressed = false;
     input_.place_block_pressed = false;
     input_.selected_hotbar_slot = -1;
+    input_.hotbar_scroll_delta = 0;
 
     const std::uint64_t current_counter = SDL_GetPerformanceCounter();
     const std::uint64_t freq = SDL_GetPerformanceFrequency();
@@ -105,6 +109,9 @@ void PlatformApp::pump_events() {
                 }
                 if (event.key.scancode == SDL_SCANCODE_F3) {
                     input_.toggle_debug_hud_pressed = true;
+                }
+                if (event.key.scancode == SDL_SCANCODE_F4) {
+                    input_.toggle_leaves_render_mode_pressed = true;
                 }
                 if (event.key.scancode == SDL_SCANCODE_M) {
                     input_.toggle_wireframe_textures_pressed = true;
@@ -151,18 +158,28 @@ void PlatformApp::pump_events() {
             }
             break;
         case SDL_EVENT_MOUSE_MOTION:
+            input_.mouse_position = {event.motion.x, event.motion.y};
+            input_.mouse_inside_window = true;
             if (input_.capture_mouse) {
                 input_.mouse_delta.x += static_cast<float>(event.motion.xrel);
                 input_.mouse_delta.y += static_cast<float>(event.motion.yrel);
             }
             break;
+        case SDL_EVENT_WINDOW_MOUSE_ENTER:
+            input_.mouse_inside_window = true;
+            break;
+        case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            input_.mouse_inside_window = false;
+            break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (!event.button.down) {
                 break;
             }
+            input_.mouse_position = {event.button.x, event.button.y};
             if (event.button.button == SDL_BUTTON_LEFT) {
                 input_.break_block_pressed = true;
                 input_.break_block_held = true;
+                input_.left_click_pressed = true;
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
                 input_.place_block_pressed = true;
             }
@@ -172,6 +189,14 @@ void PlatformApp::pump_events() {
                 input_.break_block_held = false;
             }
             break;
+        case SDL_EVENT_MOUSE_WHEEL: {
+            int scroll_y = event.wheel.y > 0.0f ? 1 : (event.wheel.y < 0.0f ? -1 : 0);
+            if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+                scroll_y = -scroll_y;
+            }
+            input_.hotbar_scroll_delta += scroll_y;
+            break;
+        }
         default:
             break;
         }
@@ -208,13 +233,81 @@ std::string PlatformApp::shader_directory() const {
     return path;
 }
 
+void PlatformApp::set_mouse_capture(bool enabled) {
+    if (input_.capture_mouse == enabled) {
+        return;
+    }
+    input_.capture_mouse = enabled;
+    update_relative_mouse_mode();
+}
+
+void PlatformApp::play_ui_press_sound() {
+    play_ui_sound(press_sound_);
+}
+
+void PlatformApp::play_ui_focus_sound() {
+    play_ui_sound(focus_sound_);
+}
+
+void PlatformApp::play_ui_sound(UiSound& sound) {
+    if (sound.stream == nullptr || sound.buffer == nullptr || sound.length == 0) {
+        return;
+    }
+    SDL_ClearAudioStream(sound.stream);
+    SDL_PutAudioStreamData(sound.stream, sound.buffer, static_cast<int>(sound.length));
+    SDL_ResumeAudioStreamDevice(sound.stream);
+}
+
 void PlatformApp::shutdown() {
+    shutdown_audio();
     if (window_.handle != nullptr) {
         SDL_DestroyWindow(window_.handle);
         window_.handle = nullptr;
     }
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
+}
+
+bool PlatformApp::initialize_audio() {
+    const bool loaded_press = load_ui_sound("assets/sound/ui/press.wav", "press", press_sound_);
+    const bool loaded_focus = load_ui_sound("assets/sound/ui/focus.wav", "focus", focus_sound_);
+    return loaded_press || loaded_focus;
+}
+
+bool PlatformApp::load_ui_sound(const char* path, const char* name, UiSound& sound) {
+    SDL_AudioSpec spec {};
+    if (!SDL_LoadWAV(path, &spec, &sound.buffer, &sound.length)) {
+        log_message(LogLevel::Warning, std::string("PlatformApp: failed to load ") + name + " sound: " + SDL_GetError());
+        return false;
+    }
+
+    sound.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    if (sound.stream == nullptr) {
+        log_message(LogLevel::Warning, std::string("PlatformApp: failed to open ") + name + " audio stream: " + SDL_GetError());
+        SDL_free(sound.buffer);
+        sound.buffer = nullptr;
+        sound.length = 0;
+        return false;
+    }
+
+    return true;
+}
+
+void PlatformApp::shutdown_audio() {
+    shutdown_ui_sound(press_sound_);
+    shutdown_ui_sound(focus_sound_);
+}
+
+void PlatformApp::shutdown_ui_sound(UiSound& sound) {
+    if (sound.stream != nullptr) {
+        SDL_DestroyAudioStream(sound.stream);
+        sound.stream = nullptr;
+    }
+    if (sound.buffer != nullptr) {
+        SDL_free(sound.buffer);
+        sound.buffer = nullptr;
+    }
+    sound.length = 0;
 }
 
 void PlatformApp::update_relative_mouse_mode() {

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -41,6 +42,12 @@ struct ClipPoint {
     float y {0.0f};
     float z {0.0f};
     float w {1.0f};
+};
+
+struct DrawSectionView {
+    VkBuffer vertex_buffer {VK_NULL_HANDLE};
+    VkBuffer index_buffer {VK_NULL_HANDLE};
+    std::uint32_t index_count {0};
 };
 
 ClipPoint transform_point_clip(const Mat4& matrix, const Vec3& point) {
@@ -335,6 +342,142 @@ void append_debug_text(
     }
 }
 
+std::array<std::uint8_t, 7> glyph_mask(char c) {
+    switch (static_cast<char>(std::toupper(static_cast<unsigned char>(c)))) {
+    case 'A': return {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
+    case 'B': return {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E};
+    case 'C': return {0x0F, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0F};
+    case 'D': return {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E};
+    case 'E': return {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F};
+    case 'F': return {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10};
+    case 'G': return {0x0F, 0x10, 0x10, 0x13, 0x11, 0x11, 0x0F};
+    case 'H': return {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
+    case 'I': return {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F};
+    case 'J': return {0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E};
+    case 'K': return {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11};
+    case 'L': return {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F};
+    case 'M': return {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11};
+    case 'N': return {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11};
+    case 'O': return {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E};
+    case 'P': return {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10};
+    case 'Q': return {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D};
+    case 'R': return {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11};
+    case 'S': return {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E};
+    case 'T': return {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
+    case 'U': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E};
+    case 'V': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04};
+    case 'W': return {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11};
+    case 'X': return {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11};
+    case 'Y': return {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04};
+    case 'Z': return {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F};
+    case '&': return {0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D};
+    case '?': return {0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04};
+    default: return {0, 0, 0, 0, 0, 0, 0};
+    }
+}
+
+void append_rotated_rect(
+    std::vector<Vertex>& vertices,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    float origin_x,
+    float origin_y,
+    float cos_a,
+    float sin_a,
+    float width,
+    float height,
+    Vec3 color) {
+    const auto transform = [&](float x, float y) {
+        const float dx = x - origin_x;
+        const float dy = y - origin_y;
+        const float rx = origin_x + dx * cos_a - dy * sin_a;
+        const float ry = origin_y + dx * sin_a + dy * cos_a;
+        return Vec3 {screen_x_to_ndc(rx, width), screen_y_to_ndc(ry, height), 0.0f};
+    };
+
+    const Vec3 p0 = transform(left, top);
+    const Vec3 p1 = transform(left, bottom);
+    const Vec3 p2 = transform(right, bottom);
+    const Vec3 p3 = transform(right, top);
+    vertices.push_back({p0, color});
+    vertices.push_back({p1, color});
+    vertices.push_back({p2, color});
+    vertices.push_back({p2, color});
+    vertices.push_back({p3, color});
+    vertices.push_back({p0, color});
+}
+
+float pixel_text_width(const std::string& text, float scale) {
+    return static_cast<float>(text.size()) * 6.0f * scale;
+}
+
+float ping_pong_offset(float time_seconds, float speed, float travel, float start_offset) {
+    if (travel <= 0.0f || speed <= 0.0f) {
+        return 0.0f;
+    }
+
+    const float cycle_length = travel * 2.0f;
+    float position = std::fmod(start_offset + time_seconds * speed, cycle_length);
+    if (position < 0.0f) {
+        position += cycle_length;
+    }
+
+    const float offset = position <= travel ? position : cycle_length - position;
+    return clamp(offset, 0.0f, travel);
+}
+
+float menu_integer_scale(float width, float height) {
+    const float fit_scale = std::min(width / 640.0f, height / 360.0f);
+    return std::max(1.0f, std::floor(fit_scale));
+}
+
+void append_pixel_text(
+    std::vector<Vertex>& vertices,
+    const std::string& text,
+    float x,
+    float y,
+    float scale,
+    float width,
+    float height,
+    Vec3 color,
+    float rotation_radians = 0.0f) {
+    const float cos_a = std::cos(rotation_radians);
+    const float sin_a = std::sin(rotation_radians);
+    const float origin_x = x + pixel_text_width(text, scale) * 0.5f;
+    const float origin_y = y + 7.0f * scale * 0.5f;
+
+    float cursor_x = x;
+    for (char c : text) {
+        if (c != ' ') {
+            const auto rows = glyph_mask(c);
+            for (int row = 0; row < 7; ++row) {
+                for (int col = 0; col < 5; ++col) {
+                    if ((rows[static_cast<std::size_t>(row)] & (1u << (4 - col))) == 0u) {
+                        continue;
+                    }
+                    append_rotated_rect(
+                        vertices,
+                        cursor_x + static_cast<float>(col) * scale,
+                        y + static_cast<float>(row) * scale,
+                        cursor_x + static_cast<float>(col + 1) * scale,
+                        y + static_cast<float>(row + 1) * scale,
+                        origin_x,
+                        origin_y,
+                        cos_a,
+                        sin_a,
+                        width,
+                        height,
+                        color
+                    );
+                }
+            }
+        }
+        cursor_x += 6.0f * scale;
+    }
+}
+
 }
 
 Renderer::~Renderer() {
@@ -406,6 +549,10 @@ bool Renderer::initialize(const PlatformWindow& window, const std::string& shade
         log_message(LogLevel::Error, "Renderer: load_ui_textures failed");
         return false;
     }
+    if (!load_menu_textures()) {
+        log_message(LogLevel::Error, "Renderer: load_menu_textures failed");
+        return false;
+    }
     log_message(LogLevel::Info, "Renderer: create_command_buffers");
     if (!create_command_buffers()) {
         log_message(LogLevel::Error, "Renderer: create_command_buffers failed");
@@ -471,14 +618,6 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
     vkCmdBeginRenderPass(frame.command_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdSetViewport(frame.command_buffer, 0, 1, &viewport_);
     vkCmdSetScissor(frame.command_buffer, 0, 1, &scissor_);
-    vkCmdPushConstants(
-        frame.command_buffer,
-        pipeline_layout_,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(Mat4),
-        current_camera_.view_proj.m.data()
-    );
 
     frame_started_ = true;
 }
@@ -490,37 +629,52 @@ void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh) {
         chunk_buffers_.erase(existing);
     }
 
-    if (mesh.vertices.empty() || mesh.indices.empty()) {
+    if (mesh.empty()) {
         log_message(LogLevel::Warning, "Renderer: chunk mesh is empty");
         return;
     }
 
-    const VkDeviceSize vertex_size = sizeof(Vertex) * mesh.vertices.size();
-    const VkDeviceSize index_size = sizeof(std::uint32_t) * mesh.indices.size();
-
     ChunkRenderData render_data {};
-    render_data.vertex_buffer = create_buffer(
-        vertex_size,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    upload_mesh_section(
+        mesh.opaque_mesh,
+        render_data.opaque_vertex_buffer,
+        render_data.opaque_index_buffer,
+        render_data.opaque_index_count
     );
-    render_data.index_buffer = create_buffer(
-        index_size,
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    upload_mesh_section(
+        mesh.cutout_mesh,
+        render_data.cutout_vertex_buffer,
+        render_data.cutout_index_buffer,
+        render_data.cutout_index_count
     );
-
-    void* mapped = nullptr;
-    vkMapMemory(device_, render_data.vertex_buffer.memory, 0, vertex_size, 0, &mapped);
-    std::memcpy(mapped, mesh.vertices.data(), static_cast<std::size_t>(vertex_size));
-    vkUnmapMemory(device_, render_data.vertex_buffer.memory);
-
-    vkMapMemory(device_, render_data.index_buffer.memory, 0, index_size, 0, &mapped);
-    std::memcpy(mapped, mesh.indices.data(), static_cast<std::size_t>(index_size));
-    vkUnmapMemory(device_, render_data.index_buffer.memory);
-
-    render_data.index_count = static_cast<std::uint32_t>(mesh.indices.size());
+    upload_mesh_section(
+        mesh.transparent_mesh,
+        render_data.transparent_vertex_buffer,
+        render_data.transparent_index_buffer,
+        render_data.transparent_index_count
+    );
     chunk_buffers_[coord] = render_data;
+}
+
+void Renderer::draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button) {
+    if (!frame_started_) {
+        return;
+    }
+
+    update_main_menu_buffers(time_seconds, use_night_panorama, hovered_button);
+
+    const FrameResources& frame = frames_[current_frame_];
+    draw_textured_buffer(
+        frame,
+        menu_panorama_vertex_buffer_,
+        menu_panorama_vertex_count_,
+        use_night_panorama ? menu_panorama_night_.descriptor_set : menu_panorama_day_.descriptor_set
+    );
+    draw_colored_buffer(frame, menu_overlay_vertex_buffer_, menu_overlay_vertex_count_, hotbar_fill_pipeline_);
+    draw_textured_buffer(frame, menu_logo_vertex_buffer_, menu_logo_vertex_count_, menu_logo_.descriptor_set);
+    draw_textured_buffer(frame, menu_button_vertex_buffer_, menu_button_vertex_count_, menu_button_.descriptor_set);
+    draw_textured_buffer(frame, menu_button_highlight_vertex_buffer_, menu_button_highlight_vertex_count_, menu_button_highlighted_.descriptor_set);
+    draw_colored_buffer(frame, menu_text_vertex_buffer_, menu_text_vertex_count_, hotbar_fill_pipeline_);
 }
 
 void Renderer::unload_chunk_mesh(ChunkCoord coord) {
@@ -557,16 +711,8 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     last_drawn_chunks_ = render_chunks.size();
     debug_hud_data_.drawn_chunks = last_drawn_chunks_;
 
-    const auto draw_chunks_with_pipeline = [&](VkPipeline pipeline, VkPipelineLayout layout, bool bind_textures) {
+    const auto draw_chunks_with_pipeline = [&](VkPipeline pipeline, VkPipelineLayout layout, bool bind_textures, auto section_getter) {
         vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        vkCmdPushConstants(
-            frame.command_buffer,
-            layout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(Mat4),
-            current_camera_.view_proj.m.data()
-        );
 
         if (bind_textures && descriptor_set_ != VK_NULL_HANDLE) {
             vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &descriptor_set_, 0, nullptr);
@@ -574,20 +720,52 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
         for (const ActiveChunk& chunk : render_chunks) {
             auto it = chunk_buffers_.find(chunk.coord);
+            if (it == chunk_buffers_.end()) {
+                continue;
+            }
+            const auto section = section_getter(it->second);
+            if (section.index_count == 0 || section.vertex_buffer == VK_NULL_HANDLE || section.index_buffer == VK_NULL_HANDLE) {
+                continue;
+            }
+            const Mat4 chunk_matrix = chunk_view_proj(chunk.coord);
+            vkCmdPushConstants(
+                frame.command_buffer,
+                layout,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(Mat4),
+                chunk_matrix.m.data()
+            );
 
-            const VkBuffer vertex_buffers[] = {it->second.vertex_buffer.buffer};
+            const VkBuffer vertex_buffers[] = {section.vertex_buffer};
             const VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
-            vkCmdBindIndexBuffer(frame.command_buffer, it->second.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(frame.command_buffer, it->second.index_count, 1, 0, 0, 0);
+            vkCmdBindIndexBuffer(frame.command_buffer, section.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(frame.command_buffer, section.index_count, 1, 0, 0, 0);
         }
     };
 
     if (draw_textured_fill) {
-        draw_chunks_with_pipeline(fill_pipeline_, pipeline_layout_, true);
+        draw_chunks_with_pipeline(fill_pipeline_, pipeline_layout_, true, [](const ChunkRenderData& chunk) {
+            return DrawSectionView {chunk.opaque_vertex_buffer.buffer, chunk.opaque_index_buffer.buffer, chunk.opaque_index_count};
+        });
+        draw_chunks_with_pipeline(cutout_pipeline_, pipeline_layout_, true, [](const ChunkRenderData& chunk) {
+            return DrawSectionView {chunk.cutout_vertex_buffer.buffer, chunk.cutout_index_buffer.buffer, chunk.cutout_index_count};
+        });
+        draw_chunks_with_pipeline(water_pipeline_, pipeline_layout_, true, [](const ChunkRenderData& chunk) {
+            return DrawSectionView {chunk.transparent_vertex_buffer.buffer, chunk.transparent_index_buffer.buffer, chunk.transparent_index_count};
+        });
     }
     if (use_wireframe) {
-        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false);
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const ChunkRenderData& chunk) {
+            return DrawSectionView {chunk.opaque_vertex_buffer.buffer, chunk.opaque_index_buffer.buffer, chunk.opaque_index_count};
+        });
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const ChunkRenderData& chunk) {
+            return DrawSectionView {chunk.cutout_vertex_buffer.buffer, chunk.cutout_index_buffer.buffer, chunk.cutout_index_count};
+        });
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const ChunkRenderData& chunk) {
+            return DrawSectionView {chunk.transparent_vertex_buffer.buffer, chunk.transparent_index_buffer.buffer, chunk.transparent_index_count};
+        });
     }
 
     if (wireframe_enabled_) {
@@ -663,8 +841,12 @@ void Renderer::shutdown() {
 
     for (auto& [coord, render_data] : chunk_buffers_) {
         (void)coord;
-        destroy_buffer(render_data.vertex_buffer);
-        destroy_buffer(render_data.index_buffer);
+        destroy_buffer(render_data.opaque_vertex_buffer);
+        destroy_buffer(render_data.opaque_index_buffer);
+        destroy_buffer(render_data.cutout_vertex_buffer);
+        destroy_buffer(render_data.cutout_index_buffer);
+        destroy_buffer(render_data.transparent_vertex_buffer);
+        destroy_buffer(render_data.transparent_index_buffer);
     }
     chunk_buffers_.clear();
     destroy_deferred_chunk_buffers_immediate();
@@ -675,6 +857,12 @@ void Renderer::shutdown() {
     destroy_buffer(hotbar_texture_vertex_buffer_);
     destroy_buffer(crosshair_vertex_buffer_);
     destroy_buffer(debug_hud_vertex_buffer_);
+    destroy_buffer(menu_panorama_vertex_buffer_);
+    destroy_buffer(menu_logo_vertex_buffer_);
+    destroy_buffer(menu_button_vertex_buffer_);
+    destroy_buffer(menu_button_highlight_vertex_buffer_);
+    destroy_buffer(menu_overlay_vertex_buffer_);
+    destroy_buffer(menu_text_vertex_buffer_);
 
     for (auto& frame : frames_) {
         if (frame.image_available != VK_NULL_HANDLE) {
@@ -715,6 +903,12 @@ void Renderer::shutdown() {
     }
     if (wireframe_pipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, wireframe_pipeline_, nullptr);
+    }
+    if (water_pipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, water_pipeline_, nullptr);
+    }
+    if (cutout_pipeline_ != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device_, cutout_pipeline_, nullptr);
     }
     if (fill_pipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, fill_pipeline_, nullptr);
@@ -796,7 +990,8 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.pending_uploads != data.pending_uploads ||
         debug_hud_data_.uploads_this_frame != data.uploads_this_frame ||
         debug_hud_data_.queued_rebuilds != data.queued_rebuilds ||
-        debug_hud_data_.drawn_chunks != data.drawn_chunks) {
+        debug_hud_data_.drawn_chunks != data.drawn_chunks ||
+        debug_hud_data_.fancy_leaves != data.fancy_leaves) {
         debug_hud_dirty_ = true;
     }
     debug_hud_enabled_ = enabled;
@@ -1056,12 +1251,13 @@ bool Renderer::create_render_pass() {
 bool Renderer::create_pipeline(const std::string& shader_directory) {
     const auto vertex_code = read_binary_file(shader_directory + "/voxel.vert.spv");
     const auto fragment_code = read_binary_file(shader_directory + "/voxel.frag.spv");
+    const auto water_fragment_code = read_binary_file(shader_directory + "/water.frag.spv");
     const auto hud_vertex_code = read_binary_file(shader_directory + "/hud.vert.spv");
     const auto hud_textured_vertex_code = read_binary_file(shader_directory + "/hud_textured.vert.spv");
     const auto hud_textured_fragment_code = read_binary_file(shader_directory + "/hud_textured.frag.spv");
     const auto color_fragment_code = read_binary_file(shader_directory + "/color.frag.spv");
     const auto wireframe_debug_fragment_code = read_binary_file(shader_directory + "/wireframe_debug.frag.spv");
-    if (vertex_code.empty() || fragment_code.empty() || hud_vertex_code.empty() ||
+    if (vertex_code.empty() || fragment_code.empty() || water_fragment_code.empty() || hud_vertex_code.empty() ||
         hud_textured_vertex_code.empty() || hud_textured_fragment_code.empty() || color_fragment_code.empty() ||
         wireframe_debug_fragment_code.empty()) {
         return false;
@@ -1123,6 +1319,34 @@ bool Renderer::create_pipeline(const std::string& shader_directory) {
             true,
             false,
             &fill_pipeline_)) {
+        return false;
+    }
+
+    if (!create_graphics_pipeline(
+            vertex_code,
+            fragment_code,
+            pipeline_layout_,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_POLYGON_MODE_FILL,
+            debug_disable_culling ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT,
+            true,
+            true,
+            false,
+            &cutout_pipeline_)) {
+        return false;
+    }
+
+    if (!create_graphics_pipeline(
+            vertex_code,
+            water_fragment_code,
+            pipeline_layout_,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_POLYGON_MODE_FILL,
+            VK_CULL_MODE_NONE,
+            true,
+            false,
+            true,
+            &water_pipeline_)) {
         return false;
     }
 
@@ -1482,13 +1706,22 @@ bool Renderer::recreate_swapchain_if_needed() {
 }
 
 void Renderer::defer_destroy_chunk_buffers(ChunkRenderData&& render_data) {
-    if (render_data.vertex_buffer.buffer == VK_NULL_HANDLE && render_data.index_buffer.buffer == VK_NULL_HANDLE) {
+    if (render_data.opaque_vertex_buffer.buffer == VK_NULL_HANDLE &&
+        render_data.opaque_index_buffer.buffer == VK_NULL_HANDLE &&
+        render_data.cutout_vertex_buffer.buffer == VK_NULL_HANDLE &&
+        render_data.cutout_index_buffer.buffer == VK_NULL_HANDLE &&
+        render_data.transparent_vertex_buffer.buffer == VK_NULL_HANDLE &&
+        render_data.transparent_index_buffer.buffer == VK_NULL_HANDLE) {
         return;
     }
 
     deferred_chunk_buffers_.push_back({
-        render_data.vertex_buffer,
-        render_data.index_buffer,
+        render_data.opaque_vertex_buffer,
+        render_data.opaque_index_buffer,
+        render_data.cutout_vertex_buffer,
+        render_data.cutout_index_buffer,
+        render_data.transparent_vertex_buffer,
+        render_data.transparent_index_buffer,
         static_cast<std::uint32_t>(frames_.size() + 1)
     });
 }
@@ -1499,8 +1732,12 @@ void Renderer::retire_deferred_chunk_buffers() {
             --it->frames_remaining;
         }
         if (it->frames_remaining == 0) {
-            destroy_buffer(it->vertex_buffer);
-            destroy_buffer(it->index_buffer);
+            destroy_buffer(it->opaque_vertex_buffer);
+            destroy_buffer(it->opaque_index_buffer);
+            destroy_buffer(it->cutout_vertex_buffer);
+            destroy_buffer(it->cutout_index_buffer);
+            destroy_buffer(it->transparent_vertex_buffer);
+            destroy_buffer(it->transparent_index_buffer);
             it = deferred_chunk_buffers_.erase(it);
         } else {
             ++it;
@@ -1510,10 +1747,46 @@ void Renderer::retire_deferred_chunk_buffers() {
 
 void Renderer::destroy_deferred_chunk_buffers_immediate() {
     for (DeferredChunkBuffers& buffers : deferred_chunk_buffers_) {
-        destroy_buffer(buffers.vertex_buffer);
-        destroy_buffer(buffers.index_buffer);
+        destroy_buffer(buffers.opaque_vertex_buffer);
+        destroy_buffer(buffers.opaque_index_buffer);
+        destroy_buffer(buffers.cutout_vertex_buffer);
+        destroy_buffer(buffers.cutout_index_buffer);
+        destroy_buffer(buffers.transparent_vertex_buffer);
+        destroy_buffer(buffers.transparent_index_buffer);
     }
     deferred_chunk_buffers_.clear();
+}
+
+void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count) {
+    if (mesh.empty()) {
+        index_count = 0;
+        return;
+    }
+
+    const VkDeviceSize vertex_size = sizeof(Vertex) * mesh.vertices.size();
+    const VkDeviceSize index_size = sizeof(std::uint32_t) * mesh.indices.size();
+
+    vertex_buffer = create_buffer(
+        vertex_size,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    index_buffer = create_buffer(
+        index_size,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    void* mapped = nullptr;
+    vkMapMemory(device_, vertex_buffer.memory, 0, vertex_size, 0, &mapped);
+    std::memcpy(mapped, mesh.vertices.data(), static_cast<std::size_t>(vertex_size));
+    vkUnmapMemory(device_, vertex_buffer.memory);
+
+    vkMapMemory(device_, index_buffer.memory, 0, index_size, 0, &mapped);
+    std::memcpy(mapped, mesh.indices.data(), static_cast<std::size_t>(index_size));
+    vkUnmapMemory(device_, index_buffer.memory);
+
+    index_count = static_cast<std::uint32_t>(mesh.indices.size());
 }
 
 Renderer::GpuBuffer Renderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
@@ -1649,6 +1922,15 @@ bool Renderer::aabb_visible_in_current_frustum(const Aabb& bounds) const {
     }
 
     return !(outside_left || outside_right || outside_bottom || outside_top || outside_near || outside_far);
+}
+
+Mat4 Renderer::chunk_view_proj(ChunkCoord coord) const {
+    const Vec3 chunk_origin {
+        static_cast<float>(coord.x * kChunkWidth),
+        0.0f,
+        static_cast<float>(coord.z * kChunkDepth)
+    };
+    return multiply(current_camera_.view_proj, translation_matrix(chunk_origin));
 }
 
 void Renderer::upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex>& vertices) {
@@ -1850,11 +2132,12 @@ void Renderer::update_debug_hud_buffer() {
     const std::string uploads = "UP:" + std::to_string(debug_hud_data_.uploads_this_frame);
     const std::string pending = "PEND:" + std::to_string(debug_hud_data_.pending_uploads);
     const std::string rebuilds = "REB:" + std::to_string(debug_hud_data_.queued_rebuilds);
+    const std::string leaves = debug_hud_data_.fancy_leaves ? "LEAVES:FANCY" : "LEAVES:FAST";
 
     std::vector<Vertex> vertices;
     vertices.reserve(
         (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
-            chunks.size() + drawn.size() + uploads.size() + pending.size() + rebuilds.size()) * 16
+            chunks.size() + drawn.size() + uploads.size() + pending.size() + rebuilds.size() + leaves.size()) * 16
     );
     const auto append_left_text = [&](const std::string& text, float y) {
         const float advance = 6.0f * scale;
@@ -1869,6 +2152,7 @@ void Renderer::update_debug_hud_buffer() {
     append_left_text(uploads, top - 100.0f);
     append_left_text(pending, top - 120.0f);
     append_left_text(rebuilds, top - 140.0f);
+    append_left_text(leaves, top - 160.0f);
 
     debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
     upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);
@@ -1880,6 +2164,14 @@ void Renderer::draw_chunk_outlines(const FrameResources& frame) {
     }
 
     vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, chunk_outline_pipeline_);
+    vkCmdPushConstants(
+        frame.command_buffer,
+        hud_pipeline_layout_,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(Mat4),
+        current_camera_.view_proj.m.data()
+    );
     const VkBuffer vertex_buffers[] = {chunk_outline_vertex_buffer_.buffer};
     const VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
@@ -1892,6 +2184,14 @@ void Renderer::draw_target_block_outline(const FrameResources& frame) {
     }
 
     vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, block_outline_pipeline_);
+    vkCmdPushConstants(
+        frame.command_buffer,
+        hud_pipeline_layout_,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(Mat4),
+        current_camera_.view_proj.m.data()
+    );
     const VkBuffer vertex_buffers[] = {target_block_outline_vertex_buffer_.buffer};
     const VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
@@ -1933,6 +2233,124 @@ void Renderer::draw_crosshair(const FrameResources& frame) {
     const VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
     vkCmdDraw(frame.command_buffer, crosshair_vertex_count_, 1, 0, 0);
+}
+
+void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panorama, int hovered_button) {
+    menu_panorama_vertex_count_ = 0;
+    menu_logo_vertex_count_ = 0;
+    menu_button_vertex_count_ = 0;
+    menu_button_highlight_vertex_count_ = 0;
+    menu_overlay_vertex_count_ = 0;
+    menu_text_vertex_count_ = 0;
+    if (swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+        return;
+    }
+
+    const float width = static_cast<float>(swapchain_extent_.width);
+    const float height = static_cast<float>(swapchain_extent_.height);
+    const float scale = menu_integer_scale(width, height);
+    const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
+
+    std::vector<Vertex> panorama_vertices;
+    panorama_vertices.reserve(6);
+    const float view_ratio = width / height;
+    const float image_ratio = panorama.height > 0 ? static_cast<float>(panorama.width) / static_cast<float>(panorama.height) : view_ratio;
+    const float visible_u = clamp(view_ratio / std::max(image_ratio, 0.001f), 0.0f, 1.0f);
+    const float travel = std::max(0.0f, 1.0f - visible_u);
+    constexpr float kPanoramaScrollUvPerSecond = 0.006f;
+    const float u0 = ping_pong_offset(time_seconds, kPanoramaScrollUvPerSecond, travel, travel * 0.5f);
+    const float u1 = std::min(1.0f, u0 + visible_u);
+    append_hud_textured_quad(panorama_vertices, 0.0f, 0.0f, width, height, width, height, u0, 0.0f, u1, 1.0f);
+    menu_panorama_vertex_count_ = static_cast<std::uint32_t>(panorama_vertices.size());
+    upload_dynamic_buffer(menu_panorama_vertex_buffer_, panorama_vertices);
+
+    menu_overlay_vertex_count_ = 0;
+
+    std::vector<Vertex> logo_vertices;
+    logo_vertices.reserve(6);
+    const float logo_width = std::min(width * 0.46f, 857.0f * scale * 0.32f);
+    const float logo_height = logo_width * (207.0f / 857.0f);
+    const float logo_left = (width - logo_width) * 0.5f;
+    const float logo_top = height * 0.075f;
+    append_hud_textured_quad(logo_vertices, logo_left, logo_top, logo_left + logo_width, logo_top + logo_height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
+    menu_logo_vertex_count_ = static_cast<std::uint32_t>(logo_vertices.size());
+    upload_dynamic_buffer(menu_logo_vertex_buffer_, logo_vertices);
+
+    constexpr std::array<const char*, 6> labels {{
+        "PLAY GAME",
+        "MINI GAMES",
+        "LEADERBOARDS",
+        "HELP & OPTIONS",
+        "MINECRAFT STORE",
+        "LAUNCH NEW MINECRAFT"
+    }};
+    const float button_width = 200.0f * scale;
+    const float button_height = 20.0f * scale;
+    const float gap = 5.0f * scale;
+    const float left = (width - button_width) * 0.5f;
+    const float first_top = height * 0.35f;
+
+    std::vector<Vertex> button_vertices;
+    std::vector<Vertex> button_highlight_vertices;
+    std::vector<Vertex> text_vertices;
+    button_vertices.reserve(6 * 5);
+    button_highlight_vertices.reserve(6);
+    text_vertices.reserve(6000);
+
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        const float top = first_top + static_cast<float>(i) * (button_height + gap);
+        std::vector<Vertex>& target = static_cast<int>(i) == hovered_button ? button_highlight_vertices : button_vertices;
+        append_hud_textured_quad(target, left, top, left + button_width, top + button_height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
+
+        const std::string label = labels[i];
+        const float preferred_text_scale = std::max(1.2f, scale * 1.12f);
+        const float text_scale = std::max(1.0f, std::min(preferred_text_scale, (button_width * 0.82f) / pixel_text_width(label, 1.0f)));
+        const float text_width = pixel_text_width(label, text_scale);
+        const float text_left = left + (button_width - text_width) * 0.5f;
+        const float text_top = top + (button_height - 7.0f * text_scale) * 0.5f;
+        const Vec3 text_color = static_cast<int>(i) == hovered_button ? Vec3 {1.0f, 1.0f, 0.25f} : Vec3 {1.0f, 1.0f, 1.0f};
+        append_pixel_text(text_vertices, label, text_left + std::max(1.0f, scale * 0.35f), text_top + std::max(1.0f, scale * 0.35f), text_scale, width, height, {0.15f, 0.15f, 0.15f});
+        append_pixel_text(text_vertices, label, text_left, text_top, text_scale, width, height, text_color);
+    }
+
+    const std::string splash = "WHAT DOES THE FOX SAY?";
+    const float splash_scale = std::max(1.5f, std::min(scale * 1.45f, (width * 0.30f) / pixel_text_width(splash, 1.0f)));
+    const float splash_left = std::min(width * 0.54f, width - pixel_text_width(splash, splash_scale) - width * 0.08f);
+    const float splash_top = logo_top + logo_height * 0.42f;
+    append_pixel_text(text_vertices, splash, splash_left + 2.0f, splash_top + 2.0f, splash_scale, width, height, {0.25f, 0.25f, 0.0f}, -0.34f);
+    append_pixel_text(text_vertices, splash, splash_left, splash_top, splash_scale, width, height, {1.0f, 1.0f, 0.0f}, -0.34f);
+
+    menu_button_vertex_count_ = static_cast<std::uint32_t>(button_vertices.size());
+    menu_button_highlight_vertex_count_ = static_cast<std::uint32_t>(button_highlight_vertices.size());
+    menu_text_vertex_count_ = static_cast<std::uint32_t>(text_vertices.size());
+    upload_dynamic_buffer(menu_button_vertex_buffer_, button_vertices);
+    upload_dynamic_buffer(menu_button_highlight_vertex_buffer_, button_highlight_vertices);
+    upload_dynamic_buffer(menu_text_vertex_buffer_, text_vertices);
+}
+
+void Renderer::draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set) {
+    if (vertex_count == 0 || buffer.buffer == VK_NULL_HANDLE || hotbar_texture_pipeline_ == VK_NULL_HANDLE || descriptor_set == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, hotbar_texture_pipeline_);
+    vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ui_pipeline_layout_, 0, 1, &descriptor_set, 0, nullptr);
+    const VkBuffer vertex_buffers[] = {buffer.buffer};
+    const VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
+    vkCmdDraw(frame.command_buffer, vertex_count, 1, 0, 0);
+}
+
+void Renderer::draw_colored_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkPipeline pipeline) {
+    if (vertex_count == 0 || buffer.buffer == VK_NULL_HANDLE || pipeline == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    const VkBuffer vertex_buffers[] = {buffer.buffer};
+    const VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
+    vkCmdDraw(frame.command_buffer, vertex_count, 1, 0, 0);
 }
 
 bool Renderer::load_textures() {
@@ -2407,7 +2825,250 @@ bool Renderer::load_ui_textures() {
     return true;
 }
 
+bool Renderer::load_menu_textures() {
+    return load_menu_texture("assets/panorama/panorama_tu69_day.png", false, false, menu_panorama_day_) &&
+        load_menu_texture("assets/panorama/panorama_tu69_night.png", false, false, menu_panorama_night_) &&
+        load_menu_texture("assets/button/button.png", false, true, menu_button_) &&
+        load_menu_texture("assets/button/button_highlighted.png", false, true, menu_button_highlighted_) &&
+        load_menu_texture("assets/sound/ui/logo/legacy_console_edition_logo.png.png", false, true, menu_logo_);
+}
+
+bool Renderer::load_menu_texture(const std::string& path, bool repeat, bool pixelated, MenuTexture& texture) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+    if (pixels == nullptr || width <= 0 || height <= 0) {
+        log_message(LogLevel::Error, "Renderer: failed to load menu texture " + path);
+        return false;
+    }
+
+    texture.width = static_cast<std::uint32_t>(width);
+    texture.height = static_cast<std::uint32_t>(height);
+    constexpr int tex_channels = 4;
+    const VkDeviceSize image_size = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * tex_channels;
+
+    GpuBuffer staging_buffer = create_buffer(
+        image_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    void* data = nullptr;
+    vkMapMemory(device_, staging_buffer.memory, 0, image_size, 0, &data);
+    std::memcpy(data, pixels, static_cast<std::size_t>(image_size));
+    vkUnmapMemory(device_, staging_buffer.memory);
+    stbi_image_free(pixels);
+
+    VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = texture.width;
+    image_info.extent.height = texture.height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateImage(device_, &image_info, nullptr, &texture.image) != VK_SUCCESS) {
+        destroy_buffer(staging_buffer);
+        return false;
+    }
+
+    VkMemoryRequirements mem_requirements {};
+    vkGetImageMemoryRequirements(device_, texture.image, &mem_requirements);
+
+    VkMemoryAllocateInfo alloc_info {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    alloc_info.allocationSize = mem_requirements.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(device_, &alloc_info, nullptr, &texture.memory) != VK_SUCCESS) {
+        destroy_buffer(staging_buffer);
+        return false;
+    }
+    vkBindImageMemory(device_, texture.image, texture.memory, 0);
+
+    VkCommandBufferAllocateInfo alloc_info_cb {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc_info_cb.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info_cb.commandPool = command_pool_;
+    alloc_info_cb.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(device_, &alloc_info_cb, &command_buffer);
+
+    VkCommandBufferBeginInfo begin_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(command_buffer, &begin_info);
+
+    VkImageMemoryBarrier barrier {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = texture.image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        command_buffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    VkBufferImageCopy region {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {texture.width, texture.height, 1};
+
+    vkCmdCopyBufferToImage(command_buffer, staging_buffer.buffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        command_buffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    vkEndCommandBuffer(command_buffer);
+
+    VkSubmitInfo submit_info {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+    vkQueueSubmit(graphics_queue_, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphics_queue_);
+    vkFreeCommandBuffers(device_, command_pool_, 1, &command_buffer);
+    destroy_buffer(staging_buffer);
+
+    VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view_info.image = texture.image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device_, &view_info, nullptr, &texture.view) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkSamplerCreateInfo sampler_info {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_info.magFilter = pixelated ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    sampler_info.minFilter = pixelated ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    sampler_info.addressModeU = repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.anisotropyEnable = VK_FALSE;
+    sampler_info.maxAnisotropy = 1.0f;
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_TRANSPARENT_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_info.mipmapMode = pixelated ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+    if (vkCreateSampler(device_, &sampler_info, nullptr, &texture.sampler) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorPoolSize pool_size {};
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes = &pool_size;
+    pool_info.maxSets = 1;
+    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &texture.descriptor_pool) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorSetAllocateInfo alloc_info_set {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    alloc_info_set.descriptorPool = texture.descriptor_pool;
+    alloc_info_set.descriptorSetCount = 1;
+    alloc_info_set.pSetLayouts = &ui_descriptor_set_layout_;
+    if (vkAllocateDescriptorSets(device_, &alloc_info_set, &texture.descriptor_set) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorImageInfo image_desc_info {};
+    image_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_desc_info.imageView = texture.view;
+    image_desc_info.sampler = texture.sampler;
+
+    VkWriteDescriptorSet descriptor_write {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    descriptor_write.dstSet = texture.descriptor_set;
+    descriptor_write.dstBinding = 0;
+    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_write.descriptorCount = 1;
+    descriptor_write.pImageInfo = &image_desc_info;
+    vkUpdateDescriptorSets(device_, 1, &descriptor_write, 0, nullptr);
+
+    return true;
+}
+
+void Renderer::destroy_menu_texture(MenuTexture& texture) {
+    if (texture.descriptor_pool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, texture.descriptor_pool, nullptr);
+        texture.descriptor_pool = VK_NULL_HANDLE;
+    }
+    if (texture.sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, texture.sampler, nullptr);
+        texture.sampler = VK_NULL_HANDLE;
+    }
+    if (texture.view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, texture.view, nullptr);
+        texture.view = VK_NULL_HANDLE;
+    }
+    if (texture.image != VK_NULL_HANDLE) {
+        vkDestroyImage(device_, texture.image, nullptr);
+        texture.image = VK_NULL_HANDLE;
+    }
+    if (texture.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, texture.memory, nullptr);
+        texture.memory = VK_NULL_HANDLE;
+    }
+    texture.descriptor_set = VK_NULL_HANDLE;
+    texture.width = 0;
+    texture.height = 0;
+}
+
 void Renderer::destroy_textures() {
+    destroy_menu_texture(menu_panorama_day_);
+    destroy_menu_texture(menu_panorama_night_);
+    destroy_menu_texture(menu_button_);
+    destroy_menu_texture(menu_button_highlighted_);
+    destroy_menu_texture(menu_logo_);
+
     if (ui_descriptor_pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device_, ui_descriptor_pool_, nullptr);
         ui_descriptor_pool_ = VK_NULL_HANDLE;

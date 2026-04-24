@@ -2,6 +2,21 @@
 
 namespace ml {
 
+namespace {
+
+Mat4 make_view_rotation(const Vec3& right, const Vec3& up, const Vec3& forward) {
+    Mat4 result = Mat4::identity();
+    result.m = {
+         right.x,  up.x, -forward.x, 0.0f,
+         right.y,  up.y, -forward.y, 0.0f,
+         right.z,  up.z, -forward.z, 0.0f,
+         0.0f,     0.0f, 0.0f,       1.0f
+    };
+    return result;
+}
+
+}
+
 void DebugCamera::update(const InputState& input, float dt) {
     if (input.capture_mouse) {
         yaw_ += input.mouse_delta.x * mouse_sensitivity_;
@@ -47,6 +62,8 @@ CameraFrameData DebugCamera::frame_data(float aspect_ratio) const {
     const Mat4 view = look_at(position_, target, {0.0f, 1.0f, 0.0f});
     Mat4 projection = perspective(radians(70.0f), aspect_ratio, 0.1f, 1000.0f);
     projection.m[5] *= -1.0f;
+    frame.projection = projection;
+    frame.view_rotation = make_view_rotation(right_vec, up_vec, fwd);
     frame.view_proj = multiply(projection, view);
     frame.camera_position = position_;
     frame.camera_forward = fwd;

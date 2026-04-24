@@ -42,6 +42,8 @@ public:
     bool is_solid_at_world(int x, int y, int z) const;
     std::optional<BlockHit> raycast(const Vec3& origin, const Vec3& direction, float max_distance) const;
     SetBlockResult set_block_at_world(int x, int y, int z, BlockId block);
+    void set_leaves_render_mode(LeavesRenderMode mode);
+    LeavesRenderMode leaves_render_mode() const;
 
 private:
     enum class ChunkJobType {
@@ -51,11 +53,16 @@ private:
 
     struct ChunkMeshSnapshot {
         std::uint64_t version {0};
+        LeavesRenderMode leaves_mode {LeavesRenderMode::Fancy};
         ChunkData chunk {};
         std::optional<ChunkData> west {};
         std::optional<ChunkData> east {};
         std::optional<ChunkData> north {};
         std::optional<ChunkData> south {};
+        std::optional<ChunkData> northwest {};
+        std::optional<ChunkData> northeast {};
+        std::optional<ChunkData> southwest {};
+        std::optional<ChunkData> southeast {};
     };
 
     struct ChunkJob {
@@ -105,6 +112,7 @@ private:
     const BlockRegistry& block_registry_;
     WorldGenerator generator_;
     int chunk_radius_ {6};
+    LeavesRenderMode leaves_render_mode_ {LeavesRenderMode::Fancy};
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;

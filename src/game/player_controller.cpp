@@ -10,6 +10,17 @@ namespace {
 
 constexpr float kCollisionSkin = 0.001f;
 
+Mat4 make_view_rotation(const Vec3& right, const Vec3& up, const Vec3& forward) {
+    Mat4 result = Mat4::identity();
+    result.m = {
+         right.x,  up.x, -forward.x, 0.0f,
+         right.y,  up.y, -forward.y, 0.0f,
+         right.z,  up.z, -forward.z, 0.0f,
+         0.0f,     0.0f, 0.0f,       1.0f
+    };
+    return result;
+}
+
 }
 
 void PlayerController::update(const InputState& input, float dt, const WorldStreamer& world) {
@@ -81,6 +92,8 @@ CameraFrameData PlayerController::camera_frame_data(float aspect_ratio) const {
     const Mat4 view = look_at(eye, eye + fwd, {0.0f, 1.0f, 0.0f});
     Mat4 projection = perspective(radians(70.0f), aspect_ratio, 0.1f, 1000.0f);
     projection.m[5] *= -1.0f;
+    frame.projection = projection;
+    frame.view_rotation = make_view_rotation(right_vec, up_vec, fwd);
     frame.view_proj = multiply(projection, view);
     frame.camera_position = eye;
     frame.camera_forward = fwd;

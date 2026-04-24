@@ -2,6 +2,10 @@
 
 #include "common/log.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <random>
+
 namespace ml {
 
 namespace {
@@ -16,6 +20,37 @@ constexpr float kDebugFpsRefreshSeconds = 0.25f;
 constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 constexpr std::size_t kMaxChunkUploadsPerFrame = 2;
+constexpr int kPlayGameButtonIndex = 0;
+
+float menu_integer_scale(float width, float height) {
+    const float fit_scale = std::min(width / 640.0f, height / 360.0f);
+    return std::max(1.0f, std::floor(fit_scale));
+}
+
+const char* leaves_render_mode_name(LeavesRenderMode mode) {
+    switch (mode) {
+    case LeavesRenderMode::Fast:
+        return "FAST";
+    case LeavesRenderMode::Fancy:
+        return "FANCY";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+std::size_t wrap_hotbar_slot(std::size_t current, int delta, std::size_t slot_count) {
+    if (slot_count == 0 || delta == 0) {
+        return current;
+    }
+
+    const int count = static_cast<int>(slot_count);
+    int wrapped = static_cast<int>(current) + delta;
+    wrapped %= count;
+    if (wrapped < 0) {
+        wrapped += count;
+    }
+    return static_cast<std::size_t>(wrapped);
+}
 
 bool aabb_intersects_block(const Aabb& box, const Int3& block) {
     const float block_min_x = static_cast<float>(block.x);
@@ -95,15 +130,62 @@ bool Application::initialize() {
     }
     renderer_.debug_log_draw_stats = false;
 
+    std::random_device random_device;
+    std::mt19937 rng(random_device());
+    std::uniform_int_distribution<int> panorama_roll(1, 100);
+    menu_uses_night_panorama_ = panorama_roll(rng) > 90;
+    platform_.set_mouse_capture(false);
+
     if (kUseFixedDebugCamera) {
         camera_.set_pose({32.0f, 110.0f, 80.0f}, -90.0f, -22.0f);
     }
     player_.set_body_position({32.0f, 100.0f, 80.0f});
     player_.set_view_from_forward(camera_.forward());
-
-    world_streamer_ = std::make_unique<WorldStreamer>(0xC0FFEEULL, block_registry_, 6);
-    log_message(LogLevel::Info, "Application: world streamer created");
     return true;
+}
+
+void Application::start_world() {
+    if (world_streamer_ == nullptr) {
+        world_streamer_ = std::make_unique<WorldStreamer>(0xC0FFEEULL, block_registry_, 6);
+        world_streamer_->set_leaves_render_mode(leaves_render_mode_);
+        log_message(LogLevel::Info, "Application: world streamer created");
+    }
+    platform_.set_mouse_capture(true);
+    app_state_ = AppState::InWorld;
+}
+
+std::array<Application::MenuButton, 6> Application::menu_buttons() const {
+    const PlatformWindow& window = platform_.window();
+    const float width = static_cast<float>(window.width);
+    const float height = static_cast<float>(window.height == 0 ? 1 : window.height);
+    const float scale = menu_integer_scale(width, height);
+    const float button_width = 200.0f * scale;
+    const float button_height = 20.0f * scale;
+    const float gap = 5.0f * scale;
+    const float left = (width - button_width) * 0.5f;
+    const float first_top = height * 0.35f;
+
+    std::array<MenuButton, 6> buttons {};
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        const float top = first_top + static_cast<float>(i) * (button_height + gap);
+        buttons[i] = {left, top, left + button_width, top + button_height};
+    }
+    return buttons;
+}
+
+int Application::hovered_menu_button(const InputState& input) const {
+    if (!input.mouse_inside_window) {
+        return -1;
+    }
+    const auto buttons = menu_buttons();
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        const MenuButton& button = buttons[i];
+        if (input.mouse_position.x >= button.left && input.mouse_position.x <= button.right &&
+            input.mouse_position.y >= button.top && input.mouse_position.y <= button.bottom) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
 }
 
 int Application::run() {
@@ -112,6 +194,39 @@ int Application::run() {
     while (!platform_.should_close()) {
         platform_.pump_events();
         const InputState& input = platform_.current_input();
+        const float dt = platform_.frame_delta_seconds();
+
+        if (app_state_ == AppState::MainMenu) {
+            platform_.set_mouse_capture(false);
+            menu_time_seconds_ += dt;
+            const int hovered_button = hovered_menu_button(input);
+            if (hovered_button != -1 && hovered_button != last_hovered_menu_button_) {
+                platform_.play_ui_focus_sound();
+            }
+            last_hovered_menu_button_ = hovered_button;
+            if (hovered_button == kPlayGameButtonIndex && input.left_click_pressed) {
+                platform_.play_ui_press_sound();
+                start_world();
+            }
+
+            const PlatformWindow& window = platform_.window();
+            const float aspect_ratio = static_cast<float>(window.width) / static_cast<float>(window.height == 0 ? 1 : window.height);
+            const CameraFrameData menu_camera {
+                Mat4::identity(),
+                Mat4::identity(),
+                Mat4::identity(),
+                {},
+                {0.0f, 0.0f, -1.0f},
+                {1.0f, 0.0f, 0.0f},
+                {0.0f, 1.0f, 0.0f}
+            };
+            (void)aspect_ratio;
+            renderer_.begin_frame(menu_camera);
+            renderer_.draw_main_menu(menu_time_seconds_, menu_uses_night_panorama_, hovered_button);
+            renderer_.end_frame();
+            continue;
+        }
+
         if (platform_.current_input().toggle_wireframe_pressed) {
             renderer_.toggle_wireframe();
         }
@@ -121,7 +236,18 @@ int Application::run() {
         if (input.toggle_debug_hud_pressed) {
             debug_hud_enabled_ = !debug_hud_enabled_;
         }
-        const bool debug_hud_toggled = input.toggle_debug_hud_pressed;
+        if (input.toggle_leaves_render_mode_pressed) {
+            leaves_render_mode_ = leaves_render_mode_ == LeavesRenderMode::Fancy
+                ? LeavesRenderMode::Fast
+                : LeavesRenderMode::Fancy;
+            world_streamer_->set_leaves_render_mode(leaves_render_mode_);
+            log_message(
+                LogLevel::Info,
+                std::string("Application: leaves render mode switched to ") + leaves_render_mode_name(leaves_render_mode_) +
+                    " [hotkey=F4]"
+            );
+        }
+        const bool debug_hud_toggled = input.toggle_debug_hud_pressed || input.toggle_leaves_render_mode_pressed;
         if (input.toggle_debug_fly_pressed) {
             debug_fly_enabled_ = !debug_fly_enabled_;
             if (debug_fly_enabled_) {
@@ -140,6 +266,13 @@ int Application::run() {
         if (input.selected_hotbar_slot >= 0 &&
             input.selected_hotbar_slot < static_cast<int>(hotbar_.size())) {
             selected_hotbar_slot_ = static_cast<std::size_t>(input.selected_hotbar_slot);
+        }
+        if (input.hotbar_scroll_delta != 0) {
+            selected_hotbar_slot_ = wrap_hotbar_slot(
+                selected_hotbar_slot_,
+                -input.hotbar_scroll_delta,
+                hotbar_.size()
+            );
         }
         renderer_.set_hotbar_state(selected_hotbar_slot_, hotbar_.size());
 
@@ -171,7 +304,6 @@ int Application::run() {
         const Vec3 ray_direction = debug_fly_enabled_ ? camera_.forward() : player_.forward();
         hovered_block_ = world_streamer_->raycast(ray_origin, ray_direction, kBlockTargetDistance);
 
-        const float dt = platform_.frame_delta_seconds();
         if (!input.break_block_held || !hovered_block_.has_value()) {
             block_break_.target.reset();
             block_break_.repeat_seconds = 0.0f;
@@ -258,7 +390,9 @@ int Application::run() {
                     streaming_stats.visible_chunks,
                     streaming_stats.pending_uploads,
                     uploads_this_frame,
-                    streaming_stats.queued_rebuilds
+                    streaming_stats.queued_rebuilds,
+                    0,
+                    leaves_render_mode_ == LeavesRenderMode::Fancy
                 }
             );
         }

@@ -13,5 +13,7 @@ void main() {
     if (tex_color.a < 0.5) {
         discard;
     }
-    out_color = tex_color * vec4(frag_color, 1.0);
+    vec3 lit_color = tex_color.rgb * clamp(frag_color, vec3(0.0), vec3(1.0));
+    lit_color = clamp(lit_color, vec3(0.0), vec3(1.0));
+    out_color = vec4(lit_color, tex_color.a);
 }

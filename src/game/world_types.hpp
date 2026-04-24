@@ -52,9 +52,23 @@ struct Int3 {
     bool operator==(const Int3&) const = default;
 };
 
-struct ChunkMesh {
+struct MeshSection {
     std::vector<Vertex> vertices;
     std::vector<std::uint32_t> indices;
+
+    bool empty() const {
+        return vertices.empty() || indices.empty();
+    }
+};
+
+struct ChunkMesh {
+    MeshSection opaque_mesh;
+    MeshSection cutout_mesh;
+    MeshSection transparent_mesh;
+
+    bool empty() const {
+        return opaque_mesh.empty() && cutout_mesh.empty() && transparent_mesh.empty();
+    }
 };
 
 struct ChunkData {
@@ -87,6 +101,8 @@ struct PendingChunkUpload {
 };
 
 struct CameraFrameData {
+    Mat4 projection {};
+    Mat4 view_rotation {};
     Mat4 view_proj {};
     Vec3 camera_position {};
     Vec3 camera_forward {};
