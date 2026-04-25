@@ -25,7 +25,22 @@ public:
         std::size_t pending_uploads {0};
         std::size_t uploads_this_frame {0};
         std::size_t queued_rebuilds {0};
+        std::size_t queued_generates {0};
+        std::size_t queued_meshes {0};
+        std::size_t pending_upload_bytes {0};
+        std::size_t uploaded_bytes_this_frame {0};
+        float generate_ms {0.0f};
+        float mesh_ms {0.0f};
+        float upload_ms {0.0f};
         std::size_t drawn_chunks {0};
+        std::size_t visible_sections {0};
+        std::size_t drawn_sections {0};
+        std::size_t frustum_culled_sections {0};
+        std::size_t occlusion_culled_sections {0};
+        std::size_t draw_calls {0};
+        std::size_t drawn_vertices {0};
+        std::size_t drawn_indices {0};
+        std::size_t gpu_buffer_bytes {0};
         bool fancy_leaves {true};
     };
 
@@ -45,6 +60,8 @@ public:
     void shutdown();
     void toggle_wireframe();
     void toggle_wireframe_textures();
+    void toggle_section_culling();
+    void toggle_occlusion_culling();
     bool wireframe_enabled() const;
     void set_target_block(const std::optional<BlockHit>& target_block);
     void set_hotbar_state(std::size_t selected_slot, std::size_t slot_count);
@@ -57,25 +74,32 @@ private:
         VkDeviceSize size {0};
     };
 
-    struct ChunkRenderData {
+    static constexpr int kChunkSectionHeight = 16;
+    static constexpr int kChunkSectionCount = kChunkHeight / kChunkSectionHeight;
+
+    struct RenderSection {
         GpuBuffer opaque_vertex_buffer;
         GpuBuffer opaque_index_buffer;
         std::uint32_t opaque_index_count {0};
+        std::uint32_t opaque_vertex_count {0};
         GpuBuffer cutout_vertex_buffer;
         GpuBuffer cutout_index_buffer;
         std::uint32_t cutout_index_count {0};
+        std::uint32_t cutout_vertex_count {0};
         GpuBuffer transparent_vertex_buffer;
         GpuBuffer transparent_index_buffer;
         std::uint32_t transparent_index_count {0};
+        std::uint32_t transparent_vertex_count {0};
+        bool has_geometry {false};
+        bool has_opaque_geometry {false};
+    };
+
+    struct ChunkRenderData {
+        std::array<RenderSection, kChunkSectionCount> sections {};
     };
 
     struct DeferredChunkBuffers {
-        GpuBuffer opaque_vertex_buffer;
-        GpuBuffer opaque_index_buffer;
-        GpuBuffer cutout_vertex_buffer;
-        GpuBuffer cutout_index_buffer;
-        GpuBuffer transparent_vertex_buffer;
-        GpuBuffer transparent_index_buffer;
+        ChunkRenderData render_data;
         std::uint32_t frames_remaining {0};
     };
 
@@ -147,13 +171,15 @@ private:
     void defer_destroy_chunk_buffers(ChunkRenderData&& render_data);
     void retire_deferred_chunk_buffers();
     void destroy_deferred_chunk_buffers_immediate();
-    void upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count);
+    void upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count, std::uint32_t& vertex_count);
+    void destroy_render_section(RenderSection& section);
     GpuBuffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
     void destroy_buffer(GpuBuffer& buffer);
     std::uint32_t find_memory_type(std::uint32_t type_filter, VkMemoryPropertyFlags properties) const;
     VkShaderModule create_shader_module(const std::vector<char>& code) const;
     std::vector<char> read_binary_file(const std::string& path) const;
     Aabb chunk_bounds(ChunkCoord coord) const;
+    Aabb chunk_section_bounds(ChunkCoord coord, int section_index) const;
     bool aabb_visible_in_current_frustum(const Aabb& bounds) const;
     Mat4 chunk_view_proj(ChunkCoord coord) const;
     void update_chunk_outline_buffer(std::span<const ActiveChunk> visible_chunks);
@@ -294,7 +320,10 @@ private:
     bool wide_lines_supported_ {false};
     bool wireframe_enabled_ {false};
     bool wireframe_textures_enabled_ {false};
+    bool section_culling_enabled_ {true};
+    bool occlusion_culling_enabled_ {false};
     bool logged_wireframe_support_ {false};
+    std::size_t logged_occlusion_warning_count_ {0};
     std::optional<BlockHit> target_block_ {};
     std::size_t hotbar_selected_slot_ {0};
     std::size_t hotbar_slot_count_ {9};

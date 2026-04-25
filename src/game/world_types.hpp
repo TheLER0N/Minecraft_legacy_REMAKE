@@ -14,7 +14,22 @@ using WorldSeed = std::uint64_t;
 
 constexpr int kChunkWidth = 16;
 constexpr int kChunkDepth = 16;
-constexpr int kChunkHeight = 128;
+constexpr int kWorldMinY = -64;
+constexpr int kWorldMaxY = 319;
+constexpr int kChunkHeight = kWorldMaxY - kWorldMinY + 1;
+constexpr int kSeaLevel = 62;
+
+constexpr bool contains_world_y(int world_y) {
+    return world_y >= kWorldMinY && world_y <= kWorldMaxY;
+}
+
+constexpr int world_y_to_local_y(int world_y) {
+    return world_y - kWorldMinY;
+}
+
+constexpr int local_y_to_world_y(int local_y) {
+    return local_y + kWorldMinY;
+}
 
 struct ChunkCoord {
     int x {0};

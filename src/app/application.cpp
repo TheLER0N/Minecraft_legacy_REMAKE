@@ -1,8 +1,10 @@
 #include "app/application.hpp"
 
 #include "common/log.hpp"
+#include "game/world_generator.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <random>
 #include <filesystem>
@@ -12,6 +14,7 @@ namespace ml {
 namespace {
 
 constexpr bool kUseFixedDebugCamera = true;
+constexpr WorldSeed kDefaultWorldSeed = 0xC0FFEEULL;
 constexpr std::size_t kPendingUploadLogLimit = 8;
 constexpr std::size_t kPlacementFailureLogLimit = 8;
 constexpr float kBlockTargetDistance = 5.0f;
@@ -20,7 +23,7 @@ constexpr float kPlacementBodyPadding = 0.02f;
 constexpr float kDebugFpsRefreshSeconds = 0.25f;
 constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
-constexpr std::size_t kMaxChunkUploadsPerFrame = 2;
+constexpr std::size_t kChunkUploadByteBudgetPerFrame = 6ull * 1024ull * 1024ull;
 constexpr int kPlayGameButtonIndex = 0;
 constexpr int kExitGameButtonIndex = 5;
 constexpr float kMenuExitDelaySeconds = 0.18f;
@@ -119,6 +122,12 @@ const char* set_block_result_message(SetBlockResult result) {
     return "unknown";
 }
 
+std::size_t mesh_byte_count(const ChunkMesh& mesh) {
+    const std::size_t vertices = mesh.opaque_mesh.vertices.size() + mesh.cutout_mesh.vertices.size() + mesh.transparent_mesh.vertices.size();
+    const std::size_t indices = mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
+    return vertices * sizeof(Vertex) + indices * sizeof(std::uint32_t);
+}
+
 }
 
 Application::Application() = default;
@@ -159,8 +168,16 @@ bool Application::initialize() {
 
 void Application::start_world() {
     if (world_streamer_ == nullptr) {
-        world_streamer_ = std::make_unique<WorldStreamer>(0xC0FFEEULL, block_registry_, 6);
+        world_streamer_ = std::make_unique<WorldStreamer>(kDefaultWorldSeed, block_registry_, 6);
         world_streamer_->set_leaves_render_mode(leaves_render_mode_);
+        const WorldGenerator spawn_generator {block_registry_};
+        const int spawn_x = 32;
+        const int spawn_z = 80;
+        const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, kDefaultWorldSeed);
+        const float spawn_y = static_cast<float>(std::max(surface_y, kSeaLevel) + 2);
+        player_.set_body_position({static_cast<float>(spawn_x), spawn_y, static_cast<float>(spawn_z)});
+        camera_.set_pose({static_cast<float>(spawn_x), spawn_y + kPlayerEyeHeight, static_cast<float>(spawn_z)}, -90.0f, -22.0f);
+        player_.set_view_from_forward(camera_.forward());
         log_message(LogLevel::Info, "Application: world streamer created");
     }
     platform_.set_mouse_capture(true);
@@ -306,6 +323,16 @@ int Application::run() {
         if (input.gamepad_start_pressed) {
             platform_.set_mouse_capture(!input.capture_mouse);
         }
+        if (input.escape_pressed) {
+            platform_.set_mouse_capture(false);
+            platform_.start_menu_music();
+            app_state_ = AppState::MainMenu;
+            hovered_block_.reset();
+            block_break_.target.reset();
+            block_break_.repeat_seconds = 0.0f;
+            debug_fly_enabled_ = false;
+            continue;
+        }
         if (platform_.current_input().toggle_wireframe_pressed) {
             renderer_.toggle_wireframe();
         }
@@ -325,6 +352,12 @@ int Application::run() {
                 std::string("Application: leaves render mode switched to ") + leaves_render_mode_name(leaves_render_mode_) +
                     " [hotkey=F4]"
                 );
+        }
+        if (input.toggle_section_culling_pressed) {
+            renderer_.toggle_section_culling();
+        }
+        if (input.toggle_occlusion_culling_pressed) {
+            renderer_.toggle_occlusion_culling();
         }
         if (input.render_distance_delta != 0) {
             world_streamer_->set_chunk_radius(world_streamer_->chunk_radius() + input.render_distance_delta);
@@ -372,15 +405,20 @@ int Application::run() {
         }
         world_streamer_->tick_generation_jobs();
 
-        auto pending_uploads = world_streamer_->drain_pending_uploads(kMaxChunkUploadsPerFrame, observer_position, observer_forward);
+        auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(kChunkUploadByteBudgetPerFrame, observer_position, observer_forward);
         if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
             log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
             ++pending_upload_log_count;
         }
 
+        std::size_t uploaded_bytes_this_frame = 0;
+        const auto upload_start = std::chrono::steady_clock::now();
         for (PendingChunkUpload& upload : pending_uploads) {
+            uploaded_bytes_this_frame += mesh_byte_count(upload.mesh);
             renderer_.upload_chunk_mesh(upload.coord, upload.mesh);
         }
+        const auto upload_end = std::chrono::steady_clock::now();
+        const float upload_ms = std::chrono::duration<float, std::milli>(upload_end - upload_start).count();
 
         const Vec3 ray_origin = debug_fly_enabled_ ? camera_.position() : player_.eye_position();
         const Vec3 ray_direction = debug_fly_enabled_ ? camera_.forward() : player_.forward();
@@ -473,6 +511,21 @@ int Application::run() {
                     streaming_stats.pending_uploads,
                     uploads_this_frame,
                     streaming_stats.queued_rebuilds,
+                    streaming_stats.queued_generates,
+                    streaming_stats.queued_meshes,
+                    streaming_stats.pending_upload_bytes,
+                    uploaded_bytes_this_frame,
+                    streaming_stats.last_generate_ms,
+                    streaming_stats.last_mesh_ms,
+                    upload_ms,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
                     0,
                     leaves_render_mode_ == LeavesRenderMode::Fancy
                 }

@@ -23,6 +23,11 @@ public:
         std::size_t visible_chunks {0};
         std::size_t pending_uploads {0};
         std::size_t queued_rebuilds {0};
+        std::size_t queued_generates {0};
+        std::size_t queued_meshes {0};
+        std::size_t pending_upload_bytes {0};
+        float last_generate_ms {0.0f};
+        float last_mesh_ms {0.0f};
     };
 
     WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius = 6);
@@ -35,6 +40,7 @@ public:
     std::vector<PendingChunkUpload> drain_pending_uploads();
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position);
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position, Vec3 observer_forward);
+    std::vector<PendingChunkUpload> drain_pending_uploads_by_budget(std::size_t byte_budget, Vec3 observer_position, Vec3 observer_forward);
     std::vector<ChunkCoord> drain_pending_unloads();
     StreamingStats stats() const;
     BlockQueryResult query_block_at_world(int x, int y, int z) const;
@@ -78,8 +84,11 @@ private:
     struct JobResult {
         ChunkCoord coord {};
         std::uint64_t version {0};
+        std::uint64_t rebuild_serial {0};
         ChunkJobType type {ChunkJobType::GenerateChunk};
         bool stale_rebuild {false};
+        float generate_ms {0.0f};
+        float mesh_ms {0.0f};
         std::optional<ChunkData> chunk_data {};
         ChunkMesh mesh {};
     };
@@ -106,6 +115,7 @@ private:
     ChunkCoord world_to_chunk(int world_x, int world_z) const;
     bool desired_chunk(const ChunkCoord& origin, const ChunkCoord& candidate) const;
     float chunk_priority_score(ChunkCoord coord, Vec3 observer_position, Vec3 observer_forward) const;
+    float job_priority_score_locked(const ChunkJob& job) const;
     void push_job_locked(ChunkJob&& job);
     void queue_generate_job(ChunkCoord coord, std::uint64_t version);
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
@@ -138,6 +148,8 @@ private:
     std::uint64_t next_rebuild_serial_ {1};
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
+    float last_generate_ms_ {0.0f};
+    float last_mesh_ms_ {0.0f};
 };
 
 }

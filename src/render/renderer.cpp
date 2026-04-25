@@ -1,5 +1,6 @@
 #include "render/renderer.hpp"
 
+#include "common/asset_pack.hpp"
 #include "common/log.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -33,6 +34,11 @@ static_assert(sizeof(Mat4) == 64, "Mat4 must match GLSL mat4 push constant size"
 namespace {
 
 constexpr int kMaxFramesInFlight = 2;
+
+const AssetPackResolver& asset_pack_resolver() {
+    static const AssetPackResolver resolver;
+    return resolver;
+}
 
 struct QueueFamilySelection {
     std::optional<std::uint32_t> graphics_family;
@@ -68,6 +74,149 @@ struct DrawSectionView {
     VkBuffer vertex_buffer {VK_NULL_HANDLE};
     VkBuffer index_buffer {VK_NULL_HANDLE};
     std::uint32_t index_count {0};
+    std::uint32_t vertex_count {0};
+};
+
+ClipPoint transform_point_clip(const Mat4& matrix, const Vec3& point);
+
+constexpr int kRenderSectionHeight = 16;
+constexpr int kRenderSectionCount = kChunkHeight / kRenderSectionHeight;
+constexpr int kOcclusionGridWidth = 32;
+constexpr int kOcclusionGridHeight = 18;
+constexpr float kOcclusionNearPadding = 0.0025f;
+constexpr int kMaxOccluderGridArea = 48;
+constexpr int kMinOccluderGridArea = 4;
+constexpr std::uint32_t kMinOccluderOpaqueIndices = 768;
+constexpr float kOcclusionWarningRatio = 0.35f;
+constexpr std::size_t kOcclusionWarningLogLimit = 8;
+
+int render_section_index_for_y(float y) {
+    const int section = static_cast<int>(std::floor((y - static_cast<float>(kWorldMinY)) / static_cast<float>(kRenderSectionHeight)));
+    return std::clamp(section, 0, kRenderSectionCount - 1);
+}
+
+std::array<MeshSection, kRenderSectionCount> split_mesh_into_render_sections(const MeshSection& mesh) {
+    std::array<MeshSection, kRenderSectionCount> sections {};
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        const Vertex& a = mesh.vertices[mesh.indices[i + 0]];
+        const Vertex& b = mesh.vertices[mesh.indices[i + 1]];
+        const Vertex& c = mesh.vertices[mesh.indices[i + 2]];
+
+        const float min_y = std::min({a.position.y, b.position.y, c.position.y});
+        const float max_y = std::max({a.position.y, b.position.y, c.position.y});
+        const int first_section = render_section_index_for_y(min_y);
+        const int last_section = render_section_index_for_y(std::max(min_y, max_y - 0.001f));
+
+        for (int section_index = first_section; section_index <= last_section; ++section_index) {
+            MeshSection& section = sections[static_cast<std::size_t>(section_index)];
+            const std::uint32_t base = static_cast<std::uint32_t>(section.vertices.size());
+            section.vertices.push_back(a);
+            section.vertices.push_back(b);
+            section.vertices.push_back(c);
+            section.indices.push_back(base + 0);
+            section.indices.push_back(base + 1);
+            section.indices.push_back(base + 2);
+        }
+    }
+    return sections;
+}
+
+struct ProjectedBounds {
+    int min_x {0};
+    int max_x {0};
+    int min_y {0};
+    int max_y {0};
+    float nearest_depth {1.0f};
+    bool valid {false};
+};
+
+int projected_area(const ProjectedBounds& bounds) {
+    return (bounds.max_x - bounds.min_x + 1) * (bounds.max_y - bounds.min_y + 1);
+}
+
+std::optional<ProjectedBounds> project_aabb_to_occlusion_grid(const Mat4& view_proj, const Aabb& bounds) {
+    const std::array<Vec3, 8> corners {{
+        {bounds.min.x, bounds.min.y, bounds.min.z},
+        {bounds.max.x, bounds.min.y, bounds.min.z},
+        {bounds.min.x, bounds.max.y, bounds.min.z},
+        {bounds.max.x, bounds.max.y, bounds.min.z},
+        {bounds.min.x, bounds.min.y, bounds.max.z},
+        {bounds.max.x, bounds.min.y, bounds.max.z},
+        {bounds.min.x, bounds.max.y, bounds.max.z},
+        {bounds.max.x, bounds.max.y, bounds.max.z}
+    }};
+
+    float min_ndc_x = 1.0f;
+    float max_ndc_x = -1.0f;
+    float min_ndc_y = 1.0f;
+    float max_ndc_y = -1.0f;
+    float nearest_depth = 1.0f;
+    bool has_projected_point = false;
+
+    for (const Vec3& corner : corners) {
+        const ClipPoint clip = transform_point_clip(view_proj, corner);
+        if (clip.w <= 0.0001f) {
+            return std::nullopt;
+        }
+
+        const float inv_w = 1.0f / clip.w;
+        const float ndc_x = clip.x * inv_w;
+        const float ndc_y = clip.y * inv_w;
+        const float ndc_z = clip.z * inv_w;
+        min_ndc_x = std::min(min_ndc_x, ndc_x);
+        max_ndc_x = std::max(max_ndc_x, ndc_x);
+        min_ndc_y = std::min(min_ndc_y, ndc_y);
+        max_ndc_y = std::max(max_ndc_y, ndc_y);
+        nearest_depth = std::min(nearest_depth, ndc_z);
+        has_projected_point = true;
+    }
+
+    if (!has_projected_point || max_ndc_x < -1.0f || min_ndc_x > 1.0f || max_ndc_y < -1.0f || min_ndc_y > 1.0f) {
+        return std::nullopt;
+    }
+
+    min_ndc_x = clamp(min_ndc_x, -1.0f, 1.0f);
+    max_ndc_x = clamp(max_ndc_x, -1.0f, 1.0f);
+    min_ndc_y = clamp(min_ndc_y, -1.0f, 1.0f);
+    max_ndc_y = clamp(max_ndc_y, -1.0f, 1.0f);
+
+    ProjectedBounds projected {};
+    projected.min_x = std::clamp(static_cast<int>(((min_ndc_x + 1.0f) * 0.5f) * static_cast<float>(kOcclusionGridWidth)), 0, kOcclusionGridWidth - 1);
+    projected.max_x = std::clamp(static_cast<int>(((max_ndc_x + 1.0f) * 0.5f) * static_cast<float>(kOcclusionGridWidth)), 0, kOcclusionGridWidth - 1);
+    projected.min_y = std::clamp(static_cast<int>(((min_ndc_y + 1.0f) * 0.5f) * static_cast<float>(kOcclusionGridHeight)), 0, kOcclusionGridHeight - 1);
+    projected.max_y = std::clamp(static_cast<int>(((max_ndc_y + 1.0f) * 0.5f) * static_cast<float>(kOcclusionGridHeight)), 0, kOcclusionGridHeight - 1);
+    projected.nearest_depth = nearest_depth;
+    projected.valid = projected.min_x <= projected.max_x && projected.min_y <= projected.max_y;
+    return projected.valid ? std::optional<ProjectedBounds>(projected) : std::nullopt;
+}
+
+struct OcclusionGrid {
+    std::array<float, static_cast<std::size_t>(kOcclusionGridWidth * kOcclusionGridHeight)> depth {};
+
+    OcclusionGrid() {
+        depth.fill(std::numeric_limits<float>::infinity());
+    }
+
+    bool occluded(const ProjectedBounds& bounds) const {
+        for (int y = bounds.min_y; y <= bounds.max_y; ++y) {
+            for (int x = bounds.min_x; x <= bounds.max_x; ++x) {
+                const float stored_depth = depth[static_cast<std::size_t>(x + y * kOcclusionGridWidth)];
+                if (stored_depth > bounds.nearest_depth - kOcclusionNearPadding) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    void add_occluder(const ProjectedBounds& bounds) {
+        for (int y = bounds.min_y; y <= bounds.max_y; ++y) {
+            for (int x = bounds.min_x; x <= bounds.max_x; ++x) {
+                float& stored_depth = depth[static_cast<std::size_t>(x + y * kOcclusionGridWidth)];
+                stored_depth = std::min(stored_depth, bounds.nearest_depth);
+            }
+        }
+    }
 };
 
 ClipPoint transform_point_clip(const Mat4& matrix, const Vec3& point) {
@@ -703,24 +852,35 @@ void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh) {
     }
 
     ChunkRenderData render_data {};
-    upload_mesh_section(
-        mesh.opaque_mesh,
-        render_data.opaque_vertex_buffer,
-        render_data.opaque_index_buffer,
-        render_data.opaque_index_count
-    );
-    upload_mesh_section(
-        mesh.cutout_mesh,
-        render_data.cutout_vertex_buffer,
-        render_data.cutout_index_buffer,
-        render_data.cutout_index_count
-    );
-    upload_mesh_section(
-        mesh.transparent_mesh,
-        render_data.transparent_vertex_buffer,
-        render_data.transparent_index_buffer,
-        render_data.transparent_index_count
-    );
+    const auto opaque_sections = split_mesh_into_render_sections(mesh.opaque_mesh);
+    const auto cutout_sections = split_mesh_into_render_sections(mesh.cutout_mesh);
+    const auto transparent_sections = split_mesh_into_render_sections(mesh.transparent_mesh);
+    for (std::size_t section_index = 0; section_index < render_data.sections.size(); ++section_index) {
+        RenderSection& section = render_data.sections[section_index];
+        upload_mesh_section(
+            opaque_sections[section_index],
+            section.opaque_vertex_buffer,
+            section.opaque_index_buffer,
+            section.opaque_index_count,
+            section.opaque_vertex_count
+        );
+        upload_mesh_section(
+            cutout_sections[section_index],
+            section.cutout_vertex_buffer,
+            section.cutout_index_buffer,
+            section.cutout_index_count,
+            section.cutout_vertex_count
+        );
+        upload_mesh_section(
+            transparent_sections[section_index],
+            section.transparent_vertex_buffer,
+            section.transparent_index_buffer,
+            section.transparent_index_count,
+            section.transparent_vertex_count
+        );
+        section.has_opaque_geometry = section.opaque_index_count > 0;
+        section.has_geometry = section.has_opaque_geometry || section.cutout_index_count > 0 || section.transparent_index_count > 0;
+    }
     chunk_buffers_[coord] = render_data;
 }
 
@@ -784,20 +944,125 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     const bool use_wireframe = wireframe_enabled_ && wireframe_supported_ && wireframe_pipeline_ != VK_NULL_HANDLE;
     const bool draw_textured_fill = !use_wireframe || wireframe_textures_enabled_;
 
-    std::vector<ActiveChunk> render_chunks;
-    render_chunks.reserve(visible_chunks.size());
+    struct RenderCandidate {
+        ChunkCoord coord {};
+        RenderSection* section {nullptr};
+        int section_index {0};
+        Aabb bounds {};
+        float distance_sq {0.0f};
+    };
+
+    std::vector<RenderCandidate> candidates;
+    candidates.reserve(visible_chunks.size() * kChunkSectionCount);
+    std::vector<ActiveChunk> outline_chunks;
+    outline_chunks.reserve(visible_chunks.size());
+
+    std::size_t visible_section_count = 0;
+    std::size_t frustum_culled_section_count = 0;
+    std::size_t occlusion_culled_section_count = 0;
+    std::size_t gpu_buffer_bytes = 0;
+
     for (const ActiveChunk& chunk : visible_chunks) {
         auto it = chunk_buffers_.find(chunk.coord);
         if (it == chunk_buffers_.end()) {
             continue;
         }
-        if (!aabb_visible_in_current_frustum(chunk_bounds(chunk.coord))) {
+        const Aabb full_chunk_bounds = chunk_bounds(chunk.coord);
+        if (!aabb_visible_in_current_frustum(full_chunk_bounds)) {
+            frustum_culled_section_count += kChunkSectionCount;
             continue;
         }
-        render_chunks.push_back(chunk);
+
+        for (int section_index = 0; section_index < kChunkSectionCount; ++section_index) {
+            RenderSection& section = it->second.sections[static_cast<std::size_t>(section_index)];
+            gpu_buffer_bytes += static_cast<std::size_t>(
+                section.opaque_vertex_buffer.size + section.opaque_index_buffer.size +
+                section.cutout_vertex_buffer.size + section.cutout_index_buffer.size +
+                section.transparent_vertex_buffer.size + section.transparent_index_buffer.size
+            );
+            if (!section.has_geometry) {
+                continue;
+            }
+
+            ++visible_section_count;
+            const Aabb section_bounds = section_culling_enabled_ ? chunk_section_bounds(chunk.coord, section_index) : full_chunk_bounds;
+            if (section_culling_enabled_ && !aabb_visible_in_current_frustum(section_bounds)) {
+                ++frustum_culled_section_count;
+                continue;
+            }
+
+            const Vec3 center {
+                (section_bounds.min.x + section_bounds.max.x) * 0.5f,
+                (section_bounds.min.y + section_bounds.max.y) * 0.5f,
+                (section_bounds.min.z + section_bounds.max.z) * 0.5f
+            };
+            const Vec3 to_center = center - current_camera_.camera_position;
+            candidates.push_back({chunk.coord, &section, section_index, section_bounds, dot(to_center, to_center)});
+        }
     }
-    last_drawn_chunks_ = render_chunks.size();
+
+    std::sort(candidates.begin(), candidates.end(), [](const RenderCandidate& lhs, const RenderCandidate& rhs) {
+        return lhs.distance_sq < rhs.distance_sq;
+    });
+
+    std::vector<RenderCandidate> render_sections;
+    render_sections.reserve(candidates.size());
+    OcclusionGrid occlusion_grid;
+    for (const RenderCandidate& candidate : candidates) {
+        const bool opaque_only = candidate.section->opaque_index_count > 0 &&
+            candidate.section->cutout_index_count == 0 &&
+            candidate.section->transparent_index_count == 0;
+        const bool dense_opaque_section = opaque_only && candidate.section->opaque_index_count >= kMinOccluderOpaqueIndices;
+        const std::optional<ProjectedBounds> projected = occlusion_culling_enabled_ && opaque_only
+            ? project_aabb_to_occlusion_grid(current_camera_.view_proj, candidate.bounds)
+            : std::nullopt;
+        const int projected_grid_area = projected.has_value() ? projected_area(*projected) : 0;
+        const bool safe_occlusion_candidate = projected.has_value() &&
+            dense_opaque_section &&
+            projected_grid_area >= kMinOccluderGridArea &&
+            projected_grid_area <= kMaxOccluderGridArea;
+
+        if (safe_occlusion_candidate && occlusion_grid.occluded(*projected)) {
+            ++occlusion_culled_section_count;
+            continue;
+        }
+
+        if (safe_occlusion_candidate) {
+            occlusion_grid.add_occluder(*projected);
+        }
+
+        if (std::none_of(outline_chunks.begin(), outline_chunks.end(), [&](const ActiveChunk& active) {
+                return active.coord == candidate.coord;
+            })) {
+            outline_chunks.push_back({candidate.coord});
+        }
+        render_sections.push_back(candidate);
+    }
+
+    last_drawn_chunks_ = outline_chunks.size();
     debug_hud_data_.drawn_chunks = last_drawn_chunks_;
+    debug_hud_data_.visible_sections = visible_section_count;
+    debug_hud_data_.drawn_sections = render_sections.size();
+    debug_hud_data_.frustum_culled_sections = frustum_culled_section_count;
+    debug_hud_data_.occlusion_culled_sections = occlusion_culled_section_count;
+    debug_hud_data_.draw_calls = 0;
+    debug_hud_data_.drawn_vertices = 0;
+    debug_hud_data_.drawn_indices = 0;
+    debug_hud_data_.gpu_buffer_bytes = gpu_buffer_bytes;
+
+    if (occlusion_culling_enabled_ &&
+        visible_section_count > 0 &&
+        occlusion_culled_section_count > static_cast<std::size_t>(static_cast<float>(visible_section_count) * kOcclusionWarningRatio) &&
+        logged_occlusion_warning_count_ < kOcclusionWarningLogLimit) {
+        log_message(
+            LogLevel::Warning,
+            std::string("Renderer: experimental occlusion culled many sections visible=") +
+                std::to_string(visible_section_count) +
+                " occluded=" + std::to_string(occlusion_culled_section_count) +
+                " [press F6 to disable if chunks disappear]"
+        );
+        ++logged_occlusion_warning_count_;
+    }
 
     const auto draw_chunks_with_pipeline = [&](VkPipeline pipeline, VkPipelineLayout layout, bool bind_textures, auto section_getter) {
         vkCmdBindPipeline(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -806,16 +1071,12 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             vkCmdBindDescriptorSets(frame.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &descriptor_set_, 0, nullptr);
         }
 
-        for (const ActiveChunk& chunk : render_chunks) {
-            auto it = chunk_buffers_.find(chunk.coord);
-            if (it == chunk_buffers_.end()) {
+        for (const RenderCandidate& candidate : render_sections) {
+            const auto section = section_getter(*candidate.section);
+            if (section.index_count == 0 || section.vertex_count == 0 || section.vertex_buffer == VK_NULL_HANDLE || section.index_buffer == VK_NULL_HANDLE) {
                 continue;
             }
-            const auto section = section_getter(it->second);
-            if (section.index_count == 0 || section.vertex_buffer == VK_NULL_HANDLE || section.index_buffer == VK_NULL_HANDLE) {
-                continue;
-            }
-            const Mat4 chunk_matrix = chunk_view_proj(chunk.coord);
+            const Mat4 chunk_matrix = chunk_view_proj(candidate.coord);
             vkCmdPushConstants(
                 frame.command_buffer,
                 layout,
@@ -830,34 +1091,37 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             vkCmdBindVertexBuffers(frame.command_buffer, 0, 1, vertex_buffers, offsets);
             vkCmdBindIndexBuffer(frame.command_buffer, section.index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(frame.command_buffer, section.index_count, 1, 0, 0, 0);
+            ++debug_hud_data_.draw_calls;
+            debug_hud_data_.drawn_vertices += section.vertex_count;
+            debug_hud_data_.drawn_indices += section.index_count;
         }
     };
 
     if (draw_textured_fill) {
-        draw_chunks_with_pipeline(fill_pipeline_, pipeline_layout_, true, [](const ChunkRenderData& chunk) {
-            return DrawSectionView {chunk.opaque_vertex_buffer.buffer, chunk.opaque_index_buffer.buffer, chunk.opaque_index_count};
+        draw_chunks_with_pipeline(fill_pipeline_, pipeline_layout_, true, [](const RenderSection& section) {
+            return DrawSectionView {section.opaque_vertex_buffer.buffer, section.opaque_index_buffer.buffer, section.opaque_index_count, section.opaque_vertex_count};
         });
-        draw_chunks_with_pipeline(cutout_pipeline_, pipeline_layout_, true, [](const ChunkRenderData& chunk) {
-            return DrawSectionView {chunk.cutout_vertex_buffer.buffer, chunk.cutout_index_buffer.buffer, chunk.cutout_index_count};
+        draw_chunks_with_pipeline(cutout_pipeline_, pipeline_layout_, true, [](const RenderSection& section) {
+            return DrawSectionView {section.cutout_vertex_buffer.buffer, section.cutout_index_buffer.buffer, section.cutout_index_count, section.cutout_vertex_count};
         });
-        draw_chunks_with_pipeline(water_pipeline_, pipeline_layout_, true, [](const ChunkRenderData& chunk) {
-            return DrawSectionView {chunk.transparent_vertex_buffer.buffer, chunk.transparent_index_buffer.buffer, chunk.transparent_index_count};
+        draw_chunks_with_pipeline(water_pipeline_, pipeline_layout_, true, [](const RenderSection& section) {
+            return DrawSectionView {section.transparent_vertex_buffer.buffer, section.transparent_index_buffer.buffer, section.transparent_index_count, section.transparent_vertex_count};
         });
     }
     if (use_wireframe) {
-        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const ChunkRenderData& chunk) {
-            return DrawSectionView {chunk.opaque_vertex_buffer.buffer, chunk.opaque_index_buffer.buffer, chunk.opaque_index_count};
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const RenderSection& section) {
+            return DrawSectionView {section.opaque_vertex_buffer.buffer, section.opaque_index_buffer.buffer, section.opaque_index_count, section.opaque_vertex_count};
         });
-        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const ChunkRenderData& chunk) {
-            return DrawSectionView {chunk.cutout_vertex_buffer.buffer, chunk.cutout_index_buffer.buffer, chunk.cutout_index_count};
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const RenderSection& section) {
+            return DrawSectionView {section.cutout_vertex_buffer.buffer, section.cutout_index_buffer.buffer, section.cutout_index_count, section.cutout_vertex_count};
         });
-        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const ChunkRenderData& chunk) {
-            return DrawSectionView {chunk.transparent_vertex_buffer.buffer, chunk.transparent_index_buffer.buffer, chunk.transparent_index_count};
+        draw_chunks_with_pipeline(wireframe_pipeline_, hud_pipeline_layout_, false, [](const RenderSection& section) {
+            return DrawSectionView {section.transparent_vertex_buffer.buffer, section.transparent_index_buffer.buffer, section.transparent_index_count, section.transparent_vertex_count};
         });
     }
 
     if (wireframe_enabled_) {
-        update_chunk_outline_buffer(render_chunks);
+        update_chunk_outline_buffer(outline_chunks);
     } else {
         chunk_outline_vertex_count_ = 0;
     }
@@ -929,12 +1193,9 @@ void Renderer::shutdown() {
 
     for (auto& [coord, render_data] : chunk_buffers_) {
         (void)coord;
-        destroy_buffer(render_data.opaque_vertex_buffer);
-        destroy_buffer(render_data.opaque_index_buffer);
-        destroy_buffer(render_data.cutout_vertex_buffer);
-        destroy_buffer(render_data.cutout_index_buffer);
-        destroy_buffer(render_data.transparent_vertex_buffer);
-        destroy_buffer(render_data.transparent_index_buffer);
+        for (RenderSection& section : render_data.sections) {
+            destroy_render_section(section);
+        }
     }
     chunk_buffers_.clear();
     destroy_deferred_chunk_buffers_immediate();
@@ -1049,6 +1310,26 @@ void Renderer::toggle_wireframe_textures() {
     );
 }
 
+void Renderer::toggle_section_culling() {
+    section_culling_enabled_ = !section_culling_enabled_;
+    log_message(
+        LogLevel::Info,
+        section_culling_enabled_
+            ? "Renderer: section frustum culling enabled"
+            : "Renderer: section frustum culling disabled"
+    );
+}
+
+void Renderer::toggle_occlusion_culling() {
+    occlusion_culling_enabled_ = !occlusion_culling_enabled_;
+    log_message(
+        LogLevel::Info,
+        occlusion_culling_enabled_
+            ? "Renderer: conservative CPU occlusion culling enabled"
+            : "Renderer: conservative CPU occlusion culling disabled"
+    );
+}
+
 bool Renderer::wireframe_enabled() const {
     return wireframe_enabled_;
 }
@@ -1081,7 +1362,22 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.pending_uploads != data.pending_uploads ||
         debug_hud_data_.uploads_this_frame != data.uploads_this_frame ||
         debug_hud_data_.queued_rebuilds != data.queued_rebuilds ||
+        debug_hud_data_.queued_generates != data.queued_generates ||
+        debug_hud_data_.queued_meshes != data.queued_meshes ||
+        debug_hud_data_.pending_upload_bytes != data.pending_upload_bytes ||
+        debug_hud_data_.uploaded_bytes_this_frame != data.uploaded_bytes_this_frame ||
+        debug_hud_data_.generate_ms != data.generate_ms ||
+        debug_hud_data_.mesh_ms != data.mesh_ms ||
+        debug_hud_data_.upload_ms != data.upload_ms ||
         debug_hud_data_.drawn_chunks != data.drawn_chunks ||
+        debug_hud_data_.visible_sections != data.visible_sections ||
+        debug_hud_data_.drawn_sections != data.drawn_sections ||
+        debug_hud_data_.frustum_culled_sections != data.frustum_culled_sections ||
+        debug_hud_data_.occlusion_culled_sections != data.occlusion_culled_sections ||
+        debug_hud_data_.draw_calls != data.draw_calls ||
+        debug_hud_data_.drawn_vertices != data.drawn_vertices ||
+        debug_hud_data_.drawn_indices != data.drawn_indices ||
+        debug_hud_data_.gpu_buffer_bytes != data.gpu_buffer_bytes ||
         debug_hud_data_.fancy_leaves != data.fancy_leaves) {
         debug_hud_dirty_ = true;
     }
@@ -1834,24 +2130,19 @@ bool Renderer::recreate_swapchain_if_needed() {
 }
 
 void Renderer::defer_destroy_chunk_buffers(ChunkRenderData&& render_data) {
-    if (render_data.opaque_vertex_buffer.buffer == VK_NULL_HANDLE &&
-        render_data.opaque_index_buffer.buffer == VK_NULL_HANDLE &&
-        render_data.cutout_vertex_buffer.buffer == VK_NULL_HANDLE &&
-        render_data.cutout_index_buffer.buffer == VK_NULL_HANDLE &&
-        render_data.transparent_vertex_buffer.buffer == VK_NULL_HANDLE &&
-        render_data.transparent_index_buffer.buffer == VK_NULL_HANDLE) {
+    const bool has_buffers = std::any_of(render_data.sections.begin(), render_data.sections.end(), [](const RenderSection& section) {
+        return section.opaque_vertex_buffer.buffer != VK_NULL_HANDLE ||
+            section.opaque_index_buffer.buffer != VK_NULL_HANDLE ||
+            section.cutout_vertex_buffer.buffer != VK_NULL_HANDLE ||
+            section.cutout_index_buffer.buffer != VK_NULL_HANDLE ||
+            section.transparent_vertex_buffer.buffer != VK_NULL_HANDLE ||
+            section.transparent_index_buffer.buffer != VK_NULL_HANDLE;
+    });
+    if (!has_buffers) {
         return;
     }
 
-    deferred_chunk_buffers_.push_back({
-        render_data.opaque_vertex_buffer,
-        render_data.opaque_index_buffer,
-        render_data.cutout_vertex_buffer,
-        render_data.cutout_index_buffer,
-        render_data.transparent_vertex_buffer,
-        render_data.transparent_index_buffer,
-        static_cast<std::uint32_t>(frames_.size() + 1)
-    });
+    deferred_chunk_buffers_.push_back({std::move(render_data), static_cast<std::uint32_t>(frames_.size() + 1)});
 }
 
 void Renderer::retire_deferred_chunk_buffers() {
@@ -1860,12 +2151,9 @@ void Renderer::retire_deferred_chunk_buffers() {
             --it->frames_remaining;
         }
         if (it->frames_remaining == 0) {
-            destroy_buffer(it->opaque_vertex_buffer);
-            destroy_buffer(it->opaque_index_buffer);
-            destroy_buffer(it->cutout_vertex_buffer);
-            destroy_buffer(it->cutout_index_buffer);
-            destroy_buffer(it->transparent_vertex_buffer);
-            destroy_buffer(it->transparent_index_buffer);
+            for (RenderSection& section : it->render_data.sections) {
+                destroy_render_section(section);
+            }
             it = deferred_chunk_buffers_.erase(it);
         } else {
             ++it;
@@ -1875,19 +2163,17 @@ void Renderer::retire_deferred_chunk_buffers() {
 
 void Renderer::destroy_deferred_chunk_buffers_immediate() {
     for (DeferredChunkBuffers& buffers : deferred_chunk_buffers_) {
-        destroy_buffer(buffers.opaque_vertex_buffer);
-        destroy_buffer(buffers.opaque_index_buffer);
-        destroy_buffer(buffers.cutout_vertex_buffer);
-        destroy_buffer(buffers.cutout_index_buffer);
-        destroy_buffer(buffers.transparent_vertex_buffer);
-        destroy_buffer(buffers.transparent_index_buffer);
+        for (RenderSection& section : buffers.render_data.sections) {
+            destroy_render_section(section);
+        }
     }
     deferred_chunk_buffers_.clear();
 }
 
-void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count) {
+void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count, std::uint32_t& vertex_count) {
     if (mesh.empty()) {
         index_count = 0;
+        vertex_count = 0;
         return;
     }
 
@@ -1915,6 +2201,24 @@ void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_bu
     vkUnmapMemory(device_, index_buffer.memory);
 
     index_count = static_cast<std::uint32_t>(mesh.indices.size());
+    vertex_count = static_cast<std::uint32_t>(mesh.vertices.size());
+}
+
+void Renderer::destroy_render_section(RenderSection& section) {
+    destroy_buffer(section.opaque_vertex_buffer);
+    destroy_buffer(section.opaque_index_buffer);
+    destroy_buffer(section.cutout_vertex_buffer);
+    destroy_buffer(section.cutout_index_buffer);
+    destroy_buffer(section.transparent_vertex_buffer);
+    destroy_buffer(section.transparent_index_buffer);
+    section.opaque_index_count = 0;
+    section.opaque_vertex_count = 0;
+    section.cutout_index_count = 0;
+    section.cutout_vertex_count = 0;
+    section.transparent_index_count = 0;
+    section.transparent_vertex_count = 0;
+    section.has_geometry = false;
+    section.has_opaque_geometry = false;
 }
 
 Renderer::GpuBuffer Renderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
@@ -2003,10 +2307,24 @@ Aabb Renderer::chunk_bounds(ChunkCoord coord) const {
     const float min_x = static_cast<float>(coord.x * kChunkWidth);
     const float min_z = static_cast<float>(coord.z * kChunkDepth);
     return {
-        {min_x, 0.0f, min_z},
+        {min_x, static_cast<float>(kWorldMinY), min_z},
         {
             min_x + static_cast<float>(kChunkWidth),
-            static_cast<float>(kChunkHeight),
+            static_cast<float>(kWorldMaxY + 1),
+            min_z + static_cast<float>(kChunkDepth)
+        }
+    };
+}
+
+Aabb Renderer::chunk_section_bounds(ChunkCoord coord, int section_index) const {
+    const float min_x = static_cast<float>(coord.x * kChunkWidth);
+    const float min_z = static_cast<float>(coord.z * kChunkDepth);
+    const float min_y = static_cast<float>(kWorldMinY + section_index * kChunkSectionHeight);
+    return {
+        {min_x, min_y, min_z},
+        {
+            min_x + static_cast<float>(kChunkWidth),
+            min_y + static_cast<float>(kChunkSectionHeight),
             min_z + static_cast<float>(kChunkDepth)
         }
     };
@@ -2098,10 +2416,10 @@ void Renderer::update_chunk_outline_buffer(std::span<const ActiveChunk> visible_
 
     for (const ActiveChunk& chunk : visible_chunks) {
         const float min_x = static_cast<float>(chunk.coord.x * kChunkWidth);
-        const float min_y = 0.0f;
+        const float min_y = static_cast<float>(kWorldMinY);
         const float min_z = static_cast<float>(chunk.coord.z * kChunkDepth);
         const float max_x = min_x + static_cast<float>(kChunkWidth);
-        const float max_y = static_cast<float>(kChunkHeight);
+        const float max_y = static_cast<float>(kWorldMaxY + 1);
         const float max_z = min_z + static_cast<float>(kChunkDepth);
         append_box_edges(vertices, {min_x, min_y, min_z}, {max_x, max_y, max_z}, outline_color);
     }
@@ -2257,15 +2575,38 @@ void Renderer::update_debug_hud_buffer() {
     const std::string mode = debug_hud_data_.debug_fly ? "MODE:FLY" : "MODE:PLAYER";
     const std::string chunks = "CH:" + std::to_string(debug_hud_data_.visible_chunks);
     const std::string drawn = "DRAW:" + std::to_string(debug_hud_data_.drawn_chunks);
+    const std::string sections = "SEC:" + std::to_string(debug_hud_data_.visible_sections) + "/" + std::to_string(debug_hud_data_.drawn_sections);
+    const std::string culled = "CULL F/O:" + std::to_string(debug_hud_data_.frustum_culled_sections) + "/" + std::to_string(debug_hud_data_.occlusion_culled_sections);
+    const std::string occ_culled = occlusion_culling_enabled_
+        ? "OCC_CULLED:" + std::to_string(debug_hud_data_.occlusion_culled_sections)
+        : "OCC_CULLED:OFF";
+    const std::string draw_calls = "CALLS:" + std::to_string(debug_hud_data_.draw_calls);
+    const std::string geometry = "V/I:" + std::to_string(debug_hud_data_.drawn_vertices) + "/" + std::to_string(debug_hud_data_.drawn_indices);
+    const std::string memory = "GPUKB:" + std::to_string(debug_hud_data_.gpu_buffer_bytes / 1024);
     const std::string uploads = "UP:" + std::to_string(debug_hud_data_.uploads_this_frame);
     const std::string pending = "PEND:" + std::to_string(debug_hud_data_.pending_uploads);
     const std::string rebuilds = "REB:" + std::to_string(debug_hud_data_.queued_rebuilds);
+    const std::string queues = "GENQ:" + std::to_string(debug_hud_data_.queued_generates) +
+        " MESHQ:" + std::to_string(debug_hud_data_.queued_meshes);
+    const std::string upload_queue = "UPLOADQ:" + std::to_string(debug_hud_data_.pending_upload_bytes / 1024) + "KB";
+    const std::string timings = "GENms:" + std::to_string(static_cast<int>(debug_hud_data_.generate_ms + 0.5f)) +
+        " MESHms:" + std::to_string(static_cast<int>(debug_hud_data_.mesh_ms + 0.5f)) +
+        " UPms:" + std::to_string(static_cast<int>(debug_hud_data_.upload_ms + 0.5f));
+    const std::string uploaded = "UPKB:" + std::to_string(debug_hud_data_.uploaded_bytes_this_frame / 1024);
+    const std::string culling_modes = std::string("SEC:") + (section_culling_enabled_ ? "ON" : "OFF") +
+        " OCC:" + (occlusion_culling_enabled_ ? "ON" : "OFF");
     const std::string leaves = debug_hud_data_.fancy_leaves ? "LEAVES:FANCY" : "LEAVES:FAST";
+    const std::string world_y = "WORLD_Y:" + std::to_string(kWorldMinY) + ".." + std::to_string(kWorldMaxY);
+    const std::string sea = "SEA:" + std::to_string(kSeaLevel);
+    const std::string caves = "CAVES:ON AQUIFERS:ON";
 
     std::vector<Vertex> vertices;
     vertices.reserve(
         (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
-            chunks.size() + drawn.size() + uploads.size() + pending.size() + rebuilds.size() + leaves.size()) * 16
+            chunks.size() + drawn.size() + sections.size() + culled.size() + draw_calls.size() +
+            occ_culled.size() + geometry.size() + memory.size() + uploads.size() + pending.size() + rebuilds.size() +
+            queues.size() + upload_queue.size() + timings.size() + uploaded.size() +
+            culling_modes.size() + leaves.size() + world_y.size() + sea.size() + caves.size()) * 16
     );
     const auto append_left_text = [&](const std::string& text, float y) {
         const float advance = 6.0f * scale;
@@ -2277,10 +2618,24 @@ void Renderer::update_debug_hud_buffer() {
     append_left_text(mode, top - 40.0f);
     append_left_text(chunks, top - 60.0f);
     append_left_text(drawn, top - 80.0f);
-    append_left_text(uploads, top - 100.0f);
-    append_left_text(pending, top - 120.0f);
-    append_left_text(rebuilds, top - 140.0f);
-    append_left_text(leaves, top - 160.0f);
+    append_left_text(sections, top - 100.0f);
+    append_left_text(culled, top - 120.0f);
+    append_left_text(occ_culled, top - 140.0f);
+    append_left_text(draw_calls, top - 160.0f);
+    append_left_text(geometry, top - 180.0f);
+    append_left_text(memory, top - 200.0f);
+    append_left_text(uploads, top - 220.0f);
+    append_left_text(pending, top - 240.0f);
+    append_left_text(rebuilds, top - 260.0f);
+    append_left_text(queues, top - 280.0f);
+    append_left_text(upload_queue, top - 300.0f);
+    append_left_text(timings, top - 320.0f);
+    append_left_text(uploaded, top - 340.0f);
+    append_left_text(culling_modes, top - 360.0f);
+    append_left_text(leaves, top - 380.0f);
+    append_left_text(world_y, top - 400.0f);
+    append_left_text(sea, top - 420.0f);
+    append_left_text(caves, top - 440.0f);
 
     debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
     upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);
@@ -2605,16 +2960,16 @@ void Renderer::draw_colored_buffer(const FrameResources& frame, const GpuBuffer&
 
 bool Renderer::load_textures() {
     const std::vector<std::string> texture_paths = {
-        "assets/textures/texture_pack/classic/blocks/dirt.png",
-        "assets/textures/texture_pack/classic/blocks/grass_carried.png",
-        "assets/textures/texture_pack/classic/blocks/grass_side_carried.png",
-        "assets/textures/texture_pack/classic/blocks/stone.png",
-        "assets/textures/texture_pack/classic/blocks/water_placeholder.png",
-        "assets/textures/texture_pack/classic/blocks/sand.png",
-        "assets/textures/texture_pack/classic/blocks/gravel.png",
-        "assets/textures/texture_pack/classic/blocks/log_oak.png",
-        "assets/textures/texture_pack/classic/blocks/log_oak_top.png",
-        "assets/textures/texture_pack/classic/blocks/leaves_big_oak_carried.tga"
+        "blocks/dirt.png",
+        "blocks/grass_carried.png",
+        "blocks/grass_side_carried.png",
+        "blocks/stone.png",
+        "blocks/water_placeholder.png",
+        "blocks/sand.png",
+        "blocks/gravel.png",
+        "blocks/log_oak.png",
+        "blocks/log_oak_top.png",
+        "blocks/leaves_big_oak_carried.tga"
     };
 
     const int array_layers = static_cast<int>(texture_paths.size());
@@ -2634,16 +2989,17 @@ bool Renderer::load_textures() {
     vkMapMemory(device_, staging_buffer.memory, 0, image_size, 0, &data);
 
     for (int i = 0; i < array_layers; ++i) {
+        const std::string resolved_path = asset_pack_resolver().resolve_file_utf8(texture_paths[static_cast<std::size_t>(i)]);
         int width, height, channels;
-        stbi_uc* pixels = stbi_load(texture_paths[i].c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load(resolved_path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
         if (!pixels) {
-            log_message(LogLevel::Error, "Renderer: failed to load texture image");
+            log_message(LogLevel::Error, "Renderer: failed to load block texture " + texture_paths[static_cast<std::size_t>(i)] + " at " + resolved_path);
             vkUnmapMemory(device_, staging_buffer.memory);
             destroy_buffer(staging_buffer);
             return false;
         }
         if (width != tex_width || height != tex_height) {
-            log_message(LogLevel::Error, "Renderer: texture size is not 16x16");
+            log_message(LogLevel::Error, "Renderer: block texture is not 16x16: " + texture_paths[static_cast<std::size_t>(i)] + " at " + resolved_path);
             stbi_image_free(pixels);
             vkUnmapMemory(device_, staging_buffer.memory);
             destroy_buffer(staging_buffer);
@@ -2851,17 +3207,18 @@ bool Renderer::load_ui_textures() {
     const VkDeviceSize image_size = atlas_width * atlas_height * tex_channels;
 
     std::vector<stbi_uc> atlas(static_cast<std::size_t>(image_size), 0);
-    const auto blit_image = [&](const std::string& path, int dst_x, int expected_width, int expected_height) -> bool {
+    const auto blit_image = [&](const std::string& relative_path, int dst_x, int expected_width, int expected_height) -> bool {
+        const std::string path = asset_pack_resolver().resolve_file_utf8(relative_path);
         int width = 0;
         int height = 0;
         int channels = 0;
         stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
         if (pixels == nullptr) {
-            log_message(LogLevel::Error, "Renderer: failed to load UI texture image");
+            log_message(LogLevel::Error, "Renderer: failed to load UI texture " + relative_path + " at " + path);
             return false;
         }
         if (width != expected_width || height != expected_height) {
-            log_message(LogLevel::Error, "Renderer: UI texture has unexpected size");
+            log_message(LogLevel::Error, "Renderer: UI texture has unexpected size: " + relative_path + " at " + path);
             stbi_image_free(pixels);
             return false;
         }
@@ -2877,14 +3234,14 @@ bool Renderer::load_ui_textures() {
 
     for (int i = 0; i < 9; ++i) {
         if (!blit_image(
-                "assets/textures/texture_pack/classic/ui/hotbar_" + std::to_string(i) + ".png",
+                "ui/hotbar_" + std::to_string(i) + ".png",
                 i * 20,
                 20,
                 22)) {
             return false;
         }
     }
-    if (!blit_image("assets/textures/texture_pack/classic/ui/selected_hotbar_slot.png", 180, 24, 24)) {
+    if (!blit_image("ui/selected_hotbar_slot.png", 180, 24, 24)) {
         return false;
     }
 
@@ -3079,14 +3436,14 @@ bool Renderer::load_menu_textures() {
     if (!load_menu_font()) {
         log_message(LogLevel::Error, "Renderer: failed to load menu font");
     }
-    return load_menu_texture("assets/panorama/panorama_tu69_day.png", false, false, menu_panorama_day_) &&
-        load_menu_texture("assets/panorama/panorama_tu69_night.png", false, false, menu_panorama_night_) &&
-        load_menu_texture("assets/button/button.png", false, true, menu_button_) &&
-        load_menu_texture("assets/button/button_highlighted.png", false, true, menu_button_highlighted_) &&
-        load_menu_texture("assets/sound/ui/logo/legacy_console_edition_logo.png.png", false, true, menu_logo_) &&
-        load_menu_texture("assets/photo/pic.png", false, false, startup_pic_) &&
-        load_menu_texture("assets/photo/mojang.png", false, false, startup_mojang_) &&
-        load_menu_texture("assets/photo/KING.png", false, false, startup_king_);
+    return load_menu_texture(asset_pack_resolver().resolve_file_utf8("panorama/panorama_tu69_day.png"), false, false, menu_panorama_day_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("panorama/panorama_tu69_night.png"), false, false, menu_panorama_night_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("button/button.png"), false, true, menu_button_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("button/button_highlighted.png"), false, true, menu_button_highlighted_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("sound/ui/logo/legacy_console_edition_logo.png.png"), false, true, menu_logo_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("photo/pic.png"), false, false, startup_pic_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("photo/mojang.png"), false, false, startup_mojang_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("photo/KING.png"), false, false, startup_king_);
 }
 
 bool Renderer::load_menu_texture(const std::string& path, bool repeat, bool pixelated, MenuTexture& texture) {
@@ -3578,9 +3935,10 @@ bool Renderer::load_menu_texture_from_rgba(const std::vector<std::uint8_t>& pixe
 }
 
 bool Renderer::load_menu_font() {
-    std::ifstream file("assets/fonts/RU/minecraft.ttf", std::ios::binary);
+    const std::string font_path = asset_pack_resolver().resolve_file_utf8("fonts/RU/minecraft.ttf");
+    std::ifstream file(font_path, std::ios::binary);
     if (!file) {
-        log_message(LogLevel::Error, "Renderer: failed to open assets/fonts/RU/minecraft.ttf");
+        log_message(LogLevel::Error, "Renderer: failed to open fonts/RU/minecraft.ttf at " + font_path);
         return false;
     }
     

@@ -1,5 +1,6 @@
 #include "platform/platform_app.hpp"
 
+#include "common/asset_pack.hpp"
 #include "common/log.hpp"
 
 #define STB_VORBIS_HEADER_ONLY
@@ -21,21 +22,13 @@ namespace ml {
 
 namespace {
 
-constexpr const char* kMusicDirectory = "assets/sound/music/game/unused";
+constexpr const char* kMusicDirectory = "sound/music/game/unused";
 constexpr float kMinWorldMusicDelaySeconds = 30.0f;
 constexpr float kMaxWorldMusicDelaySeconds = 180.0f;
 constexpr float kGamepadDeadzone = 0.24f;
 constexpr float kGamepadMenuThreshold = 0.55f;
 constexpr float kGamepadLookPixelsPerSecond = 720.0f;
 constexpr Sint16 kGamepadTriggerThreshold = 16000;
-
-std::filesystem::path base_path() {
-    const char* sdl_base_path = SDL_GetBasePath();
-    if (sdl_base_path == nullptr) {
-        return {};
-    }
-    return std::filesystem::path(reinterpret_cast<const char8_t*>(sdl_base_path));
-}
 
 float normalize_gamepad_axis(Sint16 value) {
     constexpr float deadzone = 8000.0f;
@@ -121,6 +114,9 @@ void PlatformApp::pump_events() {
     input_.toggle_debug_hud_pressed = false;
     input_.toggle_debug_fly_pressed = false;
     input_.toggle_leaves_render_mode_pressed = false;
+    input_.toggle_section_culling_pressed = false;
+    input_.toggle_occlusion_culling_pressed = false;
+    input_.escape_pressed = false;
     input_.jump_pressed = false;
     input_.break_block_pressed = false;
     input_.break_block_held = mouse_break_held_;
@@ -160,9 +156,7 @@ void PlatformApp::pump_events() {
                     toggle_fullscreen();
                 }
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
-                    input_.capture_mouse = !input_.capture_mouse;
-                    input_.toggle_mouse_pressed = true;
-                    update_relative_mouse_mode();
+                    input_.escape_pressed = true;
                 }
                 if (event.key.scancode == SDL_SCANCODE_F1) {
                     input_.toggle_wireframe_pressed = true;
@@ -175,6 +169,12 @@ void PlatformApp::pump_events() {
                 }
                 if (event.key.scancode == SDL_SCANCODE_F4) {
                     input_.toggle_leaves_render_mode_pressed = true;
+                }
+                if (event.key.scancode == SDL_SCANCODE_F5) {
+                    input_.toggle_section_culling_pressed = true;
+                }
+                if (event.key.scancode == SDL_SCANCODE_F6) {
+                    input_.toggle_occlusion_culling_pressed = true;
                 }
                 if ((event.key.mod & SDL_KMOD_CTRL) != 0 && event.key.scancode == SDL_SCANCODE_F7) {
                     input_.render_distance_delta = -1;
@@ -395,8 +395,11 @@ void PlatformApp::shutdown() {
 }
 
 bool PlatformApp::initialize_audio() {
-    const bool loaded_press = load_ui_sound("assets/sound/ui/press.wav", "press", press_sound_);
-    const bool loaded_focus = load_ui_sound("assets/sound/ui/focus.wav", "focus", focus_sound_);
+    const AssetPackResolver resolver;
+    const std::string press_path = resolver.resolve_file_utf8("sound/ui/press.wav");
+    const std::string focus_path = resolver.resolve_file_utf8("sound/ui/focus.wav");
+    const bool loaded_press = load_ui_sound(press_path.c_str(), "press", press_sound_);
+    const bool loaded_focus = load_ui_sound(focus_path.c_str(), "focus", focus_sound_);
     return loaded_press || loaded_focus;
 }
 
@@ -443,10 +446,8 @@ void PlatformApp::discover_music_tracks() {
     }
     music_tracks_discovered_ = true;
 
-    std::vector<std::filesystem::path> search_paths;
-    const std::filesystem::path binary_music_path = base_path() / kMusicDirectory;
-    search_paths.push_back(binary_music_path);
-    search_paths.emplace_back(kMusicDirectory);
+    const AssetPackResolver resolver;
+    const std::vector<std::filesystem::path> search_paths = resolver.resolve_directories(kMusicDirectory);
 
     for (const std::filesystem::path& music_path : search_paths) {
         std::error_code error;
@@ -479,7 +480,7 @@ void PlatformApp::discover_music_tracks() {
     }
 
     if (music_tracks_.empty()) {
-        log_message(LogLevel::Warning, std::string("PlatformApp: no OGG music found in ") + kMusicDirectory);
+        log_message(LogLevel::Warning, std::string("PlatformApp: no OGG music found in asset pack path ") + kMusicDirectory);
         return;
     }
 

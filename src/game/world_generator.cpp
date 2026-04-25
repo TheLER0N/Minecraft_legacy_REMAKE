@@ -14,7 +14,6 @@ namespace ml {
 
 namespace {
 
-constexpr int kWaterLevel = 40;
 constexpr int kShoreGravelRadiusMin = 2;
 constexpr int kShoreGravelRadiusMax = 5;
 constexpr int kShoreCandidateMinYOffset = -4;
@@ -22,6 +21,34 @@ constexpr int kShoreCandidateMaxYOffset = 1;
 constexpr int kUnderwaterDepthMin = 3;
 constexpr int kUndergroundGravelBlobAttempts = 14;
 constexpr int kOakTreeMargin = 4;
+constexpr int kSurfaceCaveProtectionDepth = 6;
+constexpr int kCaveMinY = kWorldMinY + 4;
+constexpr int kCaveMaxY = 220;
+constexpr int kAquiferMinY = kWorldMinY + 8;
+constexpr int kAquiferMaxY = kSeaLevel - 4;
+constexpr int kMeshVerticalPadding = 2;
+
+struct ColumnProfile {
+    int surface_y {kSeaLevel};
+    int cave_min_y {kCaveMinY};
+    int cave_max_y {kCaveMinY - 1};
+    float continentalness {0.0f};
+    bool deep_ocean {false};
+    bool cave_candidate {false};
+};
+
+struct VerticalRange {
+    int min_y {0};
+    int max_y {-1};
+
+    bool empty() const {
+        return max_y < min_y;
+    }
+};
+
+std::size_t column_index(int x, int z) {
+    return static_cast<std::size_t>(x + z * kChunkWidth);
+}
 
 struct FaceTemplate {
     const char* name;
@@ -96,6 +123,19 @@ constexpr std::array<FaceTemplate, 6> kFaceTemplates {{
 
 float hash_noise(int x, int z, WorldSeed seed) {
     std::uint64_t value = static_cast<std::uint64_t>(x) * 0x9E3779B185EBCA87ull;
+    value ^= static_cast<std::uint64_t>(z) * 0xC2B2AE3D27D4EB4Full;
+    value ^= seed + 0x165667B19E3779F9ull;
+    value ^= (value >> 33u);
+    value *= 0xff51afd7ed558ccdull;
+    value ^= (value >> 33u);
+    value *= 0xc4ceb9fe1a85ec53ull;
+    value ^= (value >> 33u);
+    return static_cast<float>(value & 0xFFFFFFull) / static_cast<float>(0xFFFFFFull);
+}
+
+float hash_noise3d(int x, int y, int z, WorldSeed seed) {
+    std::uint64_t value = static_cast<std::uint64_t>(x) * 0x9E3779B185EBCA87ull;
+    value ^= static_cast<std::uint64_t>(y) * 0xD6E8FEB86659FD93ull;
     value ^= static_cast<std::uint64_t>(z) * 0xC2B2AE3D27D4EB4Full;
     value ^= seed + 0x165667B19E3779F9ull;
     value ^= (value >> 33u);
@@ -351,8 +391,11 @@ float light_level_to_brightness(std::uint8_t level) {
 }
 
 template <typename SampleFn>
-ChunkLightData build_sky_light_map(SampleFn&& sample, const BlockRegistry& block_registry) {
+ChunkLightData build_sky_light_map(SampleFn&& sample, const BlockRegistry& block_registry, VerticalRange range) {
     ChunkLightData light {};
+    if (range.empty()) {
+        return light;
+    }
     std::vector<LightNode> queue;
     queue.reserve(static_cast<std::size_t>(kChunkWidth * kChunkDepth * 8));
 
@@ -373,7 +416,7 @@ ChunkLightData build_sky_light_map(SampleFn&& sample, const BlockRegistry& block
     for (int z = -ChunkLightData::kBorder; z < kChunkDepth + ChunkLightData::kBorder; ++z) {
         for (int x = -ChunkLightData::kBorder; x < kChunkWidth + ChunkLightData::kBorder; ++x) {
             bool open_to_sky = true;
-            for (int y = kChunkHeight - 1; y >= 0; --y) {
+            for (int y = range.max_y; y >= range.min_y; --y) {
                 const BlockId block = sample(x, y, z);
                 if (!transmits_sky_light(block, block_registry)) {
                     open_to_sky = false;
@@ -613,6 +656,40 @@ float smooth_noise(float x, float z, WorldSeed seed) {
     return nx0 + tz * (nx1 - nx0);
 }
 
+float smooth_noise3d(float x, float y, float z, WorldSeed seed) {
+    const int x0 = static_cast<int>(std::floor(x));
+    const int y0 = static_cast<int>(std::floor(y));
+    const int z0 = static_cast<int>(std::floor(z));
+    const int x1 = x0 + 1;
+    const int y1 = y0 + 1;
+    const int z1 = z0 + 1;
+
+    float tx = x - static_cast<float>(x0);
+    float ty = y - static_cast<float>(y0);
+    float tz = z - static_cast<float>(z0);
+
+    tx = tx * tx * (3.0f - 2.0f * tx);
+    ty = ty * ty * (3.0f - 2.0f * ty);
+    tz = tz * tz * (3.0f - 2.0f * tz);
+
+    const float n000 = hash_noise3d(x0, y0, z0, seed);
+    const float n100 = hash_noise3d(x1, y0, z0, seed);
+    const float n010 = hash_noise3d(x0, y1, z0, seed);
+    const float n110 = hash_noise3d(x1, y1, z0, seed);
+    const float n001 = hash_noise3d(x0, y0, z1, seed);
+    const float n101 = hash_noise3d(x1, y0, z1, seed);
+    const float n011 = hash_noise3d(x0, y1, z1, seed);
+    const float n111 = hash_noise3d(x1, y1, z1, seed);
+
+    const float nx00 = n000 + tx * (n100 - n000);
+    const float nx10 = n010 + tx * (n110 - n010);
+    const float nx01 = n001 + tx * (n101 - n001);
+    const float nx11 = n011 + tx * (n111 - n011);
+    const float nxy0 = nx00 + ty * (nx10 - nx00);
+    const float nxy1 = nx01 + ty * (nx11 - nx01);
+    return nxy0 + tz * (nxy1 - nxy0);
+}
+
 void append_face(MeshSection& mesh, const Vec3& color, const std::array<Vec3, 4>& vertices, const std::array<Vec2, 4>& uvs, std::uint32_t tex_index) {
     const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
     for (std::size_t i = 0; i < vertices.size(); ++i) {
@@ -744,7 +821,11 @@ void append_greedy_face(
         }};
     }
     const FaceLighting lighting = make_greedy_face_lighting(sample, block_registry, light, key.block, face_index, vertices, key.color);
-    append_lit_face(mesh_section_for_block(mesh, key.block, block_registry), lighting, vertices, uvs, key.texture_index);
+    std::array<Vec3, 4> world_vertices = vertices;
+    for (Vec3& vertex : world_vertices) {
+        vertex.y += static_cast<float>(kWorldMinY);
+    }
+    append_lit_face(mesh_section_for_block(mesh, key.block, block_registry), lighting, world_vertices, uvs, key.texture_index);
 }
 
 template <typename SampleFn>
@@ -755,10 +836,41 @@ ChunkMesh build_mesh_from_sampler(
     std::size_t* face_count_out = nullptr) {
     ChunkMesh mesh {};
     std::size_t face_count = 0;
-    const ChunkLightData light = build_sky_light_map(sample, block_registry);
+    VerticalRange occupied_range {};
+    for (int y = 0; y < kChunkHeight; ++y) {
+        bool has_renderable = false;
+        for (int z = 0; z < kChunkDepth && !has_renderable; ++z) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                if (block_registry.is_renderable(sample(x, y, z))) {
+                    has_renderable = true;
+                    break;
+                }
+            }
+        }
+        if (!has_renderable) {
+            continue;
+        }
+        if (occupied_range.empty()) {
+            occupied_range.min_y = y;
+        }
+        occupied_range.max_y = y;
+    }
+    if (occupied_range.empty()) {
+        if (face_count_out != nullptr) {
+            *face_count_out = 0;
+        }
+        return mesh;
+    }
 
-    const auto emit_greedy_mask = [&](int face_index, int slice, int mask_width, int mask_height, std::vector<MaskCell>& mask) {
-        for (int v = 0; v < mask_height; ++v) {
+    const VerticalRange work_range {
+        std::max(0, occupied_range.min_y - kMeshVerticalPadding),
+        std::min(kChunkHeight - 1, occupied_range.max_y + kMeshVerticalPadding)
+    };
+    const ChunkLightData light = build_sky_light_map(sample, block_registry, work_range);
+
+    const auto emit_greedy_mask = [&](int face_index, int slice, int mask_width, int mask_height, int v_min, int v_max, std::vector<MaskCell>& mask) {
+        (void)mask_height;
+        for (int v = v_min; v <= v_max; ++v) {
             for (int u = 0; u < mask_width;) {
                 const int index = u + v * mask_width;
                 if (!mask[static_cast<std::size_t>(index)].valid) {
@@ -776,7 +888,7 @@ ChunkMesh build_mesh_from_sampler(
 
                 int height = 1;
                 bool can_extend = true;
-                while (v + height < mask_height && can_extend) {
+                while (v + height <= v_max && can_extend) {
                     for (int step = 0; step < width; ++step) {
                         if (!same_mask_cell(
                                 mask[static_cast<std::size_t>(index)],
@@ -816,7 +928,7 @@ ChunkMesh build_mesh_from_sampler(
     const auto build_greedy_faces = [&](auto&& eligible, bool water_only) {
         std::vector<MaskCell> mask {};
         mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkDepth));
-        for (int y = 0; y < kChunkHeight; ++y) {
+        for (int y = work_range.min_y; y <= work_range.max_y; ++y) {
             if (!water_only) {
                 std::fill(mask.begin(), mask.end(), MaskCell {});
                 for (int z = 0; z < kChunkDepth; ++z) {
@@ -824,7 +936,7 @@ ChunkMesh build_mesh_from_sampler(
                         mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y + 1, z), 0, eligible);
                     }
                 }
-                emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
+                emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, 0, kChunkDepth - 1, mask);
 
                 std::fill(mask.begin(), mask.end(), MaskCell {});
                 for (int z = 0; z < kChunkDepth; ++z) {
@@ -832,7 +944,7 @@ ChunkMesh build_mesh_from_sampler(
                         mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y - 1, z), 1, eligible);
                     }
                 }
-                emit_greedy_mask(1, y, kChunkWidth, kChunkDepth, mask);
+                emit_greedy_mask(1, y, kChunkWidth, kChunkDepth, 0, kChunkDepth - 1, mask);
             } else {
                 std::fill(mask.begin(), mask.end(), MaskCell {});
                 for (int z = 0; z < kChunkDepth; ++z) {
@@ -840,46 +952,46 @@ ChunkMesh build_mesh_from_sampler(
                         mask[static_cast<std::size_t>(x + z * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y + 1, z), 0, eligible);
                     }
                 }
-                emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, mask);
+                emit_greedy_mask(0, y, kChunkWidth, kChunkDepth, 0, kChunkDepth - 1, mask);
             }
         }
 
         mask.resize(static_cast<std::size_t>(kChunkDepth * kChunkHeight));
         for (int x = 0; x < kChunkWidth; ++x) {
             std::fill(mask.begin(), mask.end(), MaskCell {});
-            for (int y = 0; y < kChunkHeight; ++y) {
+            for (int y = work_range.min_y; y <= work_range.max_y; ++y) {
                 for (int z = 0; z < kChunkDepth; ++z) {
                     mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x + 1, y, z), 2, eligible);
                 }
             }
-            emit_greedy_mask(2, x, kChunkDepth, kChunkHeight, mask);
+            emit_greedy_mask(2, x, kChunkDepth, kChunkHeight, work_range.min_y, work_range.max_y, mask);
 
             std::fill(mask.begin(), mask.end(), MaskCell {});
-            for (int y = 0; y < kChunkHeight; ++y) {
+            for (int y = work_range.min_y; y <= work_range.max_y; ++y) {
                 for (int z = 0; z < kChunkDepth; ++z) {
                     mask[static_cast<std::size_t>(z + y * kChunkDepth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x - 1, y, z), 3, eligible);
                 }
             }
-            emit_greedy_mask(3, x, kChunkDepth, kChunkHeight, mask);
+            emit_greedy_mask(3, x, kChunkDepth, kChunkHeight, work_range.min_y, work_range.max_y, mask);
         }
 
         mask.resize(static_cast<std::size_t>(kChunkWidth * kChunkHeight));
         for (int z = 0; z < kChunkDepth; ++z) {
             std::fill(mask.begin(), mask.end(), MaskCell {});
-            for (int y = 0; y < kChunkHeight; ++y) {
+            for (int y = work_range.min_y; y <= work_range.max_y; ++y) {
                 for (int x = 0; x < kChunkWidth; ++x) {
                     mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y, z + 1), 4, eligible);
                 }
             }
-            emit_greedy_mask(4, z, kChunkWidth, kChunkHeight, mask);
+            emit_greedy_mask(4, z, kChunkWidth, kChunkHeight, work_range.min_y, work_range.max_y, mask);
 
             std::fill(mask.begin(), mask.end(), MaskCell {});
-            for (int y = 0; y < kChunkHeight; ++y) {
+            for (int y = work_range.min_y; y <= work_range.max_y; ++y) {
                 for (int x = 0; x < kChunkWidth; ++x) {
                     mask[static_cast<std::size_t>(x + y * kChunkWidth)] = make_mask_cell(x, y, z, sample(x, y, z), sample(x, y, z - 1), 5, eligible);
                 }
             }
-            emit_greedy_mask(5, z, kChunkWidth, kChunkHeight, mask);
+            emit_greedy_mask(5, z, kChunkWidth, kChunkHeight, work_range.min_y, work_range.max_y, mask);
         }
     };
 
@@ -894,7 +1006,7 @@ ChunkMesh build_mesh_from_sampler(
 
     std::vector<MaskCell> mask {};
 
-    for (int y = 0; y < kChunkHeight; ++y) {
+    for (int y = work_range.min_y; y <= work_range.max_y; ++y) {
         for (int z = 0; z < kChunkDepth; ++z) {
             for (int x = 0; x < kChunkWidth; ++x) {
                 const BlockId block = sample(x, y, z);
@@ -906,7 +1018,7 @@ ChunkMesh build_mesh_from_sampler(
                 }
 
                 const float world_x = static_cast<float>(x);
-                const float world_y = static_cast<float>(y);
+                const float world_y = static_cast<float>(local_y_to_world_y(y));
                 const float world_z = static_cast<float>(z);
 
                 for (const FaceTemplate& face : kFaceTemplates) {
@@ -1059,7 +1171,10 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         const Vertex& b = slab_mesh.opaque_mesh.vertices[i + 1];
         const Vertex& c = slab_mesh.opaque_mesh.vertices[i + 2];
         const Vertex& d = slab_mesh.opaque_mesh.vertices[i + 3];
-        if (a.position.y == 0.0f && b.position.y == 0.0f && c.position.y == 0.0f && d.position.y == 0.0f) {
+        if (a.position.y == static_cast<float>(kWorldMinY) &&
+            b.position.y == static_cast<float>(kWorldMinY) &&
+            c.position.y == static_cast<float>(kWorldMinY) &&
+            d.position.y == static_cast<float>(kWorldMinY)) {
             const float uv_width = std::max({a.uv.x, b.uv.x, c.uv.x, d.uv.x}) - std::min({a.uv.x, b.uv.x, c.uv.x, d.uv.x});
             const float uv_height = std::max({a.uv.y, b.uv.y, c.uv.y, d.uv.y}) - std::min({a.uv.y, b.uv.y, c.uv.y, d.uv.y});
             found_tiled_bottom = uv_width == 3.0f && uv_height == 2.0f;
@@ -1154,44 +1269,104 @@ WorldGenerator::WorldGenerator(const BlockRegistry& block_registry)
     : block_registry_(block_registry) {
 }
 
+int WorldGenerator::surface_height_at(int world_x, int world_z, WorldSeed seed) const {
+    return static_cast<int>(sample_height(world_x, world_z, seed));
+}
+
 ChunkData WorldGenerator::generate_chunk(ChunkCoord coord, WorldSeed seed) const {
     ChunkData chunk {};
+    std::array<ColumnProfile, static_cast<std::size_t>(kChunkWidth * kChunkDepth)> profiles {};
 
     for (int z = 0; z < kChunkDepth; ++z) {
         for (int x = 0; x < kChunkWidth; ++x) {
             const int world_x = coord.x * kChunkWidth + x;
             const int world_z = coord.z * kChunkDepth + z;
-            const int height = static_cast<int>(sample_height(world_x, world_z, seed));
+            ColumnProfile& profile = profiles[column_index(x, z)];
+            profile.continentalness = sample_continentalness(world_x, world_z, seed);
+            profile.surface_y = static_cast<int>(sample_height(world_x, world_z, profile.continentalness, seed));
+            profile.deep_ocean = profile.continentalness < -0.45f;
+            profile.cave_min_y = kCaveMinY;
+            profile.cave_max_y = std::min(profile.surface_y - 2, kCaveMaxY);
+            const float cave_mask = smooth_noise(
+                static_cast<float>(world_x) * 0.018f,
+                static_cast<float>(world_z) * 0.018f,
+                seed ^ 0xCAFECA5ECAFECA5Eull
+            );
+            profile.cave_candidate = profile.cave_max_y >= profile.cave_min_y && cave_mask > 0.18f;
 
-            for (int y = 0; y < kChunkHeight; ++y) {
-                if (y > height) {
-                    if (y <= kWaterLevel) {
-                        chunk.set(x, y, z, BlockId::Water);
+            const int column_top_y = std::max(profile.surface_y, kSeaLevel);
+            const int max_local_y = world_y_to_local_y(std::clamp(column_top_y, kWorldMinY, kWorldMaxY));
+            for (int local_y = 0; local_y <= max_local_y; ++local_y) {
+                const int world_y = local_y_to_world_y(local_y);
+                if (world_y > profile.surface_y) {
+                    if (world_y <= kSeaLevel) {
+                        chunk.set(x, local_y, z, BlockId::Water);
                     }
                     continue;
                 }
 
-                if (y == height) {
-                    if (y <= kWaterLevel + 1) {
-                        chunk.set(x, y, z, BlockId::Sand);
+                if (world_y <= kWorldMinY + 2) {
+                    chunk.set(x, local_y, z, BlockId::Stone);
+                } else if (world_y == profile.surface_y) {
+                    if (world_y <= kSeaLevel + 1) {
+                        chunk.set(x, local_y, z, profile.deep_ocean ? BlockId::Gravel : BlockId::Sand);
                     } else {
-                        chunk.set(x, y, z, BlockId::Grass);
+                        chunk.set(x, local_y, z, BlockId::Grass);
                     }
-                } else if (y > height - 4) {
-                    if (height <= kWaterLevel + 1) {
-                        chunk.set(x, y, z, BlockId::Sand);
+                } else if (world_y > profile.surface_y - 4) {
+                    if (profile.surface_y <= kSeaLevel + 1) {
+                        chunk.set(x, local_y, z, profile.deep_ocean ? BlockId::Gravel : BlockId::Sand);
                     } else {
-                        chunk.set(x, y, z, BlockId::Dirt);
+                        chunk.set(x, local_y, z, BlockId::Dirt);
                     }
                 } else {
-                    chunk.set(x, y, z, BlockId::Stone);
+                    chunk.set(x, local_y, z, BlockId::Stone);
                 }
             }
         }
     }
 
-    apply_underwater_gravel_bottom(chunk, coord, kWaterLevel, seed);
-    apply_shore_gravel_disks(chunk, coord, kWaterLevel, seed);
+    for (int z = 0; z < kChunkDepth; ++z) {
+        for (int x = 0; x < kChunkWidth; ++x) {
+            const ColumnProfile& profile = profiles[column_index(x, z)];
+            if (!profile.cave_candidate) {
+                continue;
+            }
+            const int world_x = coord.x * kChunkWidth + x;
+            const int world_z = coord.z * kChunkDepth + z;
+            const bool ocean_floor_guard_column = profile.continentalness < -0.16f;
+            const int min_local_y = world_y_to_local_y(std::max(profile.cave_min_y, kWorldMinY));
+            const int max_local_y = world_y_to_local_y(std::min(profile.cave_max_y, kWorldMaxY));
+            for (int local_y = min_local_y; local_y <= max_local_y; ++local_y) {
+                const int world_y = local_y_to_world_y(local_y);
+                BlockId block = chunk.get(x, local_y, z);
+                if (block == BlockId::Air || block == BlockId::Water) {
+                    continue;
+                }
+                if (ocean_floor_guard_column && world_y > profile.surface_y - 8) {
+                    continue;
+                }
+                if (!should_carve_cave(world_x, world_y, world_z, profile.surface_y, seed)) {
+                    continue;
+                }
+
+                if (world_y <= kAquiferMaxY) {
+                    const int aquifer_level = sample_aquifer_level(world_x, world_y, world_z, seed);
+                    const float aquifer_presence = smooth_noise3d(
+                        static_cast<float>(world_x) * 0.012f,
+                        static_cast<float>(world_y) * 0.010f,
+                        static_cast<float>(world_z) * 0.012f,
+                        seed ^ 0xFA117EDC0DEull
+                    );
+                    chunk.set(x, local_y, z, (world_y <= aquifer_level && aquifer_presence > 0.36f) ? BlockId::Water : BlockId::Air);
+                } else {
+                    chunk.set(x, local_y, z, BlockId::Air);
+                }
+            }
+        }
+    }
+    apply_underwater_gravel_bottom(chunk, coord, kSeaLevel, seed);
+    apply_shore_gravel_disks(chunk, coord, kSeaLevel, seed);
     apply_underground_gravel_blobs(chunk, coord, seed);
     apply_oak_trees(chunk, coord, seed);
 
@@ -1235,9 +1410,10 @@ void WorldGenerator::apply_underwater_gravel_bottom(ChunkData& chunk, ChunkCoord
             const int world_x = coord.x * kChunkWidth + x;
             const int world_z = coord.z * kChunkDepth + z;
             const int surface_y = static_cast<int>(sample_height(world_x, world_z, seed));
-            if (surface_y < 0 || surface_y >= kChunkHeight || surface_y > water_level - kUnderwaterDepthMin) {
+            if (!contains_world_y(surface_y) || surface_y > water_level - kUnderwaterDepthMin) {
                 continue;
             }
+            const int surface_local_y = world_y_to_local_y(surface_y);
 
             const float clump = smooth_noise(static_cast<float>(world_x) * 0.13f, static_cast<float>(world_z) * 0.13f, seed ^ 0xA0C7B157BEEFull);
             const float edge = smooth_noise(static_cast<float>(world_x) * 0.31f, static_cast<float>(world_z) * 0.31f, seed ^ 0x6C8E9CF570932BD5ull);
@@ -1245,11 +1421,11 @@ void WorldGenerator::apply_underwater_gravel_bottom(ChunkData& chunk, ChunkCoord
                 continue;
             }
 
-            if (can_replace_surface_with_gravel(chunk.get(x, surface_y, z)) || chunk.get(x, surface_y, z) == BlockId::Stone) {
-                chunk.set(x, surface_y, z, BlockId::Gravel);
+            if (can_replace_surface_with_gravel(chunk.get(x, surface_local_y, z)) || chunk.get(x, surface_local_y, z) == BlockId::Stone) {
+                chunk.set(x, surface_local_y, z, BlockId::Gravel);
             }
-            if (surface_y > 0 && chunk.get(x, surface_y - 1, z) == BlockId::Sand && hash_noise(world_x, world_z, seed ^ 0xB0770B077ull) > 0.45f) {
-                chunk.set(x, surface_y - 1, z, BlockId::Gravel);
+            if (surface_y > kWorldMinY && chunk.get(x, world_y_to_local_y(surface_y - 1), z) == BlockId::Sand && hash_noise(world_x, world_z, seed ^ 0xB0770B077ull) > 0.45f) {
+                chunk.set(x, world_y_to_local_y(surface_y - 1), z, BlockId::Gravel);
             }
         }
     }
@@ -1302,7 +1478,7 @@ void WorldGenerator::apply_shore_gravel_disks(ChunkData& chunk, ChunkCoord coord
                     }
 
                     const int surface_y = static_cast<int>(sample_height(world_x, world_z, seed));
-                    if (surface_y < 0 || surface_y >= kChunkHeight) {
+                    if (!contains_world_y(surface_y)) {
                         continue;
                     }
                     if (surface_y < water_level + kShoreCandidateMinYOffset || surface_y > water_level + kShoreCandidateMaxYOffset) {
@@ -1311,11 +1487,12 @@ void WorldGenerator::apply_shore_gravel_disks(ChunkData& chunk, ChunkCoord coord
                     if (!is_water_adjacent_or_submerged_surface(world_x, world_z, surface_y, water_level, seed)) {
                         continue;
                     }
-                    if (can_replace_surface_with_gravel(chunk.get(x, surface_y, z))) {
-                        chunk.set(x, surface_y, z, BlockId::Gravel);
+                    const int surface_local_y = world_y_to_local_y(surface_y);
+                    if (can_replace_surface_with_gravel(chunk.get(x, surface_local_y, z))) {
+                        chunk.set(x, surface_local_y, z, BlockId::Gravel);
                     }
-                    if (surface_y > 0 && chunk.get(x, surface_y - 1, z) == BlockId::Sand && hash_noise(world_x * 3, world_z * 5, seed ^ 0x5A7D5A7Dull) > 0.62f) {
-                        chunk.set(x, surface_y - 1, z, BlockId::Gravel);
+                    if (surface_y > kWorldMinY && chunk.get(x, world_y_to_local_y(surface_y - 1), z) == BlockId::Sand && hash_noise(world_x * 3, world_z * 5, seed ^ 0x5A7D5A7Dull) > 0.62f) {
+                        chunk.set(x, world_y_to_local_y(surface_y - 1), z, BlockId::Gravel);
                     }
                 }
             }
@@ -1333,7 +1510,7 @@ void WorldGenerator::apply_underground_gravel_blobs(ChunkData& chunk, ChunkCoord
                 const int seed_z = source_chunk_z * 131071 - attempt * 97;
                 const int center_x = source_chunk_x * kChunkWidth + random_range(0, kChunkWidth - 1, hash_noise(seed_x, seed_z, seed ^ 0x9A504EA9D90E4A11ull));
                 const int center_z = source_chunk_z * kChunkDepth + random_range(0, kChunkDepth - 1, hash_noise(seed_x, seed_z, seed ^ 0x4B1D0B5B00B51357ull));
-                const int center_y = random_range(5, 72, hash_noise(seed_x, seed_z, seed ^ 0x7F4A7C159E3779B9ull));
+                const int center_y = random_range(kWorldMinY + 12, 120, hash_noise(seed_x, seed_z, seed ^ 0x7F4A7C159E3779B9ull));
                 const float radius = 1.5f + hash_noise(seed_x, seed_z, seed ^ 0x0DDC0FFEEC0FFEE0ull) * 1.7f;
                 const float radius_sq = radius * radius;
 
@@ -1341,10 +1518,11 @@ void WorldGenerator::apply_underground_gravel_blobs(ChunkData& chunk, ChunkCoord
                 const int max_x = std::min(kChunkWidth - 1, center_x + max_radius - coord.x * kChunkWidth);
                 const int min_z = std::max(0, center_z - max_radius - coord.z * kChunkDepth);
                 const int max_z = std::min(kChunkDepth - 1, center_z + max_radius - coord.z * kChunkDepth);
-                const int min_y = std::max(0, center_y - max_radius);
-                const int max_y = std::min(kChunkHeight - 1, center_y + max_radius);
+                const int min_y = std::max(kWorldMinY, center_y - max_radius);
+                const int max_y = std::min(kWorldMaxY, center_y + max_radius);
 
                 for (int y = min_y; y <= max_y; ++y) {
+                    const int local_y = world_y_to_local_y(y);
                     for (int z = min_z; z <= max_z; ++z) {
                         for (int x = min_x; x <= max_x; ++x) {
                             const int world_x = coord.x * kChunkWidth + x;
@@ -1356,8 +1534,8 @@ void WorldGenerator::apply_underground_gravel_blobs(ChunkData& chunk, ChunkCoord
                             if (dx * dx + dy * dy + dz * dz > radius_sq + noise) {
                                 continue;
                             }
-                            if (chunk.get(x, y, z) == BlockId::Stone) {
-                                chunk.set(x, y, z, BlockId::Gravel);
+                            if (chunk.get(x, local_y, z) == BlockId::Stone) {
+                                chunk.set(x, local_y, z, BlockId::Gravel);
                             }
                         }
                     }
@@ -1401,7 +1579,7 @@ void WorldGenerator::apply_oak_trees(ChunkData& chunk, ChunkCoord coord, WorldSe
 }
 
 bool WorldGenerator::can_place_oak_tree(int base_world_x, int ground_y, int base_world_z, WorldSeed seed) const {
-    if (ground_y < 1 || ground_y + 7 >= kChunkHeight || ground_y <= kWaterLevel + 1) {
+    if (ground_y < kWorldMinY + 1 || ground_y + 7 > kWorldMaxY || ground_y <= kSeaLevel + 1) {
         return false;
     }
 
@@ -1413,7 +1591,7 @@ bool WorldGenerator::can_place_oak_tree(int base_world_x, int ground_y, int base
     for (int dz = -2; dz <= 2; ++dz) {
         for (int dx = -2; dx <= 2; ++dx) {
             const int neighbor_height = static_cast<int>(sample_height(base_world_x + dx, base_world_z + dz, seed));
-            if (neighbor_height <= kWaterLevel + 1) {
+            if (neighbor_height <= kSeaLevel + 1) {
                 return false;
             }
             if (std::abs(neighbor_height - ground_y) > 2) {
@@ -1439,20 +1617,21 @@ void WorldGenerator::try_place_oak_tree(
     const auto set_if_local = [&](int world_x, int y, int world_z, BlockId block) {
         const int local_x = world_x - chunk_min_x;
         const int local_z = world_z - chunk_min_z;
-        if (local_x < 0 || local_x >= kChunkWidth || local_z < 0 || local_z >= kChunkDepth || y < 0 || y >= kChunkHeight) {
+        if (local_x < 0 || local_x >= kChunkWidth || local_z < 0 || local_z >= kChunkDepth || !contains_world_y(y)) {
             return;
         }
+        const int local_y = world_y_to_local_y(y);
 
-        const BlockId existing = chunk.get(local_x, y, local_z);
+        const BlockId existing = chunk.get(local_x, local_y, local_z);
         if (block == BlockId::OakLog) {
             if (existing == BlockId::Air || existing == BlockId::OakLeaves) {
-                chunk.set(local_x, y, local_z, block);
+                chunk.set(local_x, local_y, local_z, block);
             }
             return;
         }
 
         if (existing == BlockId::Air) {
-            chunk.set(local_x, y, local_z, block);
+            chunk.set(local_x, local_y, local_z, block);
         }
     };
 
@@ -1481,14 +1660,138 @@ void WorldGenerator::try_place_oak_tree(
 }
 
 float WorldGenerator::sample_height(int world_x, int world_z, WorldSeed seed) const {
+    return sample_height(world_x, world_z, sample_continentalness(world_x, world_z, seed), seed);
+}
+
+float WorldGenerator::sample_height(int world_x, int world_z, float continentalness, WorldSeed seed) const {
     const float x = static_cast<float>(world_x);
     const float z = static_cast<float>(world_z);
 
-    float elevation = smooth_noise(x * 0.01f, z * 0.01f, seed) * 32.0f;
-    float roughness = smooth_noise(x * 0.05f, z * 0.05f, seed ^ 0x12345678ull) * 16.0f;
-    float detail = smooth_noise(x * 0.1f, z * 0.1f, seed ^ 0x87654321ull) * 8.0f;
+    const float erosion = smooth_noise(x * 0.0065f, z * 0.0065f, seed ^ 0x12345678ull) * 2.0f - 1.0f;
+    const float hills = smooth_noise(x * 0.018f, z * 0.018f, seed ^ 0x23456789ull) * 2.0f - 1.0f;
+    const float roughness = smooth_noise(x * 0.048f, z * 0.048f, seed ^ 0x3456789Aull) * 2.0f - 1.0f;
+    const float detail = smooth_noise(x * 0.11f, z * 0.11f, seed ^ 0x87654321ull) * 2.0f - 1.0f;
 
-    return 30.0f + elevation + roughness + detail;
+    float height = static_cast<float>(kSeaLevel);
+    if (continentalness < -0.45f) {
+        const float t = std::clamp((continentalness + 1.0f) / 0.55f, 0.0f, 1.0f);
+        height = static_cast<float>(kSeaLevel) - 46.0f + t * 18.0f + roughness * 3.0f;
+    } else if (continentalness < -0.16f) {
+        const float t = (continentalness + 0.45f) / 0.29f;
+        height = static_cast<float>(kSeaLevel) - 26.0f + t * 18.0f + roughness * 4.0f;
+    } else if (continentalness < 0.08f) {
+        const float t = (continentalness + 0.16f) / 0.24f;
+        height = static_cast<float>(kSeaLevel) - 5.0f + t * 9.0f + erosion * 2.0f + detail * 1.5f;
+    } else {
+        const float land = std::clamp((continentalness - 0.08f) / 0.92f, 0.0f, 1.0f);
+        height = static_cast<float>(kSeaLevel) + 5.0f + land * 82.0f + hills * (10.0f + land * 24.0f) + roughness * 6.0f + detail * 2.0f;
+    }
+
+    return std::clamp(height, static_cast<float>(kWorldMinY + 6), static_cast<float>(kWorldMaxY - 24));
+}
+
+float WorldGenerator::sample_continentalness(int world_x, int world_z, WorldSeed seed) const {
+    const float x = static_cast<float>(world_x);
+    const float z = static_cast<float>(world_z);
+
+    const float continents = smooth_noise(x * 0.0022f, z * 0.0022f, seed ^ 0xC01171E477E55ull) * 2.0f - 1.0f;
+    const float islands = smooth_noise(x * 0.006f, z * 0.006f, seed ^ 0x15A11D5BEEFull) * 2.0f - 1.0f;
+    const float coast_noise = smooth_noise(x * 0.014f, z * 0.014f, seed ^ 0xC0A57A17ull) * 2.0f - 1.0f;
+
+    return std::clamp(continents * 0.82f + islands * 0.26f + coast_noise * 0.10f, -1.0f, 1.0f);
+}
+
+float WorldGenerator::sample_cave_density(int world_x, int world_y, int world_z, WorldSeed seed) const {
+    const float x = static_cast<float>(world_x);
+    const float y = static_cast<float>(world_y);
+    const float z = static_cast<float>(world_z);
+
+    const float cheese_a = smooth_noise3d(x * 0.030f, y * 0.024f, z * 0.030f, seed ^ 0xC4A5E0000000001ull);
+    const float cheese_b = smooth_noise3d(x * 0.052f, y * 0.040f, z * 0.052f, seed ^ 0xC4A5E0000000002ull);
+    const float cheese_detail = smooth_noise3d(x * 0.095f, y * 0.080f, z * 0.095f, seed ^ 0xC4A5E0000000003ull);
+    const float cheese_density = cheese_a * 0.62f + cheese_b * 0.28f + cheese_detail * 0.10f;
+
+    const float tunnel_x = std::abs(smooth_noise3d(x * 0.019f, y * 0.036f, z * 0.019f, seed ^ 0x5EA9E771ull) - 0.5f);
+    const float tunnel_z = std::abs(smooth_noise3d(x * 0.021f, y * 0.033f, z * 0.021f, seed ^ 0x5EA9E772ull) - 0.5f);
+    const float spaghetti = 0.078f - std::max(tunnel_x, tunnel_z);
+
+    const float noodle_a = std::abs(smooth_noise3d(x * 0.052f, y * 0.060f, z * 0.052f, seed ^ 0x900D1E0000000001ull) - 0.5f);
+    const float noodle_b = std::abs(smooth_noise3d(x * 0.047f, y * 0.055f, z * 0.047f, seed ^ 0x900D1E0000000002ull) - 0.5f);
+    const float noodle = 0.030f - std::max(noodle_a, noodle_b);
+
+    const float depth = std::clamp((static_cast<float>(kCaveMaxY - world_y) / static_cast<float>(kCaveMaxY - kCaveMinY)), 0.0f, 1.0f);
+    const float depth_bias = depth * 0.075f;
+    const float cheese = (0.365f + depth_bias) - cheese_density;
+    return std::max({cheese, spaghetti + depth_bias * 0.25f, noodle + depth_bias * 0.15f});
+}
+
+int WorldGenerator::sample_aquifer_level(int world_x, int world_y, int world_z, WorldSeed seed) const {
+    const float local = smooth_noise3d(
+        static_cast<float>(world_x) * 0.018f,
+        static_cast<float>(world_y) * 0.014f,
+        static_cast<float>(world_z) * 0.018f,
+        seed ^ 0xA901FEA901FEull
+    );
+    return std::clamp(kSeaLevel - 30 + static_cast<int>(local * 24.0f), kAquiferMinY, kSeaLevel - 2);
+}
+
+bool WorldGenerator::should_carve_cave(int world_x, int world_y, int world_z, int surface_y, WorldSeed seed) const {
+    if (world_y < kCaveMinY || world_y > kCaveMaxY || world_y > surface_y - 2) {
+        return false;
+    }
+    if (surface_y - world_y < kSurfaceCaveProtectionDepth) {
+        const float mouth = smooth_noise3d(
+            static_cast<float>(world_x) * 0.06f,
+            static_cast<float>(world_y) * 0.08f,
+            static_cast<float>(world_z) * 0.06f,
+            seed ^ 0xE4712A9E4712A9ull
+        );
+        if (mouth < 0.86f) {
+            return false;
+        }
+    }
+
+    return sample_cave_density(world_x, world_y, world_z, seed) > 0.0f;
+}
+
+void WorldGenerator::apply_caves_and_aquifers(ChunkData& chunk, ChunkCoord coord, WorldSeed seed) const {
+    for (int z = 0; z < kChunkDepth; ++z) {
+        for (int x = 0; x < kChunkWidth; ++x) {
+            const int world_x = coord.x * kChunkWidth + x;
+            const int world_z = coord.z * kChunkDepth + z;
+            const int surface_y = static_cast<int>(sample_height(world_x, world_z, seed));
+            const float ocean_connectivity = sample_continentalness(world_x, world_z, seed);
+
+            for (int local_y = 0; local_y < kChunkHeight; ++local_y) {
+                const int world_y = local_y_to_world_y(local_y);
+                BlockId block = chunk.get(x, local_y, z);
+                if (block == BlockId::Air || block == BlockId::Water || block == BlockId::OakLog || block == BlockId::OakLeaves) {
+                    continue;
+                }
+                if (!should_carve_cave(world_x, world_y, world_z, surface_y, seed)) {
+                    continue;
+                }
+
+                const bool ocean_floor_guard = ocean_connectivity < -0.16f && world_y > surface_y - 8;
+                if (ocean_floor_guard) {
+                    continue;
+                }
+
+                const int aquifer_level = sample_aquifer_level(world_x, world_y, world_z, seed);
+                const float aquifer_presence = smooth_noise3d(
+                    static_cast<float>(world_x) * 0.012f,
+                    static_cast<float>(world_y) * 0.010f,
+                    static_cast<float>(world_z) * 0.012f,
+                    seed ^ 0xFA117EDC0DEull
+                );
+                if (world_y <= aquifer_level && world_y <= kAquiferMaxY && aquifer_presence > 0.36f) {
+                    chunk.set(x, local_y, z, BlockId::Water);
+                } else {
+                    chunk.set(x, local_y, z, BlockId::Air);
+                }
+            }
+        }
+    }
 }
 
 ChunkMesh build_chunk_mesh(const ChunkData& chunk_data, ChunkCoord coord, const BlockRegistry& block_registry, LeavesRenderMode leaves_mode) {

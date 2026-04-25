@@ -30,6 +30,9 @@ struct InputState {
     bool toggle_debug_hud_pressed {false};
     bool toggle_debug_fly_pressed {false};
     bool toggle_leaves_render_mode_pressed {false};
+    bool toggle_section_culling_pressed {false};
+    bool toggle_occlusion_culling_pressed {false};
+    bool escape_pressed {false};
     bool jump_pressed {false};
     bool break_block_pressed {false};
     bool break_block_held {false};

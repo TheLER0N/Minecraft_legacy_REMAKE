@@ -39,7 +39,7 @@ else()
     find_package(SDL3 CONFIG REQUIRED)
 endif()
 
-set(MINECRAFT_LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders")
+set(MINECRAFT_LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/texture_pack/classic/shaders")
 set(MINECRAFT_LEGACY_COMPILED_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${MINECRAFT_LEGACY_COMPILED_SHADER_DIR}")
 
@@ -90,6 +90,7 @@ add_custom_target(compile_shaders DEPENDS ${SHADER_OUTPUTS})
 add_executable(minecraft_legacy
     src/main.cpp
     src/app/application.cpp
+    src/common/asset_pack.cpp
     src/platform/platform_app.cpp
     src/platform/stb_vorbis_impl.cpp
     src/render/renderer.cpp

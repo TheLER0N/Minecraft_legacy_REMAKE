@@ -3,6 +3,7 @@
 #include "common/log.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <optional>
 #include <string>
@@ -28,6 +29,10 @@ std::size_t mesh_index_count(const ChunkMesh& mesh) {
     return mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
 }
 
+std::size_t mesh_byte_count(const ChunkMesh& mesh) {
+    return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
+}
+
 }
 
 WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius)
@@ -35,7 +40,8 @@ WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry
     , block_registry_(block_registry)
     , generator_(block_registry)
     , chunk_radius_(std::clamp(chunk_radius, kMinChunkRadius, kMaxChunkRadius)) {
-    const std::size_t worker_count = std::max<std::size_t>(2, std::thread::hardware_concurrency() / 2);
+    const std::size_t hardware_threads = std::max<std::size_t>(2, std::thread::hardware_concurrency());
+    const std::size_t worker_count = std::clamp<std::size_t>(hardware_threads - 1, 2, 12);
     workers_.reserve(worker_count);
     for (std::size_t i = 0; i < worker_count; ++i) {
         workers_.emplace_back([this]() { worker_loop(); });
@@ -134,6 +140,11 @@ void WorldStreamer::tick_generation_jobs() {
         completed_.pop();
         ++processed;
 
+        if (!desired_chunk(observer_chunk_, result.coord)) {
+            rebuild_states_.erase(result.coord);
+            continue;
+        }
+
         if (result.type == ChunkJobType::RebuildMesh) {
             if (result.stale_rebuild) {
                 auto state_it = rebuild_states_.find(result.coord);
@@ -153,6 +164,9 @@ void WorldStreamer::tick_generation_jobs() {
                 continue;
             }
             auto state_it = rebuild_states_.find(result.coord);
+            if (state_it == rebuild_states_.end() || state_it->second.serial != result.rebuild_serial) {
+                continue;
+            }
             if (state_it != rebuild_states_.end() && state_it->second.dirty) {
                 state_it->second.queued = false;
                 state_it->second.dirty = false;
@@ -182,6 +196,7 @@ void WorldStreamer::tick_generation_jobs() {
             if (!result.chunk_data.has_value()) {
                 continue;
             }
+            last_generate_ms_ = result.generate_ms;
             it->second.state = ChunkState::Visible;
             it->second.data = std::move(result.chunk_data);
             visible_chunks_.push_back({result.coord});
@@ -191,12 +206,9 @@ void WorldStreamer::tick_generation_jobs() {
             queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z});
             queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z - 1});
             queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z + 1});
-            queue_rebuild_job_if_loaded_locked({result.coord.x - 1, result.coord.z - 1});
-            queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z - 1});
-            queue_rebuild_job_if_loaded_locked({result.coord.x - 1, result.coord.z + 1});
-            queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z + 1});
             continue;
         }
+        last_mesh_ms_ = result.mesh_ms;
 
         if (result.mesh.empty()) {
             log_message(LogLevel::Warning, "WorldStreamer: rebuilt chunk mesh is empty");
@@ -204,7 +216,9 @@ void WorldStreamer::tick_generation_jobs() {
             log_message(
                 LogLevel::Info,
                 std::string("WorldStreamer: chunk ready vertices=") + std::to_string(mesh_vertex_count(result.mesh)) +
-                    " indices=" + std::to_string(mesh_index_count(result.mesh))
+                    " indices=" + std::to_string(mesh_index_count(result.mesh)) +
+                    " generate_ms=" + std::to_string(result.generate_ms) +
+                    " mesh_ms=" + std::to_string(result.mesh_ms)
             );
             ++logged_ready_chunk_count_;
         }
@@ -254,6 +268,36 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
     return uploads;
 }
 
+std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(std::size_t byte_budget, Vec3 observer_position, Vec3 observer_forward) {
+    if (byte_budget == 0 || pending_uploads_.empty()) {
+        return {};
+    }
+
+    const Vec3 planar_forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
+    std::sort(
+        pending_uploads_.begin(),
+        pending_uploads_.end(),
+        [&](const PendingChunkUpload& lhs, const PendingChunkUpload& rhs) {
+            return chunk_priority_score(lhs.coord, observer_position, planar_forward) <
+                chunk_priority_score(rhs.coord, observer_position, planar_forward);
+        }
+    );
+
+    std::vector<PendingChunkUpload> uploads;
+    std::size_t selected_bytes = 0;
+    std::size_t selected_count = 0;
+    for (; selected_count < pending_uploads_.size(); ++selected_count) {
+        const std::size_t upload_bytes = mesh_byte_count(pending_uploads_[selected_count].mesh);
+        if (!uploads.empty() && selected_bytes + upload_bytes > byte_budget) {
+            break;
+        }
+        selected_bytes += upload_bytes;
+        uploads.push_back(std::move(pending_uploads_[selected_count]));
+    }
+    pending_uploads_.erase(pending_uploads_.begin(), pending_uploads_.begin() + static_cast<std::ptrdiff_t>(selected_count));
+    return uploads;
+}
+
 std::vector<ChunkCoord> WorldStreamer::drain_pending_unloads() {
     std::vector<ChunkCoord> unloads;
     unloads.swap(pending_unloads_);
@@ -261,6 +305,7 @@ std::vector<ChunkCoord> WorldStreamer::drain_pending_unloads() {
 }
 
 WorldStreamer::StreamingStats WorldStreamer::stats() const {
+    std::lock_guard lock(mutex_);
     std::size_t queued_rebuilds = 0;
     for (const auto& [coord, state] : rebuild_states_) {
         (void)coord;
@@ -268,16 +313,34 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
             ++queued_rebuilds;
         }
     }
+    std::size_t queued_generates = 0;
+    std::size_t queued_meshes = 0;
+    for (const ChunkJob& job : job_queue_) {
+        if (job.type == ChunkJobType::GenerateChunk) {
+            ++queued_generates;
+        } else {
+            ++queued_meshes;
+        }
+    }
+    std::size_t pending_upload_bytes = 0;
+    for (const PendingChunkUpload& upload : pending_uploads_) {
+        pending_upload_bytes += mesh_byte_count(upload.mesh);
+    }
 
     return {
         visible_chunks_.size(),
         pending_uploads_.size(),
-        queued_rebuilds
+        queued_rebuilds,
+        queued_generates,
+        queued_meshes,
+        pending_upload_bytes,
+        last_generate_ms_,
+        last_mesh_ms_
     };
 }
 
 BlockQueryResult WorldStreamer::query_block_at_world(int x, int y, int z) const {
-    if (y < 0 || y >= kChunkHeight) {
+    if (!contains_world_y(y)) {
         return {BlockQueryStatus::OutOfBounds, BlockId::Air};
     }
 
@@ -305,7 +368,7 @@ BlockQueryResult WorldStreamer::query_block_at_world(int x, int y, int z) const 
 
     return {
         BlockQueryStatus::Loaded,
-        chunk_it->second.data->get(positive_mod(x, kChunkWidth), y, positive_mod(z, kChunkDepth))
+        chunk_it->second.data->get(positive_mod(x, kChunkWidth), world_y_to_local_y(y), positive_mod(z, kChunkDepth))
     };
 }
 
@@ -414,7 +477,7 @@ std::optional<BlockHit> WorldStreamer::raycast(const Vec3& origin, const Vec3& d
 }
 
 SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId block) {
-    if (y < 0 || y >= kChunkHeight) {
+    if (!contains_world_y(y)) {
         return SetBlockResult::OutOfBounds;
     }
 
@@ -431,8 +494,9 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
 
     ChunkData& chunk = *chunk_it->second.data;
     const int local_x = positive_mod(x, kChunkWidth);
+    const int local_y = world_y_to_local_y(y);
     const int local_z = positive_mod(z, kChunkDepth);
-    const BlockId existing = chunk.get(local_x, y, local_z);
+    const BlockId existing = chunk.get(local_x, local_y, local_z);
     if (existing == block) {
         return SetBlockResult::NoChange;
     }
@@ -440,7 +504,7 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
         return SetBlockResult::Occupied;
     }
 
-    chunk.set(local_x, y, local_z, block);
+    chunk.set(local_x, local_y, local_z, block);
     queue_rebuild_job_if_loaded(chunk_coord);
     queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
     queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
@@ -507,25 +571,20 @@ void WorldStreamer::worker_loop() {
         JobResult result {};
         result.coord = job.coord;
         result.version = job.version;
+        result.rebuild_serial = job.rebuild_serial;
         result.type = job.type;
 
         if (job.type == ChunkJobType::GenerateChunk) {
+            const auto start = std::chrono::steady_clock::now();
             result.chunk_data = generator_.generate_chunk(job.coord, seed_);
+            const auto end = std::chrono::steady_clock::now();
+            result.generate_ms = std::chrono::duration<float, std::milli>(end - start).count();
         } else if (job.snapshot.has_value()) {
-            {
-                std::lock_guard lock(mutex_);
-                const auto state_it = rebuild_states_.find(job.coord);
-                if (state_it == rebuild_states_.end() || state_it->second.serial != job.rebuild_serial) {
-                    result.stale_rebuild = true;
-                }
-            }
-            if (result.stale_rebuild) {
-                std::lock_guard lock(mutex_);
-                completed_.push(std::move(result));
-                continue;
-            }
             const ChunkMeshSnapshot& snapshot = *job.snapshot;
+            const auto start = std::chrono::steady_clock::now();
             result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), snapshot.leaves_mode);
+            const auto end = std::chrono::steady_clock::now();
+            result.mesh_ms = std::chrono::duration<float, std::milli>(end - start).count();
         }
 
         {
@@ -577,13 +636,21 @@ float WorldStreamer::chunk_priority_score(ChunkCoord coord, Vec3 observer_positi
     return bucket * 1000000.0f + distance_sq;
 }
 
+float WorldStreamer::job_priority_score_locked(const ChunkJob& job) const {
+    float score = chunk_priority_score(job.coord, observer_position_, observer_forward_);
+    if (job.type == ChunkJobType::RebuildMesh) {
+        score += 500000.0f;
+    }
+    return score;
+}
+
 void WorldStreamer::push_job_locked(ChunkJob&& job) {
-    const float score = chunk_priority_score(job.coord, observer_position_, observer_forward_);
+    const float score = job_priority_score_locked(job);
     const auto insert_at = std::find_if(
         job_queue_.begin(),
         job_queue_.end(),
         [&](const ChunkJob& existing) {
-            return score < chunk_priority_score(existing.coord, observer_position_, observer_forward_);
+            return score < job_priority_score_locked(existing);
         }
     );
     job_queue_.insert(insert_at, std::move(job));

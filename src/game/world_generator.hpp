@@ -17,9 +17,16 @@ class WorldGenerator {
 public:
     explicit WorldGenerator(const BlockRegistry& block_registry);
     ChunkData generate_chunk(ChunkCoord coord, WorldSeed seed) const;
+    int surface_height_at(int world_x, int world_z, WorldSeed seed) const;
 
 private:
     float sample_height(int world_x, int world_z, WorldSeed seed) const;
+    float sample_height(int world_x, int world_z, float continentalness, WorldSeed seed) const;
+    float sample_continentalness(int world_x, int world_z, WorldSeed seed) const;
+    float sample_cave_density(int world_x, int world_y, int world_z, WorldSeed seed) const;
+    int sample_aquifer_level(int world_x, int world_y, int world_z, WorldSeed seed) const;
+    bool should_carve_cave(int world_x, int world_y, int world_z, int surface_y, WorldSeed seed) const;
+    void apply_caves_and_aquifers(ChunkData& chunk, ChunkCoord coord, WorldSeed seed) const;
     bool is_water_adjacent_or_submerged_surface(int world_x, int world_z, int surface_y, int water_level, WorldSeed seed) const;
     void apply_shore_gravel_disks(ChunkData& chunk, ChunkCoord coord, int water_level, WorldSeed seed) const;
     void apply_underwater_gravel_bottom(ChunkData& chunk, ChunkCoord coord, int water_level, WorldSeed seed) const;
