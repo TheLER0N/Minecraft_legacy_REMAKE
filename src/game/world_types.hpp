@@ -3,6 +3,7 @@
 #include "common/math.hpp"
 #include "game/block.hpp"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -17,6 +18,8 @@ constexpr int kChunkDepth = 16;
 constexpr int kWorldMinY = -64;
 constexpr int kWorldMaxY = 319;
 constexpr int kChunkHeight = kWorldMaxY - kWorldMinY + 1;
+constexpr int kChunkSectionHeight = 16;
+constexpr int kChunkSectionCount = kChunkHeight / kChunkSectionHeight;
 constexpr int kSeaLevel = 62;
 
 constexpr bool contains_world_y(int world_y) {
@@ -86,6 +89,21 @@ struct ChunkMesh {
     }
 };
 
+struct ChunkSectionVisibility {
+    int min_world_y {kWorldMinY};
+    int max_world_y {kWorldMinY + kChunkSectionHeight - 1};
+    int nearest_surface_y {kSeaLevel};
+    bool has_geometry {false};
+    bool has_surface_geometry {false};
+    bool has_cave_geometry {false};
+    bool has_sky_access {false};
+    bool solid_roof_above {false};
+};
+
+struct ChunkVisibilityMetadata {
+    std::array<ChunkSectionVisibility, kChunkSectionCount> sections {};
+};
+
 struct ChunkData {
     std::vector<BlockId> blocks;
 
@@ -113,6 +131,7 @@ struct ActiveChunk {
 struct PendingChunkUpload {
     ChunkCoord coord {};
     ChunkMesh mesh {};
+    ChunkVisibilityMetadata visibility {};
 };
 
 struct CameraFrameData {

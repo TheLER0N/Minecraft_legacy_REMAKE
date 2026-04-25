@@ -3,6 +3,7 @@
 #include "common/log.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <limits>
 #include <optional>
@@ -16,6 +17,9 @@ constexpr float kRaycastEpsilon = 0.0001f;
 constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
 constexpr int kMaxChunkRadius = 100;
+constexpr std::size_t kMaxNewChunkRequestsPerFrame = 2;
+constexpr std::size_t kMaxResultsPerTick = 8;
+constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 bool nearly_equal(float lhs, float rhs) {
     return std::abs(lhs - rhs) <= kRaycastTieEpsilon;
@@ -33,10 +37,95 @@ std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
 }
 
+ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const BlockRegistry& block_registry) {
+    ChunkVisibilityMetadata metadata {};
+    std::array<int, static_cast<std::size_t>(kChunkWidth * kChunkDepth)> surface_y {};
+    std::array<int, static_cast<std::size_t>(kChunkWidth * kChunkDepth)> roof_y {};
+    surface_y.fill(kWorldMinY);
+    roof_y.fill(kWorldMaxY + 1);
+
+    const auto column_index = [](int x, int z) {
+        return static_cast<std::size_t>(x + z * kChunkWidth);
+    };
+
+    for (int z = 0; z < kChunkDepth; ++z) {
+        for (int x = 0; x < kChunkWidth; ++x) {
+            bool sky_open = true;
+            for (int local_y = kChunkHeight - 1; local_y >= 0; --local_y) {
+                const BlockId block = chunk.get(x, local_y, z);
+                const int world_y = local_y_to_world_y(local_y);
+                if (block_registry.is_renderable(block) && surface_y[column_index(x, z)] == kWorldMinY) {
+                    surface_y[column_index(x, z)] = world_y;
+                }
+                if (sky_open && block_registry.is_opaque(block)) {
+                    roof_y[column_index(x, z)] = world_y;
+                    sky_open = false;
+                }
+            }
+        }
+    }
+
+    for (int section_index = 0; section_index < kChunkSectionCount; ++section_index) {
+        ChunkSectionVisibility& section = metadata.sections[static_cast<std::size_t>(section_index)];
+        section.min_world_y = kWorldMinY + section_index * kChunkSectionHeight;
+        section.max_world_y = std::min(kWorldMaxY, section.min_world_y + kChunkSectionHeight - 1);
+        section.nearest_surface_y = kWorldMinY;
+        int surface_blocks = 0;
+        int cave_blocks = 0;
+
+        for (int z = 0; z < kChunkDepth; ++z) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                const int column_surface = surface_y[column_index(x, z)];
+                section.nearest_surface_y = std::max(section.nearest_surface_y, column_surface);
+                const int column_roof = roof_y[column_index(x, z)];
+                for (int world_y = section.min_world_y; world_y <= section.max_world_y; ++world_y) {
+                    const int local_y = world_y_to_local_y(world_y);
+                    const BlockId block = chunk.get(x, local_y, z);
+                    if (!block_registry.is_renderable(block)) {
+                        continue;
+                    }
+                    section.has_geometry = true;
+                    const bool sky_access = column_roof == kWorldMaxY + 1 || world_y >= column_roof;
+                    section.has_sky_access = section.has_sky_access || sky_access;
+                    const bool near_surface = world_y >= column_surface - 8;
+                    if (sky_access || near_surface || block == BlockId::OakLog || block == BlockId::OakLeaves) {
+                        ++surface_blocks;
+                    }
+                    if (!sky_access && world_y < column_surface - 8) {
+                        ++cave_blocks;
+                    }
+                }
+            }
+        }
+        const int mixed_threshold = 12;
+        section.has_surface_geometry = surface_blocks > 0;
+        section.has_cave_geometry = cave_blocks > 0;
+        if (surface_blocks > 0 && cave_blocks > 0 && std::min(surface_blocks, cave_blocks) < mixed_threshold) {
+            if (surface_blocks > cave_blocks) {
+                section.has_cave_geometry = false;
+            } else {
+                section.has_surface_geometry = false;
+            }
+        }
+        section.solid_roof_above = section.nearest_surface_y - section.max_world_y >= 8;
+        if (section.has_geometry && !section.has_surface_geometry && !section.has_cave_geometry) {
+            section.has_cave_geometry = !section.has_sky_access;
+            section.has_surface_geometry = section.has_sky_access;
+        }
+    }
+
+    return metadata;
+}
+
 }
 
 WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius)
+    : WorldStreamer(seed, block_registry, chunk_radius, nullptr) {
+}
+
+WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius, WorldSave* world_save)
     : seed_(seed)
+    , world_save_(world_save)
     , block_registry_(block_registry)
     , generator_(block_registry)
     , chunk_radius_(std::clamp(chunk_radius, kMinChunkRadius, kMaxChunkRadius)) {
@@ -49,6 +138,7 @@ WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry
 }
 
 WorldStreamer::~WorldStreamer() {
+    flush_all_dirty_chunks();
     {
         std::lock_guard lock(mutex_);
         stop_requested_ = true;
@@ -67,14 +157,11 @@ void WorldStreamer::update_observer(Vec3 position) {
 
 void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
     const ChunkCoord origin = world_to_chunk(position);
+    ++frame_counter_;
     observer_position_ = position;
     observer_forward_ = normalize({forward.x, 0.0f, forward.z});
     if (length(observer_forward_) <= 0.00001f) {
         observer_forward_ = {0.0f, 0.0f, -1.0f};
-    }
-
-    if (origin == observer_chunk_ && !chunks_.empty()) {
-        return;
     }
 
     observer_chunk_ = origin;
@@ -95,25 +182,47 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
         }
     );
 
+    std::size_t requested_this_frame = 0;
     for (const ChunkCoord& coord : wanted) {
+        if (requested_this_frame >= kMaxNewChunkRequestsPerFrame) {
+            break;
+        }
         if (!chunks_.contains(coord)) {
             ChunkRecord record {};
-            record.version = next_chunk_version_++;
-            const std::uint64_t version = record.version;
+            record.generation_version = next_chunk_version_++;
+            record.mesh_version = record.generation_version;
+            record.last_touched_frame = frame_counter_;
+            const std::uint64_t version = record.generation_version;
             chunks_.emplace(coord, std::move(record));
             queue_generate_job(coord, version);
+            ++requested_this_frame;
+        } else {
+            chunks_[coord].last_touched_frame = frame_counter_;
         }
     }
 
     for (auto it = chunks_.begin(); it != chunks_.end();) {
         if (!desired_chunk(origin, it->first)) {
-            pending_unloads_.push_back(it->first);
-            rebuild_states_.erase(it->first);
+            const ChunkCoord unloaded_coord = it->first;
+            if (world_save_ != nullptr && it->second.dirty_save && it->second.data.has_value()) {
+                world_save_->save_chunk(unloaded_coord, *it->second.data);
+            }
+            {
+                std::lock_guard lock(mutex_);
+                const std::size_t before = job_queue_.size();
+                std::erase_if(job_queue_, [&](const ChunkJob& job) {
+                    return job.coord == unloaded_coord;
+                });
+                dropped_jobs_ += before - job_queue_.size();
+            }
+            pending_unloads_.push_back(unloaded_coord);
+            rebuild_states_.erase(unloaded_coord);
+            dirty_save_set_.erase(unloaded_coord);
             if (logged_rebuild_lifecycle_count_ < 16) {
                 log_message(
                     LogLevel::Info,
                     std::string("WorldStreamer: chunk unloaded coord=(") +
-                        std::to_string(it->first.x) + "," + std::to_string(it->first.z) + ")"
+                        std::to_string(unloaded_coord.x) + "," + std::to_string(unloaded_coord.z) + ")"
                 );
                 ++logged_rebuild_lifecycle_count_;
             }
@@ -125,27 +234,29 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 
     visible_chunks_.clear();
     for (const auto& [coord, record] : chunks_) {
-        if (record.state == ChunkState::Visible) {
+        if (record.uploaded_to_gpu) {
             visible_chunks_.push_back({coord});
         }
     }
+
+    flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
 
 void WorldStreamer::tick_generation_jobs() {
     std::lock_guard lock(mutex_);
-    constexpr std::size_t max_results_per_tick = 8;
     std::size_t processed = 0;
-    while (!completed_.empty() && processed < max_results_per_tick) {
+    while (!completed_.empty() && processed < kMaxResultsPerTick) {
         JobResult result = std::move(completed_.front());
         completed_.pop();
         ++processed;
 
-        if (!desired_chunk(observer_chunk_, result.coord)) {
-            rebuild_states_.erase(result.coord);
+        auto it = chunks_.find(result.coord);
+        if (it == chunks_.end() || it->second.generation_version != result.version || !desired_chunk(observer_chunk_, result.coord)) {
+            ++stale_results_;
             continue;
         }
 
-        if (result.type == ChunkJobType::RebuildMesh) {
+        if (result.type == ChunkJobType::BuildMesh) {
             if (result.stale_rebuild) {
                 auto state_it = rebuild_states_.find(result.coord);
                 if (state_it != rebuild_states_.end()) {
@@ -163,10 +274,16 @@ void WorldStreamer::tick_generation_jobs() {
                 queue_rebuild_job_if_loaded_locked(result.coord);
                 continue;
             }
-            auto state_it = rebuild_states_.find(result.coord);
-            if (state_it == rebuild_states_.end() || state_it->second.serial != result.rebuild_serial) {
-                continue;
+            if (result.rebuild_serial != 0) {
+                auto state_it = rebuild_states_.find(result.coord);
+                if (state_it != rebuild_states_.end() && state_it->second.serial != result.rebuild_serial) {
+                    ++stale_results_;
+                    state_it->second.queued = false;
+                    queue_rebuild_job_if_loaded_locked(result.coord);
+                    continue;
+                }
             }
+            auto state_it = rebuild_states_.find(result.coord);
             if (state_it != rebuild_states_.end() && state_it->second.dirty) {
                 state_it->second.queued = false;
                 state_it->second.dirty = false;
@@ -182,23 +299,53 @@ void WorldStreamer::tick_generation_jobs() {
                 continue;
             }
             rebuild_states_.erase(result.coord);
-        }
+            last_mesh_ms_ = result.mesh_ms;
+            it->second.state = ChunkState::UploadQueued;
+            it->second.dirty_mesh = false;
 
-        auto it = chunks_.find(result.coord);
-        if (it == chunks_.end()) {
-            continue;
-        }
-        if (it->second.version != result.version) {
-            continue;
-        }
-
-        if (result.type == ChunkJobType::GenerateChunk) {
-            if (!result.chunk_data.has_value()) {
-                continue;
+            if (result.mesh.empty()) {
+                log_message(LogLevel::Warning, "WorldStreamer: rebuilt chunk mesh is empty");
+            } else if (logged_ready_chunk_count_ < 8) {
+                log_message(
+                    LogLevel::Info,
+                    std::string("WorldStreamer: chunk ready vertices=") + std::to_string(mesh_vertex_count(result.mesh)) +
+                        " indices=" + std::to_string(mesh_index_count(result.mesh)) +
+                        " generate_ms=" + std::to_string(result.generate_ms) +
+                        " mesh_ms=" + std::to_string(result.mesh_ms)
+                );
+                ++logged_ready_chunk_count_;
             }
+            const ChunkVisibilityMetadata visibility = it->second.data.has_value()
+                ? build_visibility_metadata(*it->second.data, block_registry_)
+                : ChunkVisibilityMetadata {};
+            pending_uploads_.push_back({result.coord, std::move(result.mesh), visibility});
+            continue;
+        }
+
+        if (!result.chunk_data.has_value()) {
+            ++stale_results_;
+            continue;
+        }
+
+        if (result.type == ChunkJobType::GenerateTerrain) {
             last_generate_ms_ = result.generate_ms;
-            it->second.state = ChunkState::Visible;
+            it->second.state = ChunkState::TerrainGenerated;
+            it->second.data = *result.chunk_data;
+            queue_stage_job_locked(result.coord, result.version, ChunkJobType::Decorate, std::move(result.chunk_data));
+            continue;
+        }
+
+        if (result.type == ChunkJobType::Decorate) {
+            it->second.state = ChunkState::Decorated;
+            it->second.data = *result.chunk_data;
+            queue_stage_job_locked(result.coord, result.version, ChunkJobType::CalculateLight, std::move(result.chunk_data));
+            continue;
+        }
+
+        if (result.type == ChunkJobType::CalculateLight) {
+            it->second.state = ChunkState::LightCalculated;
             it->second.data = std::move(result.chunk_data);
+            it->second.dirty_mesh = true;
             visible_chunks_.push_back({result.coord});
 
             queue_rebuild_job_if_loaded_locked(result.coord);
@@ -208,21 +355,7 @@ void WorldStreamer::tick_generation_jobs() {
             queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z + 1});
             continue;
         }
-        last_mesh_ms_ = result.mesh_ms;
 
-        if (result.mesh.empty()) {
-            log_message(LogLevel::Warning, "WorldStreamer: rebuilt chunk mesh is empty");
-        } else if (logged_ready_chunk_count_ < 8) {
-            log_message(
-                LogLevel::Info,
-                std::string("WorldStreamer: chunk ready vertices=") + std::to_string(mesh_vertex_count(result.mesh)) +
-                    " indices=" + std::to_string(mesh_index_count(result.mesh)) +
-                    " generate_ms=" + std::to_string(result.generate_ms) +
-                    " mesh_ms=" + std::to_string(result.mesh_ms)
-            );
-            ++logged_ready_chunk_count_;
-        }
-        pending_uploads_.push_back({result.coord, std::move(result.mesh)});
     }
 }
 
@@ -262,6 +395,10 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
     std::vector<PendingChunkUpload> uploads;
     uploads.reserve(upload_count);
     for (std::size_t i = 0; i < upload_count; ++i) {
+        if (auto it = chunks_.find(pending_uploads_[i].coord); it != chunks_.end()) {
+            it->second.state = ChunkState::UploadedToGPU;
+            it->second.uploaded_to_gpu = true;
+        }
         uploads.push_back(std::move(pending_uploads_[i]));
     }
     pending_uploads_.erase(pending_uploads_.begin(), pending_uploads_.begin() + static_cast<std::ptrdiff_t>(upload_count));
@@ -292,6 +429,10 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(s
             break;
         }
         selected_bytes += upload_bytes;
+        if (auto it = chunks_.find(pending_uploads_[selected_count].coord); it != chunks_.end()) {
+            it->second.state = ChunkState::UploadedToGPU;
+            it->second.uploaded_to_gpu = true;
+        }
         uploads.push_back(std::move(pending_uploads_[selected_count]));
     }
     pending_uploads_.erase(pending_uploads_.begin(), pending_uploads_.begin() + static_cast<std::ptrdiff_t>(selected_count));
@@ -314,11 +455,17 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
         }
     }
     std::size_t queued_generates = 0;
+    std::size_t queued_decorates = 0;
+    std::size_t queued_lights = 0;
     std::size_t queued_meshes = 0;
     for (const ChunkJob& job : job_queue_) {
-        if (job.type == ChunkJobType::GenerateChunk) {
+        if (job.type == ChunkJobType::GenerateTerrain) {
             ++queued_generates;
-        } else {
+        } else if (job.type == ChunkJobType::Decorate) {
+            ++queued_decorates;
+        } else if (job.type == ChunkJobType::CalculateLight) {
+            ++queued_lights;
+        } else if (job.type == ChunkJobType::BuildMesh) {
             ++queued_meshes;
         }
     }
@@ -332,8 +479,13 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
         pending_uploads_.size(),
         queued_rebuilds,
         queued_generates,
+        queued_decorates,
+        queued_lights,
         queued_meshes,
         pending_upload_bytes,
+        stale_results_,
+        dropped_jobs_,
+        dirty_save_set_.size(),
         last_generate_ms_,
         last_mesh_ms_
     };
@@ -505,15 +657,22 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
     }
 
     chunk.set(local_x, local_y, local_z, block);
+    chunk_it->second.dirty_mesh = true;
+    chunk_it->second.mesh_version = next_chunk_version_++;
+    mark_chunk_dirty_for_save(chunk_coord);
     queue_rebuild_job_if_loaded(chunk_coord);
-    queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
-    queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
-    queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z - 1});
-    queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z + 1});
-    queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z - 1});
-    queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z - 1});
-    queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z + 1});
-    queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z + 1});
+    if (local_x == 0) {
+        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
+    }
+    if (local_x == kChunkWidth - 1) {
+        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
+    }
+    if (local_z == 0) {
+        queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z - 1});
+    }
+    if (local_z == kChunkDepth - 1) {
+        queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z + 1});
+    }
 
     return SetBlockResult::Success;
 }
@@ -553,6 +712,55 @@ void WorldStreamer::set_chunk_radius(int radius) {
     update_observer(observer_position_, observer_forward_);
 }
 
+void WorldStreamer::flush_dirty_chunks(std::size_t max_chunks) {
+    if (world_save_ == nullptr || max_chunks == 0) {
+        return;
+    }
+
+    std::size_t saved = 0;
+    while (!dirty_save_queue_.empty() && saved < max_chunks) {
+        const ChunkCoord coord = dirty_save_queue_.front();
+        dirty_save_queue_.pop_front();
+        dirty_save_set_.erase(coord);
+
+        auto it = chunks_.find(coord);
+        if (it == chunks_.end() || !it->second.dirty_save || !it->second.data.has_value()) {
+            continue;
+        }
+        if (world_save_->save_chunk(coord, *it->second.data)) {
+            it->second.dirty_save = false;
+            ++saved;
+        }
+    }
+}
+
+void WorldStreamer::flush_all_dirty_chunks() {
+    while (!dirty_save_queue_.empty()) {
+        const std::size_t before = dirty_save_queue_.size();
+        flush_dirty_chunks(before);
+        if (dirty_save_queue_.size() == before) {
+            break;
+        }
+    }
+}
+
+void WorldStreamer::mark_chunk_dirty_for_save(ChunkCoord coord) {
+    auto it = chunks_.find(coord);
+    if (it == chunks_.end()) {
+        return;
+    }
+    it->second.dirty_save = true;
+    enqueue_dirty_save(coord);
+}
+
+void WorldStreamer::enqueue_dirty_save(ChunkCoord coord) {
+    if (world_save_ == nullptr || dirty_save_set_.contains(coord)) {
+        return;
+    }
+    dirty_save_set_.insert(coord);
+    dirty_save_queue_.push_back(coord);
+}
+
 void WorldStreamer::worker_loop() {
     while (true) {
         ChunkJob job {};
@@ -574,11 +782,18 @@ void WorldStreamer::worker_loop() {
         result.rebuild_serial = job.rebuild_serial;
         result.type = job.type;
 
-        if (job.type == ChunkJobType::GenerateChunk) {
+        if (job.type == ChunkJobType::GenerateTerrain) {
             const auto start = std::chrono::steady_clock::now();
-            result.chunk_data = generator_.generate_chunk(job.coord, seed_);
+            if (world_save_ != nullptr) {
+                result.chunk_data = world_save_->load_chunk(job.coord);
+            }
+            if (!result.chunk_data.has_value()) {
+                result.chunk_data = generator_.generate_chunk(job.coord, seed_);
+            }
             const auto end = std::chrono::steady_clock::now();
             result.generate_ms = std::chrono::duration<float, std::milli>(end - start).count();
+        } else if (job.type == ChunkJobType::Decorate || job.type == ChunkJobType::CalculateLight) {
+            result.chunk_data = std::move(job.chunk_data);
         } else if (job.snapshot.has_value()) {
             const ChunkMeshSnapshot& snapshot = *job.snapshot;
             const auto start = std::chrono::steady_clock::now();
@@ -638,7 +853,11 @@ float WorldStreamer::chunk_priority_score(ChunkCoord coord, Vec3 observer_positi
 
 float WorldStreamer::job_priority_score_locked(const ChunkJob& job) const {
     float score = chunk_priority_score(job.coord, observer_position_, observer_forward_);
-    if (job.type == ChunkJobType::RebuildMesh) {
+    if (job.type == ChunkJobType::Decorate) {
+        score += 50000.0f;
+    } else if (job.type == ChunkJobType::CalculateLight) {
+        score += 100000.0f;
+    } else if (job.type == ChunkJobType::BuildMesh) {
         score += 500000.0f;
     }
     return score;
@@ -659,8 +878,13 @@ void WorldStreamer::push_job_locked(ChunkJob&& job) {
 void WorldStreamer::queue_generate_job(ChunkCoord coord, std::uint64_t version) {
     {
         std::lock_guard lock(mutex_);
-        push_job_locked({coord, version, 0, ChunkJobType::GenerateChunk, std::nullopt});
+        push_job_locked({coord, version, 0, ChunkJobType::GenerateTerrain, std::nullopt, std::nullopt});
     }
+    cv_.notify_one();
+}
+
+void WorldStreamer::queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data) {
+    push_job_locked({coord, version, 0, type, std::move(chunk_data), std::nullopt});
     cv_.notify_one();
 }
 
@@ -694,6 +918,11 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
     state.queued = true;
     state.dirty = false;
     state.serial = next_rebuild_serial_++;
+    if (auto chunk_it = chunks_.find(coord); chunk_it != chunks_.end()) {
+        if (!chunk_it->second.uploaded_to_gpu) {
+            chunk_it->second.state = ChunkState::MeshQueued;
+        }
+    }
     if (logged_rebuild_lifecycle_count_ < 16) {
         log_message(
             LogLevel::Info,
@@ -702,7 +931,7 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
         );
             ++logged_rebuild_lifecycle_count_;
     }
-    push_job_locked({coord, snapshot->version, state.serial, ChunkJobType::RebuildMesh, std::move(snapshot)});
+    push_job_locked({coord, snapshot->version, state.serial, ChunkJobType::BuildMesh, std::nullopt, std::move(snapshot)});
     cv_.notify_one();
 }
 
@@ -764,7 +993,7 @@ std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snap
     }
 
     return ChunkMeshSnapshot {
-        chunk_it->second.version,
+        chunk_it->second.generation_version,
         leaves_render_mode_,
         *chunk_it->second.data,
         side_x({coord.x - 1, coord.z}, kChunkWidth - 1),

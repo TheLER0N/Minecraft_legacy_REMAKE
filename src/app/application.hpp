@@ -3,6 +3,7 @@
 #include "game/block.hpp"
 #include "game/debug_camera.hpp"
 #include "game/player_controller.hpp"
+#include "game/world_save.hpp"
 #include "game/world_streamer.hpp"
 #include "platform/platform_app.hpp"
 #include "render/renderer.hpp"
@@ -41,6 +42,7 @@ private:
     };
 
     void start_world();
+    Renderer::CaveVisibilityFrame update_cave_visibility_frame(Vec3 observer_position);
     int hovered_menu_button(const InputState& input) const;
     std::array<MenuButton, 6> menu_buttons() const;
 
@@ -49,6 +51,7 @@ private:
     BlockRegistry block_registry_;
     DebugCamera camera_;
     PlayerController player_;
+    std::unique_ptr<WorldSave> world_save_;
     std::unique_ptr<WorldStreamer> world_streamer_;
     AppState app_state_ {AppState::StartupSplash};
     bool menu_uses_night_panorama_ {false};
@@ -65,6 +68,10 @@ private:
     LeavesRenderMode leaves_render_mode_ {LeavesRenderMode::Fancy};
     bool debug_fly_enabled_ {false};
     bool debug_hud_enabled_ {false};
+    bool cave_visibility_cave_mode_ {false};
+    bool cave_visibility_pending_mode_ {false};
+    int cave_visibility_pending_frames_ {0};
+    int cave_visibility_roof_blocks_ {0};
     float debug_fps_ {0.0f};
     float debug_fps_accumulator_ {0.0f};
     int debug_fps_frames_ {0};

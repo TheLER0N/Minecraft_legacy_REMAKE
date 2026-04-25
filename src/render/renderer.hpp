@@ -17,6 +17,14 @@ namespace ml {
 
 class Renderer {
 public:
+    struct CaveVisibilityFrame {
+        bool cave_mode {false};
+        int camera_chunk_x {0};
+        int camera_chunk_z {0};
+        int camera_world_y {kSeaLevel};
+        int roof_blocks {0};
+    };
+
     struct DebugHudData {
         float fps {0.0f};
         Vec3 position {};
@@ -26,9 +34,14 @@ public:
         std::size_t uploads_this_frame {0};
         std::size_t queued_rebuilds {0};
         std::size_t queued_generates {0};
+        std::size_t queued_decorates {0};
+        std::size_t queued_lights {0};
         std::size_t queued_meshes {0};
         std::size_t pending_upload_bytes {0};
         std::size_t uploaded_bytes_this_frame {0};
+        std::size_t stale_results {0};
+        std::size_t dropped_jobs {0};
+        std::size_t dirty_save_chunks {0};
         float generate_ms {0.0f};
         float mesh_ms {0.0f};
         float upload_ms {0.0f};
@@ -37,6 +50,11 @@ public:
         std::size_t drawn_sections {0};
         std::size_t frustum_culled_sections {0};
         std::size_t occlusion_culled_sections {0};
+        std::size_t cave_culled_sections {0};
+        std::size_t surface_culled_sections {0};
+        std::size_t mixed_sections {0};
+        bool cave_visibility_cave_mode {false};
+        int cave_visibility_roof_blocks {0};
         std::size_t draw_calls {0};
         std::size_t drawn_vertices {0};
         std::size_t drawn_indices {0};
@@ -53,8 +71,9 @@ public:
     void begin_frame(const CameraFrameData& camera);
     void draw_startup_splash(float time_seconds, float fade_multiplier);
     void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
-    void upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh);
+    void upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility);
     void unload_chunk_mesh(ChunkCoord coord);
+    void set_cave_visibility_frame(const CaveVisibilityFrame& frame);
     void draw_visible_chunks(std::span<const ActiveChunk> visible_chunks);
     void end_frame();
     void shutdown();
@@ -72,10 +91,9 @@ private:
         VkBuffer buffer {VK_NULL_HANDLE};
         VkDeviceMemory memory {VK_NULL_HANDLE};
         VkDeviceSize size {0};
+        VkBufferUsageFlags usage {0};
+        VkMemoryPropertyFlags properties {0};
     };
-
-    static constexpr int kChunkSectionHeight = 16;
-    static constexpr int kChunkSectionCount = kChunkHeight / kChunkSectionHeight;
 
     struct RenderSection {
         GpuBuffer opaque_vertex_buffer;
@@ -92,6 +110,7 @@ private:
         std::uint32_t transparent_vertex_count {0};
         bool has_geometry {false};
         bool has_opaque_geometry {false};
+        ChunkSectionVisibility visibility {};
     };
 
     struct ChunkRenderData {
@@ -173,6 +192,9 @@ private:
     void destroy_deferred_chunk_buffers_immediate();
     void upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count, std::uint32_t& vertex_count);
     void destroy_render_section(RenderSection& section);
+    GpuBuffer acquire_chunk_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
+    void release_chunk_buffer(GpuBuffer& buffer);
+    void destroy_pooled_chunk_buffers();
     GpuBuffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
     void destroy_buffer(GpuBuffer& buffer);
     std::uint32_t find_memory_type(std::uint32_t type_filter, VkMemoryPropertyFlags properties) const;
@@ -276,6 +298,7 @@ private:
     MenuFont menu_font_ {};
 
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHasher> chunk_buffers_;
+    std::vector<GpuBuffer> chunk_buffer_pool_;
     std::vector<DeferredChunkBuffers> deferred_chunk_buffers_;
     GpuBuffer chunk_outline_vertex_buffer_ {};
     std::uint32_t chunk_outline_vertex_count_ {0};
@@ -324,11 +347,13 @@ private:
     bool occlusion_culling_enabled_ {false};
     bool logged_wireframe_support_ {false};
     std::size_t logged_occlusion_warning_count_ {0};
+    std::size_t logged_cave_culling_warning_count_ {0};
     std::optional<BlockHit> target_block_ {};
     std::size_t hotbar_selected_slot_ {0};
     std::size_t hotbar_slot_count_ {9};
     bool debug_hud_enabled_ {false};
     DebugHudData debug_hud_data_ {};
+    CaveVisibilityFrame cave_visibility_frame_ {};
     std::size_t last_drawn_chunks_ {0};
     bool target_block_dirty_ {true};
     bool hotbar_dirty_ {true};

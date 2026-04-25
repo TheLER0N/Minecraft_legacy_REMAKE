@@ -89,6 +89,13 @@ constexpr int kMinOccluderGridArea = 4;
 constexpr std::uint32_t kMinOccluderOpaqueIndices = 768;
 constexpr float kOcclusionWarningRatio = 0.35f;
 constexpr std::size_t kOcclusionWarningLogLimit = 8;
+constexpr int kCaveSurfaceVisibleDepth = 32;
+constexpr int kCaveUndergroundChunkRadius = 3;
+constexpr float kCaveCullingWarningRatio = 0.45f;
+constexpr std::size_t kCaveCullingWarningLogLimit = 8;
+constexpr std::size_t kNearRenderSectionBudget = 640;
+constexpr std::size_t kMaxRenderSectionBudget = 1400;
+constexpr float kSurfaceFarSectionMinY = 48.0f;
 
 int render_section_index_for_y(float y) {
     const int section = static_cast<int>(std::floor((y - static_cast<float>(kWorldMinY)) / static_cast<float>(kRenderSectionHeight)));
@@ -218,6 +225,10 @@ struct OcclusionGrid {
         }
     }
 };
+
+int chunk_distance_chebyshev(ChunkCoord coord, int chunk_x, int chunk_z) {
+    return std::max(std::abs(coord.x - chunk_x), std::abs(coord.z - chunk_z));
+}
 
 ClipPoint transform_point_clip(const Mat4& matrix, const Vec3& point) {
     return {
@@ -839,7 +850,7 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
     frame_started_ = true;
 }
 
-void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh) {
+void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility) {
     auto existing = chunk_buffers_.find(coord);
     if (existing != chunk_buffers_.end()) {
         defer_destroy_chunk_buffers(std::move(existing->second));
@@ -880,6 +891,8 @@ void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh) {
         );
         section.has_opaque_geometry = section.opaque_index_count > 0;
         section.has_geometry = section.has_opaque_geometry || section.cutout_index_count > 0 || section.transparent_index_count > 0;
+        section.visibility = visibility.sections[section_index];
+        section.visibility.has_geometry = section.has_geometry;
     }
     chunk_buffers_[coord] = render_data;
 }
@@ -935,6 +948,10 @@ void Renderer::unload_chunk_mesh(ChunkCoord coord) {
     chunk_buffers_.erase(existing);
 }
 
+void Renderer::set_cave_visibility_frame(const CaveVisibilityFrame& frame) {
+    cave_visibility_frame_ = frame;
+}
+
 void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) {
     if (!frame_started_) {
         return;
@@ -959,6 +976,9 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
     std::size_t visible_section_count = 0;
     std::size_t frustum_culled_section_count = 0;
+    std::size_t cave_culled_section_count = 0;
+    std::size_t surface_culled_section_count = 0;
+    std::size_t mixed_section_count = 0;
     std::size_t occlusion_culled_section_count = 0;
     std::size_t gpu_buffer_bytes = 0;
 
@@ -991,6 +1011,36 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
                 continue;
             }
 
+            const ChunkSectionVisibility& visibility = section.visibility;
+            const bool mixed_section = visibility.has_surface_geometry && visibility.has_cave_geometry;
+            if (mixed_section) {
+                ++mixed_section_count;
+            }
+            const bool far_chunk = chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > 4;
+            if (!cave_visibility_frame_.cave_mode && far_chunk && visibility.has_cave_geometry && !visibility.has_surface_geometry &&
+                section_bounds.max.y < kSurfaceFarSectionMinY) {
+                ++cave_culled_section_count;
+                continue;
+            }
+            if (!mixed_section) {
+                if (!cave_visibility_frame_.cave_mode && visibility.has_cave_geometry && !visibility.has_surface_geometry) {
+                    const int depth_below_camera = cave_visibility_frame_.camera_world_y - visibility.max_world_y;
+                    const int depth_below_surface = visibility.nearest_surface_y - visibility.max_world_y;
+                    if (depth_below_camera > kCaveSurfaceVisibleDepth && depth_below_surface > kCaveSurfaceVisibleDepth) {
+                        ++cave_culled_section_count;
+                        continue;
+                    }
+                } else if (cave_visibility_frame_.cave_mode && visibility.has_surface_geometry && !visibility.has_cave_geometry) {
+                    const bool far_from_camera_chunk =
+                        chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > kCaveUndergroundChunkRadius;
+                    const bool above_camera = visibility.min_world_y > cave_visibility_frame_.camera_world_y;
+                    if ((far_from_camera_chunk || above_camera) && cave_visibility_frame_.roof_blocks >= 8) {
+                        ++surface_culled_section_count;
+                        continue;
+                    }
+                }
+            }
+
             const Vec3 center {
                 (section_bounds.min.x + section_bounds.max.x) * 0.5f,
                 (section_bounds.min.y + section_bounds.max.y) * 0.5f,
@@ -1008,7 +1058,13 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     std::vector<RenderCandidate> render_sections;
     render_sections.reserve(candidates.size());
     OcclusionGrid occlusion_grid;
+    std::size_t budgeted_section_count = 0;
     for (const RenderCandidate& candidate : candidates) {
+        const bool near_section = budgeted_section_count < kNearRenderSectionBudget ||
+            candidate.distance_sq <= static_cast<float>((kChunkWidth * 4) * (kChunkWidth * 4));
+        if (!near_section && render_sections.size() >= kMaxRenderSectionBudget) {
+            continue;
+        }
         const bool opaque_only = candidate.section->opaque_index_count > 0 &&
             candidate.section->cutout_index_count == 0 &&
             candidate.section->transparent_index_count == 0;
@@ -1037,6 +1093,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             outline_chunks.push_back({candidate.coord});
         }
         render_sections.push_back(candidate);
+        ++budgeted_section_count;
     }
 
     last_drawn_chunks_ = outline_chunks.size();
@@ -1045,6 +1102,11 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     debug_hud_data_.drawn_sections = render_sections.size();
     debug_hud_data_.frustum_culled_sections = frustum_culled_section_count;
     debug_hud_data_.occlusion_culled_sections = occlusion_culled_section_count;
+    debug_hud_data_.cave_culled_sections = cave_culled_section_count;
+    debug_hud_data_.surface_culled_sections = surface_culled_section_count;
+    debug_hud_data_.mixed_sections = mixed_section_count;
+    debug_hud_data_.cave_visibility_cave_mode = cave_visibility_frame_.cave_mode;
+    debug_hud_data_.cave_visibility_roof_blocks = cave_visibility_frame_.roof_blocks;
     debug_hud_data_.draw_calls = 0;
     debug_hud_data_.drawn_vertices = 0;
     debug_hud_data_.drawn_indices = 0;
@@ -1062,6 +1124,20 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
                 " [press F6 to disable if chunks disappear]"
         );
         ++logged_occlusion_warning_count_;
+    }
+
+    const std::size_t cave_visibility_culled = cave_culled_section_count + surface_culled_section_count;
+    if (visible_section_count > 0 &&
+        cave_visibility_culled > static_cast<std::size_t>(static_cast<float>(visible_section_count) * kCaveCullingWarningRatio) &&
+        logged_cave_culling_warning_count_ < kCaveCullingWarningLogLimit) {
+        log_message(
+            LogLevel::Warning,
+            std::string("Renderer: cave visibility culled many sections visible=") +
+                std::to_string(visible_section_count) +
+                " cave=" + std::to_string(cave_culled_section_count) +
+                " surface=" + std::to_string(surface_culled_section_count)
+        );
+        ++logged_cave_culling_warning_count_;
     }
 
     const auto draw_chunks_with_pipeline = [&](VkPipeline pipeline, VkPipelineLayout layout, bool bind_textures, auto section_getter) {
@@ -1199,6 +1275,7 @@ void Renderer::shutdown() {
     }
     chunk_buffers_.clear();
     destroy_deferred_chunk_buffers_immediate();
+    destroy_pooled_chunk_buffers();
     destroy_buffer(chunk_outline_vertex_buffer_);
     destroy_buffer(target_block_outline_vertex_buffer_);
     destroy_buffer(hotbar_fill_vertex_buffer_);
@@ -1363,9 +1440,14 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.uploads_this_frame != data.uploads_this_frame ||
         debug_hud_data_.queued_rebuilds != data.queued_rebuilds ||
         debug_hud_data_.queued_generates != data.queued_generates ||
+        debug_hud_data_.queued_decorates != data.queued_decorates ||
+        debug_hud_data_.queued_lights != data.queued_lights ||
         debug_hud_data_.queued_meshes != data.queued_meshes ||
         debug_hud_data_.pending_upload_bytes != data.pending_upload_bytes ||
         debug_hud_data_.uploaded_bytes_this_frame != data.uploaded_bytes_this_frame ||
+        debug_hud_data_.stale_results != data.stale_results ||
+        debug_hud_data_.dropped_jobs != data.dropped_jobs ||
+        debug_hud_data_.dirty_save_chunks != data.dirty_save_chunks ||
         debug_hud_data_.generate_ms != data.generate_ms ||
         debug_hud_data_.mesh_ms != data.mesh_ms ||
         debug_hud_data_.upload_ms != data.upload_ms ||
@@ -1374,6 +1456,11 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.drawn_sections != data.drawn_sections ||
         debug_hud_data_.frustum_culled_sections != data.frustum_culled_sections ||
         debug_hud_data_.occlusion_culled_sections != data.occlusion_culled_sections ||
+        debug_hud_data_.cave_culled_sections != data.cave_culled_sections ||
+        debug_hud_data_.surface_culled_sections != data.surface_culled_sections ||
+        debug_hud_data_.mixed_sections != data.mixed_sections ||
+        debug_hud_data_.cave_visibility_cave_mode != data.cave_visibility_cave_mode ||
+        debug_hud_data_.cave_visibility_roof_blocks != data.cave_visibility_roof_blocks ||
         debug_hud_data_.draw_calls != data.draw_calls ||
         debug_hud_data_.drawn_vertices != data.drawn_vertices ||
         debug_hud_data_.drawn_indices != data.drawn_indices ||
@@ -2180,12 +2267,12 @@ void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_bu
     const VkDeviceSize vertex_size = sizeof(Vertex) * mesh.vertices.size();
     const VkDeviceSize index_size = sizeof(std::uint32_t) * mesh.indices.size();
 
-    vertex_buffer = create_buffer(
+    vertex_buffer = acquire_chunk_buffer(
         vertex_size,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    index_buffer = create_buffer(
+    index_buffer = acquire_chunk_buffer(
         index_size,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
@@ -2205,12 +2292,12 @@ void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_bu
 }
 
 void Renderer::destroy_render_section(RenderSection& section) {
-    destroy_buffer(section.opaque_vertex_buffer);
-    destroy_buffer(section.opaque_index_buffer);
-    destroy_buffer(section.cutout_vertex_buffer);
-    destroy_buffer(section.cutout_index_buffer);
-    destroy_buffer(section.transparent_vertex_buffer);
-    destroy_buffer(section.transparent_index_buffer);
+    release_chunk_buffer(section.opaque_vertex_buffer);
+    release_chunk_buffer(section.opaque_index_buffer);
+    release_chunk_buffer(section.cutout_vertex_buffer);
+    release_chunk_buffer(section.cutout_index_buffer);
+    release_chunk_buffer(section.transparent_vertex_buffer);
+    release_chunk_buffer(section.transparent_index_buffer);
     section.opaque_index_count = 0;
     section.opaque_vertex_count = 0;
     section.cutout_index_count = 0;
@@ -2221,9 +2308,47 @@ void Renderer::destroy_render_section(RenderSection& section) {
     section.has_opaque_geometry = false;
 }
 
+Renderer::GpuBuffer Renderer::acquire_chunk_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
+    auto best = chunk_buffer_pool_.end();
+    for (auto it = chunk_buffer_pool_.begin(); it != chunk_buffer_pool_.end(); ++it) {
+        if (it->usage != usage || it->properties != properties || it->size < size) {
+            continue;
+        }
+        if (best == chunk_buffer_pool_.end() || it->size < best->size) {
+            best = it;
+        }
+    }
+
+    if (best == chunk_buffer_pool_.end()) {
+        return create_buffer(size, usage, properties);
+    }
+
+    GpuBuffer buffer = *best;
+    chunk_buffer_pool_.erase(best);
+    return buffer;
+}
+
+void Renderer::release_chunk_buffer(GpuBuffer& buffer) {
+    if (buffer.buffer == VK_NULL_HANDLE || buffer.memory == VK_NULL_HANDLE) {
+        buffer = {};
+        return;
+    }
+    chunk_buffer_pool_.push_back(buffer);
+    buffer = {};
+}
+
+void Renderer::destroy_pooled_chunk_buffers() {
+    for (GpuBuffer& buffer : chunk_buffer_pool_) {
+        destroy_buffer(buffer);
+    }
+    chunk_buffer_pool_.clear();
+}
+
 Renderer::GpuBuffer Renderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
     GpuBuffer result {};
     result.size = size;
+    result.usage = usage;
+    result.properties = properties;
 
     VkBufferCreateInfo create_info {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     create_info.size = size;
@@ -2252,6 +2377,8 @@ void Renderer::destroy_buffer(GpuBuffer& buffer) {
         buffer.memory = VK_NULL_HANDLE;
     }
     buffer.size = 0;
+    buffer.usage = 0;
+    buffer.properties = 0;
 }
 
 std::uint32_t Renderer::find_memory_type(std::uint32_t type_filter, VkMemoryPropertyFlags properties) const {
@@ -2587,14 +2714,24 @@ void Renderer::update_debug_hud_buffer() {
     const std::string pending = "PEND:" + std::to_string(debug_hud_data_.pending_uploads);
     const std::string rebuilds = "REB:" + std::to_string(debug_hud_data_.queued_rebuilds);
     const std::string queues = "GENQ:" + std::to_string(debug_hud_data_.queued_generates) +
+        " DECORQ:" + std::to_string(debug_hud_data_.queued_decorates);
+    const std::string queues2 = "LIGHTQ:" + std::to_string(debug_hud_data_.queued_lights) +
         " MESHQ:" + std::to_string(debug_hud_data_.queued_meshes);
     const std::string upload_queue = "UPLOADQ:" + std::to_string(debug_hud_data_.pending_upload_bytes / 1024) + "KB";
+    const std::string scheduler = "STALE:" + std::to_string(debug_hud_data_.stale_results) +
+        " DROPPED:" + std::to_string(debug_hud_data_.dropped_jobs);
+    const std::string saves = "SAVEQ:" + std::to_string(debug_hud_data_.dirty_save_chunks);
     const std::string timings = "GENms:" + std::to_string(static_cast<int>(debug_hud_data_.generate_ms + 0.5f)) +
         " MESHms:" + std::to_string(static_cast<int>(debug_hud_data_.mesh_ms + 0.5f)) +
         " UPms:" + std::to_string(static_cast<int>(debug_hud_data_.upload_ms + 0.5f));
     const std::string uploaded = "UPKB:" + std::to_string(debug_hud_data_.uploaded_bytes_this_frame / 1024);
     const std::string culling_modes = std::string("SEC:") + (section_culling_enabled_ ? "ON" : "OFF") +
         " OCC:" + (occlusion_culling_enabled_ ? "ON" : "OFF");
+    const std::string cavevis = std::string("CAVEVIS:") + (debug_hud_data_.cave_visibility_cave_mode ? "CAVE" : "SURF") +
+        " ROOF:" + std::to_string(debug_hud_data_.cave_visibility_roof_blocks);
+    const std::string cave_culled = "CAVE_CULLED:" + std::to_string(debug_hud_data_.cave_culled_sections);
+    const std::string surface_culled = "SURF_CULLED:" + std::to_string(debug_hud_data_.surface_culled_sections);
+    const std::string mixed = "MIXED_SEC:" + std::to_string(debug_hud_data_.mixed_sections);
     const std::string leaves = debug_hud_data_.fancy_leaves ? "LEAVES:FANCY" : "LEAVES:FAST";
     const std::string world_y = "WORLD_Y:" + std::to_string(kWorldMinY) + ".." + std::to_string(kWorldMaxY);
     const std::string sea = "SEA:" + std::to_string(kSeaLevel);
@@ -2605,8 +2742,9 @@ void Renderer::update_debug_hud_buffer() {
         (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
             chunks.size() + drawn.size() + sections.size() + culled.size() + draw_calls.size() +
             occ_culled.size() + geometry.size() + memory.size() + uploads.size() + pending.size() + rebuilds.size() +
-            queues.size() + upload_queue.size() + timings.size() + uploaded.size() +
-            culling_modes.size() + leaves.size() + world_y.size() + sea.size() + caves.size()) * 16
+            queues.size() + queues2.size() + upload_queue.size() + scheduler.size() + saves.size() + timings.size() + uploaded.size() +
+            culling_modes.size() + cavevis.size() + cave_culled.size() + surface_culled.size() + mixed.size() +
+            leaves.size() + world_y.size() + sea.size() + caves.size()) * 16
     );
     const auto append_left_text = [&](const std::string& text, float y) {
         const float advance = 6.0f * scale;
@@ -2628,14 +2766,21 @@ void Renderer::update_debug_hud_buffer() {
     append_left_text(pending, top - 240.0f);
     append_left_text(rebuilds, top - 260.0f);
     append_left_text(queues, top - 280.0f);
-    append_left_text(upload_queue, top - 300.0f);
-    append_left_text(timings, top - 320.0f);
-    append_left_text(uploaded, top - 340.0f);
-    append_left_text(culling_modes, top - 360.0f);
-    append_left_text(leaves, top - 380.0f);
-    append_left_text(world_y, top - 400.0f);
-    append_left_text(sea, top - 420.0f);
-    append_left_text(caves, top - 440.0f);
+    append_left_text(queues2, top - 300.0f);
+    append_left_text(upload_queue, top - 320.0f);
+    append_left_text(scheduler, top - 340.0f);
+    append_left_text(saves, top - 360.0f);
+    append_left_text(timings, top - 380.0f);
+    append_left_text(uploaded, top - 400.0f);
+    append_left_text(culling_modes, top - 420.0f);
+    append_left_text(cavevis, top - 440.0f);
+    append_left_text(cave_culled, top - 460.0f);
+    append_left_text(surface_culled, top - 480.0f);
+    append_left_text(mixed, top - 500.0f);
+    append_left_text(leaves, top - 520.0f);
+    append_left_text(world_y, top - 540.0f);
+    append_left_text(sea, top - 560.0f);
+    append_left_text(caves, top - 580.0f);
 
     debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
     upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);

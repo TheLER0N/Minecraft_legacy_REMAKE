@@ -96,6 +96,7 @@ add_executable(minecraft_legacy
     src/render/renderer.cpp
     src/game/block.cpp
     src/game/world_generator.cpp
+    src/game/world_save.cpp
     src/game/world_streamer.cpp
     src/game/debug_camera.cpp
     src/game/player_controller.cpp

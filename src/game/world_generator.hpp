@@ -21,7 +21,6 @@ public:
 
 private:
     float sample_height(int world_x, int world_z, WorldSeed seed) const;
-    float sample_height(int world_x, int world_z, float continentalness, WorldSeed seed) const;
     float sample_continentalness(int world_x, int world_z, WorldSeed seed) const;
     float sample_cave_density(int world_x, int world_y, int world_z, WorldSeed seed) const;
     int sample_aquifer_level(int world_x, int world_y, int world_z, WorldSeed seed) const;

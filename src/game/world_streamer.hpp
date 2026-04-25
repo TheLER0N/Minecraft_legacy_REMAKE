@@ -2,6 +2,7 @@
 
 #include "game/block.hpp"
 #include "game/world_generator.hpp"
+#include "game/world_save.hpp"
 #include "game/world_types.hpp"
 
 #include <condition_variable>
@@ -13,6 +14,7 @@
 #include <span>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ml {
@@ -24,13 +26,19 @@ public:
         std::size_t pending_uploads {0};
         std::size_t queued_rebuilds {0};
         std::size_t queued_generates {0};
+        std::size_t queued_decorates {0};
+        std::size_t queued_lights {0};
         std::size_t queued_meshes {0};
         std::size_t pending_upload_bytes {0};
+        std::size_t stale_results {0};
+        std::size_t dropped_jobs {0};
+        std::size_t dirty_save_chunks {0};
         float last_generate_ms {0.0f};
         float last_mesh_ms {0.0f};
     };
 
     WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius = 6);
+    WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius, WorldSave* world_save);
     ~WorldStreamer();
 
     void update_observer(Vec3 position);
@@ -52,11 +60,15 @@ public:
     LeavesRenderMode leaves_render_mode() const;
     int chunk_radius() const;
     void set_chunk_radius(int radius);
+    void flush_dirty_chunks(std::size_t max_chunks);
+    void flush_all_dirty_chunks();
 
 private:
     enum class ChunkJobType {
-        GenerateChunk,
-        RebuildMesh
+        GenerateTerrain,
+        Decorate,
+        CalculateLight,
+        BuildMesh
     };
 
     struct ChunkMeshSnapshot {
@@ -77,7 +89,8 @@ private:
         ChunkCoord coord {};
         std::uint64_t version {0};
         std::uint64_t rebuild_serial {0};
-        ChunkJobType type {ChunkJobType::GenerateChunk};
+        ChunkJobType type {ChunkJobType::GenerateTerrain};
+        std::optional<ChunkData> chunk_data {};
         std::optional<ChunkMeshSnapshot> snapshot {};
     };
 
@@ -85,7 +98,7 @@ private:
         ChunkCoord coord {};
         std::uint64_t version {0};
         std::uint64_t rebuild_serial {0};
-        ChunkJobType type {ChunkJobType::GenerateChunk};
+        ChunkJobType type {ChunkJobType::GenerateTerrain};
         bool stale_rebuild {false};
         float generate_ms {0.0f};
         float mesh_ms {0.0f};
@@ -94,13 +107,26 @@ private:
     };
 
     enum class ChunkState {
+        Unloaded,
         Requested,
+        TerrainGenerated,
+        Decorated,
+        LightCalculated,
+        MeshQueued,
+        MeshBuilt,
+        UploadQueued,
+        UploadedToGPU,
         Visible
     };
 
     struct ChunkRecord {
         ChunkState state {ChunkState::Requested};
-        std::uint64_t version {0};
+        std::uint64_t generation_version {0};
+        std::uint64_t mesh_version {0};
+        std::uint64_t last_touched_frame {0};
+        bool uploaded_to_gpu {false};
+        bool dirty_mesh {false};
+        bool dirty_save {false};
         std::optional<ChunkData> data {};
     };
 
@@ -118,12 +144,16 @@ private:
     float job_priority_score_locked(const ChunkJob& job) const;
     void push_job_locked(ChunkJob&& job);
     void queue_generate_job(ChunkCoord coord, std::uint64_t version);
+    void queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data);
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
+    void mark_chunk_dirty_for_save(ChunkCoord coord);
+    void enqueue_dirty_save(ChunkCoord coord);
     std::optional<ChunkMeshSnapshot> make_rebuild_snapshot(ChunkCoord coord) const;
     static ChunkMeshNeighbors neighbors_from_snapshot(const ChunkMeshSnapshot& snapshot);
 
     WorldSeed seed_ {0};
+    WorldSave* world_save_ {nullptr};
     const BlockRegistry& block_registry_;
     WorldGenerator generator_;
     int chunk_radius_ {6};
@@ -146,10 +176,15 @@ private:
     Vec3 observer_forward_ {0.0f, 0.0f, -1.0f};
     std::uint64_t next_chunk_version_ {1};
     std::uint64_t next_rebuild_serial_ {1};
+    std::uint64_t frame_counter_ {0};
+    std::size_t stale_results_ {0};
+    std::size_t dropped_jobs_ {0};
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
     float last_generate_ms_ {0.0f};
     float last_mesh_ms_ {0.0f};
+    std::deque<ChunkCoord> dirty_save_queue_;
+    std::unordered_set<ChunkCoord, ChunkCoordHasher> dirty_save_set_;
 };
 
 }

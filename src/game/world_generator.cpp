@@ -1282,8 +1282,8 @@ ChunkData WorldGenerator::generate_chunk(ChunkCoord coord, WorldSeed seed) const
             const int world_x = coord.x * kChunkWidth + x;
             const int world_z = coord.z * kChunkDepth + z;
             ColumnProfile& profile = profiles[column_index(x, z)];
+            profile.surface_y = static_cast<int>(sample_height(world_x, world_z, seed));
             profile.continentalness = sample_continentalness(world_x, world_z, seed);
-            profile.surface_y = static_cast<int>(sample_height(world_x, world_z, profile.continentalness, seed));
             profile.deep_ocean = profile.continentalness < -0.45f;
             profile.cave_min_y = kCaveMinY;
             profile.cave_max_y = std::min(profile.surface_y - 2, kCaveMaxY);
@@ -1660,13 +1660,10 @@ void WorldGenerator::try_place_oak_tree(
 }
 
 float WorldGenerator::sample_height(int world_x, int world_z, WorldSeed seed) const {
-    return sample_height(world_x, world_z, sample_continentalness(world_x, world_z, seed), seed);
-}
-
-float WorldGenerator::sample_height(int world_x, int world_z, float continentalness, WorldSeed seed) const {
     const float x = static_cast<float>(world_x);
     const float z = static_cast<float>(world_z);
 
+    const float continentalness = sample_continentalness(world_x, world_z, seed);
     const float erosion = smooth_noise(x * 0.0065f, z * 0.0065f, seed ^ 0x12345678ull) * 2.0f - 1.0f;
     const float hills = smooth_noise(x * 0.018f, z * 0.018f, seed ^ 0x23456789ull) * 2.0f - 1.0f;
     const float roughness = smooth_noise(x * 0.048f, z * 0.048f, seed ^ 0x3456789Aull) * 2.0f - 1.0f;

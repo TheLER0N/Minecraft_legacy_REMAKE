@@ -6,15 +6,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <random>
 #include <filesystem>
+#include <limits>
+#include <random>
 
 namespace ml {
 
 namespace {
 
 constexpr bool kUseFixedDebugCamera = true;
-constexpr WorldSeed kDefaultWorldSeed = 0xC0FFEEULL;
 constexpr std::size_t kPendingUploadLogLimit = 8;
 constexpr std::size_t kPlacementFailureLogLimit = 8;
 constexpr float kBlockTargetDistance = 5.0f;
@@ -24,11 +24,14 @@ constexpr float kDebugFpsRefreshSeconds = 0.25f;
 constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 constexpr std::size_t kChunkUploadByteBudgetPerFrame = 6ull * 1024ull * 1024ull;
+constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 3ull * 1024ull * 1024ull;
 constexpr int kPlayGameButtonIndex = 0;
 constexpr int kExitGameButtonIndex = 5;
 constexpr float kMenuExitDelaySeconds = 0.18f;
 constexpr float kStartupSplashTotalSeconds = 11.8f;
 constexpr float kStartupSplashSkipFadeSeconds = 0.25f;
+constexpr int kCaveVisibilityRoofThreshold = 8;
+constexpr int kCaveVisibilityHysteresisFrames = 8;
 
 constexpr float kMenuVirtualWidth = 640.0f;
 constexpr float kMenuVirtualHeight = 360.0f;
@@ -122,6 +125,13 @@ const char* set_block_result_message(SetBlockResult result) {
     return "unknown";
 }
 
+int floor_div_chunk_coord(int value, int divisor) {
+    if (value >= 0) {
+        return value / divisor;
+    }
+    return -(((-value) + divisor - 1) / divisor);
+}
+
 std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     const std::size_t vertices = mesh.opaque_mesh.vertices.size() + mesh.cutout_mesh.vertices.size() + mesh.transparent_mesh.vertices.size();
     const std::size_t indices = mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
@@ -133,6 +143,9 @@ std::size_t mesh_byte_count(const ChunkMesh& mesh) {
 Application::Application() = default;
 
 Application::~Application() {
+    if (world_streamer_ != nullptr) {
+        world_streamer_->flush_all_dirty_chunks();
+    }
     renderer_.shutdown();
     platform_.shutdown();
 }
@@ -168,21 +181,85 @@ bool Application::initialize() {
 
 void Application::start_world() {
     if (world_streamer_ == nullptr) {
-        world_streamer_ = std::make_unique<WorldStreamer>(kDefaultWorldSeed, block_registry_, 6);
+        world_save_ = std::make_unique<WorldSave>(std::filesystem::path("saves") / "default");
+        const WorldMetadata metadata = world_save_->load_or_create_metadata();
+        world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, 6, world_save_.get());
         world_streamer_->set_leaves_render_mode(leaves_render_mode_);
         const WorldGenerator spawn_generator {block_registry_};
         const int spawn_x = 32;
         const int spawn_z = 80;
-        const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, kDefaultWorldSeed);
+        const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, metadata.world_seed);
         const float spawn_y = static_cast<float>(std::max(surface_y, kSeaLevel) + 2);
         player_.set_body_position({static_cast<float>(spawn_x), spawn_y, static_cast<float>(spawn_z)});
         camera_.set_pose({static_cast<float>(spawn_x), spawn_y + kPlayerEyeHeight, static_cast<float>(spawn_z)}, -90.0f, -22.0f);
         player_.set_view_from_forward(camera_.forward());
-        log_message(LogLevel::Info, "Application: world streamer created");
+        log_message(LogLevel::Info, "Application: world streamer created seed=" + std::to_string(metadata.world_seed));
     }
     platform_.set_mouse_capture(true);
     platform_.enter_world_music();
     app_state_ = AppState::InWorld;
+}
+
+Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame(Vec3 observer_position) {
+    const int camera_x = static_cast<int>(std::floor(observer_position.x));
+    const int camera_y = static_cast<int>(std::floor(observer_position.y));
+    const int camera_z = static_cast<int>(std::floor(observer_position.z));
+    constexpr std::array<std::array<int, 2>, 5> offsets {{
+        {{0, 0}},
+        {{1, 0}},
+        {{-1, 0}},
+        {{0, 1}},
+        {{0, -1}}
+    }};
+
+    int best_roof_blocks = std::numeric_limits<int>::max();
+    bool sampled_loaded_column = false;
+    for (const auto& offset : offsets) {
+        int roof_blocks = 0;
+        bool blocked = false;
+        bool column_loaded = false;
+        for (int y = std::clamp(camera_y + 1, kWorldMinY, kWorldMaxY); y <= kWorldMaxY; ++y) {
+            const BlockQueryResult query = world_streamer_->query_block_at_world(camera_x + offset[0], y, camera_z + offset[1]);
+            if (query.status == BlockQueryStatus::Unloaded) {
+                break;
+            }
+            if (query.status == BlockQueryStatus::Loaded) {
+                column_loaded = true;
+                if (block_registry_.is_opaque(query.block)) {
+                    ++roof_blocks;
+                    blocked = true;
+                }
+            }
+        }
+        if (!column_loaded) {
+            continue;
+        }
+        sampled_loaded_column = true;
+        best_roof_blocks = std::min(best_roof_blocks, blocked ? roof_blocks : 0);
+    }
+
+    if (!sampled_loaded_column) {
+        best_roof_blocks = 0;
+    }
+    const bool candidate_cave_mode = best_roof_blocks >= kCaveVisibilityRoofThreshold;
+    if (candidate_cave_mode != cave_visibility_pending_mode_) {
+        cave_visibility_pending_mode_ = candidate_cave_mode;
+        cave_visibility_pending_frames_ = 1;
+    } else if (cave_visibility_pending_frames_ < kCaveVisibilityHysteresisFrames) {
+        ++cave_visibility_pending_frames_;
+    }
+    if (cave_visibility_pending_frames_ >= kCaveVisibilityHysteresisFrames) {
+        cave_visibility_cave_mode_ = cave_visibility_pending_mode_;
+    }
+    cave_visibility_roof_blocks_ = best_roof_blocks;
+
+    return Renderer::CaveVisibilityFrame {
+        cave_visibility_cave_mode_,
+        floor_div_chunk_coord(camera_x, kChunkWidth),
+        floor_div_chunk_coord(camera_z, kChunkDepth),
+        camera_y,
+        cave_visibility_roof_blocks_
+    };
 }
 
 std::array<Application::MenuButton, 6> Application::menu_buttons() const {
@@ -324,6 +401,7 @@ int Application::run() {
             platform_.set_mouse_capture(!input.capture_mouse);
         }
         if (input.escape_pressed) {
+            world_streamer_->flush_dirty_chunks(8);
             platform_.set_mouse_capture(false);
             platform_.start_menu_music();
             app_state_ = AppState::MainMenu;
@@ -400,12 +478,19 @@ int Application::run() {
         const Vec3 observer_position = debug_fly_enabled_ ? camera_.position() : player_.position();
         const Vec3 observer_forward = debug_fly_enabled_ ? camera_.forward() : player_.forward();
         world_streamer_->update_observer(observer_position, observer_forward);
+        const Renderer::CaveVisibilityFrame cave_visibility_frame = update_cave_visibility_frame(observer_position);
+        renderer_.set_cave_visibility_frame(cave_visibility_frame);
         for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
             renderer_.unload_chunk_mesh(coord);
         }
         world_streamer_->tick_generation_jobs();
+        world_streamer_->flush_dirty_chunks(1);
 
-        auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(kChunkUploadByteBudgetPerFrame, observer_position, observer_forward);
+        const WorldStreamer::StreamingStats pre_upload_stats = world_streamer_->stats();
+        const std::size_t upload_budget = pre_upload_stats.pending_uploads > 4
+            ? kChunkUploadBacklogBudgetPerFrame
+            : kChunkUploadByteBudgetPerFrame;
+        auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(upload_budget, observer_position, observer_forward);
         if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
             log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
             ++pending_upload_log_count;
@@ -415,7 +500,7 @@ int Application::run() {
         const auto upload_start = std::chrono::steady_clock::now();
         for (PendingChunkUpload& upload : pending_uploads) {
             uploaded_bytes_this_frame += mesh_byte_count(upload.mesh);
-            renderer_.upload_chunk_mesh(upload.coord, upload.mesh);
+            renderer_.upload_chunk_mesh(upload.coord, upload.mesh, upload.visibility);
         }
         const auto upload_end = std::chrono::steady_clock::now();
         const float upload_ms = std::chrono::duration<float, std::milli>(upload_end - upload_start).count();
@@ -512,9 +597,14 @@ int Application::run() {
                     uploads_this_frame,
                     streaming_stats.queued_rebuilds,
                     streaming_stats.queued_generates,
+                    streaming_stats.queued_decorates,
+                    streaming_stats.queued_lights,
                     streaming_stats.queued_meshes,
                     streaming_stats.pending_upload_bytes,
                     uploaded_bytes_this_frame,
+                    streaming_stats.stale_results,
+                    streaming_stats.dropped_jobs,
+                    streaming_stats.dirty_save_chunks,
                     streaming_stats.last_generate_ms,
                     streaming_stats.last_mesh_ms,
                     upload_ms,
@@ -523,6 +613,11 @@ int Application::run() {
                     0,
                     0,
                     0,
+                    0,
+                    0,
+                    0,
+                    cave_visibility_frame.cave_mode,
+                    cave_visibility_frame.roof_blocks,
                     0,
                     0,
                     0,
