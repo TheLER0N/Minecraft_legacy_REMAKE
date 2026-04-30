@@ -1640,6 +1640,7 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.pending_upload_bytes != data.pending_upload_bytes ||
         debug_hud_data_.uploaded_bytes_this_frame != data.uploaded_bytes_this_frame ||
         debug_hud_data_.stale_results != data.stale_results ||
+        debug_hud_data_.stale_uploads != data.stale_uploads ||
         debug_hud_data_.dropped_jobs != data.dropped_jobs ||
         debug_hud_data_.dirty_save_chunks != data.dirty_save_chunks ||
         debug_hud_data_.generate_ms != data.generate_ms ||
@@ -2989,6 +2990,7 @@ void Renderer::update_debug_hud_buffer() {
         " MESHQ:" + std::to_string(debug_hud_data_.queued_meshes);
     const std::string upload_queue = "UPLOADQ:" + std::to_string(debug_hud_data_.pending_upload_bytes / 1024) + "KB";
     const std::string scheduler = "STALE:" + std::to_string(debug_hud_data_.stale_results) +
+        " STALEUP:" + std::to_string(debug_hud_data_.stale_uploads) +
         " DROPPED:" + std::to_string(debug_hud_data_.dropped_jobs);
     const std::string saves = "SAVEQ:" + std::to_string(debug_hud_data_.dirty_save_chunks);
     const std::string timings = "GENms:" + std::to_string(static_cast<int>(debug_hud_data_.generate_ms + 0.5f)) +

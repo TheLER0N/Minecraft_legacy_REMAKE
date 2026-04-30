@@ -15,6 +15,7 @@ using WorldSeed = std::uint64_t;
 
 constexpr int kChunkWidth = 16;
 constexpr int kChunkDepth = 16;
+constexpr int kLightBorder = 4;
 constexpr int kWorldMinY = -64;
 constexpr int kWorldMaxY = 319;
 constexpr int kChunkHeight = kWorldMaxY - kWorldMinY + 1;
@@ -130,6 +131,7 @@ struct ActiveChunk {
 
 struct PendingChunkUpload {
     ChunkCoord coord {};
+    std::uint64_t rebuild_serial {0};
     ChunkMesh mesh {};
     ChunkVisibilityMetadata visibility {};
 };

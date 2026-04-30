@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -31,6 +32,7 @@ public:
         std::size_t queued_meshes {0};
         std::size_t pending_upload_bytes {0};
         std::size_t stale_results {0};
+        std::size_t stale_uploads {0};
         std::size_t dropped_jobs {0};
         std::size_t dirty_save_chunks {0};
         float last_generate_ms {0.0f};
@@ -91,7 +93,7 @@ private:
         std::uint64_t rebuild_serial {0};
         ChunkJobType type {ChunkJobType::GenerateTerrain};
         std::optional<ChunkData> chunk_data {};
-        std::optional<ChunkMeshSnapshot> snapshot {};
+        std::shared_ptr<ChunkMeshSnapshot> snapshot {};
     };
 
     struct JobResult {
@@ -123,6 +125,7 @@ private:
         ChunkState state {ChunkState::Requested};
         std::uint64_t generation_version {0};
         std::uint64_t mesh_version {0};
+        std::uint64_t latest_rebuild_serial {0};
         std::uint64_t last_touched_frame {0};
         bool uploaded_to_gpu {false};
         bool dirty_mesh {false};
@@ -148,6 +151,7 @@ private:
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
     void queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
+    void record_stale_upload_drop(ChunkCoord coord);
     void mark_chunk_dirty_for_save(ChunkCoord coord);
     void enqueue_dirty_save(ChunkCoord coord);
     std::optional<ChunkMeshSnapshot> make_rebuild_snapshot(ChunkCoord coord) const;
@@ -179,9 +183,11 @@ private:
     std::uint64_t next_rebuild_serial_ {1};
     std::uint64_t frame_counter_ {0};
     std::size_t stale_results_ {0};
+    std::size_t stale_uploads_dropped_ {0};
     std::size_t dropped_jobs_ {0};
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
+    std::size_t logged_stale_upload_count_ {0};
     float last_generate_ms_ {0.0f};
     float last_mesh_ms_ {0.0f};
     std::deque<ChunkCoord> dirty_save_queue_;

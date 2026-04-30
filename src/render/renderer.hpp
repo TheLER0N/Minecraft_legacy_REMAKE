@@ -40,6 +40,7 @@ public:
         std::size_t pending_upload_bytes {0};
         std::size_t uploaded_bytes_this_frame {0};
         std::size_t stale_results {0};
+        std::size_t stale_uploads {0};
         std::size_t dropped_jobs {0};
         std::size_t dirty_save_chunks {0};
         float generate_ms {0.0f};

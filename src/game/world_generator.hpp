@@ -38,26 +38,26 @@ private:
 };
 
 struct ChunkSideBorderX {
-    std::array<BlockId, static_cast<std::size_t>(kChunkDepth * kChunkHeight)> blocks {};
+    std::array<BlockId, static_cast<std::size_t>(kLightBorder * kChunkDepth * kChunkHeight)> blocks {};
 
-    BlockId get(int y, int z) const {
-        return blocks[static_cast<std::size_t>(z + y * kChunkDepth)];
+    BlockId get(int strip_x, int y, int z) const {
+        return blocks[static_cast<std::size_t>(strip_x + kLightBorder * (z + y * kChunkDepth))];
     }
 };
 
 struct ChunkSideBorderZ {
-    std::array<BlockId, static_cast<std::size_t>(kChunkWidth * kChunkHeight)> blocks {};
+    std::array<BlockId, static_cast<std::size_t>(kChunkWidth * kLightBorder * kChunkHeight)> blocks {};
 
-    BlockId get(int x, int y) const {
-        return blocks[static_cast<std::size_t>(x + y * kChunkWidth)];
+    BlockId get(int x, int y, int strip_z) const {
+        return blocks[static_cast<std::size_t>(x + kChunkWidth * (strip_z + y * kLightBorder))];
     }
 };
 
 struct ChunkCornerBorder {
-    std::array<BlockId, static_cast<std::size_t>(kChunkHeight)> blocks {};
+    std::array<BlockId, static_cast<std::size_t>(kLightBorder * kLightBorder * kChunkHeight)> blocks {};
 
-    BlockId get(int y) const {
-        return blocks[static_cast<std::size_t>(y)];
+    BlockId get(int strip_x, int y, int strip_z) const {
+        return blocks[static_cast<std::size_t>(strip_x + kLightBorder * (strip_z + y * kLightBorder))];
     }
 };
 

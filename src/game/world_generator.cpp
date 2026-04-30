@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace ml {
@@ -258,7 +259,7 @@ struct LightNode {
 };
 
 struct ChunkLightData {
-    static constexpr int kBorder = 1;
+    static constexpr int kBorder = kLightBorder;
     static constexpr int kWidth = kChunkWidth + kBorder * 2;
     static constexpr int kDepth = kChunkDepth + kBorder * 2;
 
@@ -828,12 +829,36 @@ void append_greedy_face(
     append_lit_face(mesh_section_for_block(mesh, key.block, block_registry), lighting, world_vertices, uvs, key.texture_index);
 }
 
+template <typename SampleFn, typename LightSampleFn>
+ChunkMesh build_mesh_from_sampler(
+    SampleFn&& sample,
+    LightSampleFn&& light_sample,
+    const BlockRegistry& block_registry,
+    LeavesRenderMode leaves_mode,
+    std::size_t* face_count_out = nullptr);
+
 template <typename SampleFn>
 ChunkMesh build_mesh_from_sampler(
     SampleFn&& sample,
     const BlockRegistry& block_registry,
     LeavesRenderMode leaves_mode,
     std::size_t* face_count_out = nullptr) {
+    return build_mesh_from_sampler(
+        std::forward<SampleFn>(sample),
+        std::forward<SampleFn>(sample),
+        block_registry,
+        leaves_mode,
+        face_count_out
+    );
+}
+
+template <typename SampleFn, typename LightSampleFn>
+ChunkMesh build_mesh_from_sampler(
+    SampleFn&& sample,
+    LightSampleFn&& light_sample,
+    const BlockRegistry& block_registry,
+    LeavesRenderMode leaves_mode,
+    std::size_t* face_count_out) {
     ChunkMesh mesh {};
     std::size_t face_count = 0;
     VerticalRange occupied_range {};
@@ -866,7 +891,7 @@ ChunkMesh build_mesh_from_sampler(
         std::max(0, occupied_range.min_y - kMeshVerticalPadding),
         std::min(kChunkHeight - 1, occupied_range.max_y + kMeshVerticalPadding)
     };
-    const ChunkLightData light = build_sky_light_map(sample, block_registry, work_range);
+    const ChunkLightData light = build_sky_light_map(light_sample, block_registry, {0, kChunkHeight - 1});
 
     const auto emit_greedy_mask = [&](int face_index, int slice, int mask_width, int mask_height, int v_min, int v_max, std::vector<MaskCell>& mask) {
         (void)mask_height;
@@ -1097,46 +1122,76 @@ BlockId sample_block_for_mesh(const ChunkData& chunk_data, const ChunkMeshNeighb
         return BlockId::Air;
     }
     if (x < 0 && z < 0) {
-        return neighbors.northwest != nullptr
-            ? neighbors.northwest->get(y)
+        return neighbors.northwest != nullptr && x >= -kLightBorder && z >= -kLightBorder
+            ? neighbors.northwest->get(x + kLightBorder, y, z + kLightBorder)
             : BlockId::Air;
     }
     if (x >= kChunkWidth && z < 0) {
-        return neighbors.northeast != nullptr
-            ? neighbors.northeast->get(y)
+        return neighbors.northeast != nullptr && x < kChunkWidth + kLightBorder && z >= -kLightBorder
+            ? neighbors.northeast->get(x - kChunkWidth, y, z + kLightBorder)
             : BlockId::Air;
     }
     if (x < 0 && z >= kChunkDepth) {
-        return neighbors.southwest != nullptr
-            ? neighbors.southwest->get(y)
+        return neighbors.southwest != nullptr && x >= -kLightBorder && z < kChunkDepth + kLightBorder
+            ? neighbors.southwest->get(x + kLightBorder, y, z - kChunkDepth)
             : BlockId::Air;
     }
     if (x >= kChunkWidth && z >= kChunkDepth) {
-        return neighbors.southeast != nullptr
-            ? neighbors.southeast->get(y)
+        return neighbors.southeast != nullptr && x < kChunkWidth + kLightBorder && z < kChunkDepth + kLightBorder
+            ? neighbors.southeast->get(x - kChunkWidth, y, z - kChunkDepth)
             : BlockId::Air;
     }
     if (x < 0) {
-        return neighbors.west != nullptr && z >= 0 && z < kChunkDepth
-            ? neighbors.west->get(y, z)
+        return neighbors.west != nullptr && x >= -kLightBorder && z >= 0 && z < kChunkDepth
+            ? neighbors.west->get(x + kLightBorder, y, z)
             : BlockId::Air;
     }
     if (x >= kChunkWidth) {
-        return neighbors.east != nullptr && z >= 0 && z < kChunkDepth
-            ? neighbors.east->get(y, z)
+        return neighbors.east != nullptr && x < kChunkWidth + kLightBorder && z >= 0 && z < kChunkDepth
+            ? neighbors.east->get(x - kChunkWidth, y, z)
             : BlockId::Air;
     }
     if (z < 0) {
-        return neighbors.north != nullptr && x >= 0 && x < kChunkWidth
-            ? neighbors.north->get(x, y)
+        return neighbors.north != nullptr && x >= 0 && x < kChunkWidth && z >= -kLightBorder
+            ? neighbors.north->get(x, y, z + kLightBorder)
             : BlockId::Air;
     }
     if (z >= kChunkDepth) {
-        return neighbors.south != nullptr && x >= 0 && x < kChunkWidth
-            ? neighbors.south->get(x, y)
+        return neighbors.south != nullptr && x >= 0 && x < kChunkWidth && z < kChunkDepth + kLightBorder
+            ? neighbors.south->get(x, y, z - kChunkDepth)
             : BlockId::Air;
     }
     return chunk_data.get(x, y, z);
+}
+
+BlockId sample_block_for_light(const ChunkData& chunk_data, const ChunkMeshNeighbors& neighbors, int x, int y, int z) {
+    const BlockId block = sample_block_for_mesh(chunk_data, neighbors, x, y, z);
+    if (x >= 0 && x < kChunkWidth && z >= 0 && z < kChunkDepth) {
+        return block;
+    }
+    if (x < -kLightBorder || x >= kChunkWidth + kLightBorder || z < -kLightBorder || z >= kChunkDepth + kLightBorder) {
+        return block;
+    }
+    const bool needs_west = x < 0 && z >= 0 && z < kChunkDepth;
+    const bool needs_east = x >= kChunkWidth && z >= 0 && z < kChunkDepth;
+    const bool needs_north = z < 0 && x >= 0 && x < kChunkWidth;
+    const bool needs_south = z >= kChunkDepth && x >= 0 && x < kChunkWidth;
+    const bool needs_northwest = x < 0 && z < 0;
+    const bool needs_northeast = x >= kChunkWidth && z < 0;
+    const bool needs_southwest = x < 0 && z >= kChunkDepth;
+    const bool needs_southeast = x >= kChunkWidth && z >= kChunkDepth;
+
+    const bool missing_neighbor =
+        (needs_west && neighbors.west == nullptr) ||
+        (needs_east && neighbors.east == nullptr) ||
+        (needs_north && neighbors.north == nullptr) ||
+        (needs_south && neighbors.south == nullptr) ||
+        (needs_northwest && neighbors.northwest == nullptr) ||
+        (needs_northeast && neighbors.northeast == nullptr) ||
+        (needs_southwest && neighbors.southwest == nullptr) ||
+        (needs_southeast && neighbors.southeast == nullptr);
+
+    return missing_neighbor ? BlockId::Stone : block;
 }
 
 void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
@@ -1290,9 +1345,12 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     assert(seam_neighbor_mesh.opaque_mesh.indices.size() == 30);
 
     ChunkSideBorderX seam_east_border {};
-    for (int y = 0; y < kChunkHeight; ++y) {
-        for (int z = 0; z < kChunkDepth; ++z) {
-            seam_east_border.blocks[static_cast<std::size_t>(z + y * kChunkDepth)] = seam_right.get(0, y, z);
+    for (int strip_x = 0; strip_x < kLightBorder; ++strip_x) {
+        for (int y = 0; y < kChunkHeight; ++y) {
+            for (int z = 0; z < kChunkDepth; ++z) {
+                seam_east_border.blocks[static_cast<std::size_t>(strip_x + kLightBorder * (z + y * kChunkDepth))] =
+                    strip_x == 0 ? seam_right.get(0, y, z) : BlockId::Air;
+            }
         }
     }
     const ChunkMeshNeighbors seam_neighbors {
@@ -1321,7 +1379,7 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     ChunkData diagonal_ao_chunk {};
     diagonal_ao_chunk.set(0, 0, 0, BlockId::Stone);
     ChunkCornerBorder northwest_corner {};
-    northwest_corner.blocks[1] = BlockId::Stone;
+    northwest_corner.blocks[static_cast<std::size_t>((kLightBorder - 1) + kLightBorder * ((kLightBorder - 1) + 1 * kLightBorder))] = BlockId::Stone;
     const ChunkMeshNeighbors diagonal_ao_neighbors {
         nullptr,
         nullptr,
@@ -1909,8 +1967,11 @@ ChunkMesh build_chunk_mesh(
     const auto sample = [&](int x, int y, int z) -> BlockId {
         return sample_block_for_mesh(chunk_data, neighbors, x, y, z);
     };
+    const auto light_sample = [&](int x, int y, int z) -> BlockId {
+        return sample_block_for_light(chunk_data, neighbors, x, y, z);
+    };
 
-    return build_mesh_from_sampler(sample, block_registry, leaves_mode);
+    return build_mesh_from_sampler(sample, light_sample, block_registry, leaves_mode);
 }
 
 }

@@ -600,6 +600,7 @@ int Application::run() {
                     streaming_stats.pending_upload_bytes,
                     uploaded_bytes_this_frame,
                     streaming_stats.stale_results,
+                    streaming_stats.stale_uploads,
                     streaming_stats.dropped_jobs,
                     streaming_stats.dirty_save_chunks,
                     streaming_stats.last_generate_ms,
