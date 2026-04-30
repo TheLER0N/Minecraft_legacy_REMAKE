@@ -29,6 +29,7 @@ public:
     float frame_delta_seconds() const;
     const PlatformWindow& window() const;
     std::string shader_directory() const;
+    std::filesystem::path save_root_directory() const;
     void set_mouse_capture(bool enabled);
     void play_ui_press_sound();
     void play_ui_focus_sound();
@@ -51,7 +52,7 @@ private:
 
     struct MusicPlayback {
         SDL_AudioStream* stream {nullptr};
-        short* samples {nullptr};
+        Uint8* samples {nullptr};
         int byte_length {0};
     };
 

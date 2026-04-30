@@ -10,7 +10,11 @@ namespace ml {
 
 namespace {
 
+#ifdef __ANDROID__
+constexpr const char* kTexturePackRoot = "textures/texture_pack";
+#else
 constexpr const char* kTexturePackRoot = "assets/textures/texture_pack";
+#endif
 
 std::filesystem::path sdl_base_path() {
     const char* base_path = SDL_GetBasePath();
@@ -35,6 +39,9 @@ AssetPackResolver::AssetPackResolver(std::vector<std::string> overlay_packs) {
 
 std::filesystem::path AssetPackResolver::resolve_file(std::string_view relative_path) const {
     const std::filesystem::path relative_resource_path {std::string(relative_path)};
+#ifdef __ANDROID__
+    return relative_pack_root(std::string(kClassicPackId)) / relative_resource_path;
+#else
     for (const std::string& pack_id : pack_order_) {
         for (const std::filesystem::path& root : candidate_pack_roots(pack_id)) {
             const std::filesystem::path candidate = root / relative_resource_path;
@@ -46,9 +53,14 @@ std::filesystem::path AssetPackResolver::resolve_file(std::string_view relative_
     }
 
     return relative_pack_root(std::string(kClassicPackId)) / relative_resource_path;
+#endif
 }
 
 std::vector<std::filesystem::path> AssetPackResolver::resolve_directories(std::string_view relative_path) const {
+#ifdef __ANDROID__
+    (void)relative_path;
+    return {};
+#else
     const std::filesystem::path relative_resource_path {std::string(relative_path)};
     std::vector<std::filesystem::path> directories;
     for (const std::string& pack_id : pack_order_) {
@@ -64,6 +76,7 @@ std::vector<std::filesystem::path> AssetPackResolver::resolve_directories(std::s
         }
     }
     return directories;
+#endif
 }
 
 std::string AssetPackResolver::resolve_file_utf8(std::string_view relative_path) const {

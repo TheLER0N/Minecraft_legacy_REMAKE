@@ -186,6 +186,7 @@ private:
     bool create_sync_objects();
     void destroy_swapchain_objects();
     VkExtent2D current_surface_extent(const VkSurfaceCapabilitiesKHR& capabilities) const;
+    VkExtent2D logical_extent() const;
     bool recreate_swapchain_if_needed();
     void defer_destroy_chunk_buffers(ChunkRenderData&& render_data);
     void retire_deferred_chunk_buffers();
@@ -241,7 +242,10 @@ private:
     std::uint32_t graphics_family_index_ {0};
     VkSwapchainKHR swapchain_ {VK_NULL_HANDLE};
     VkFormat swapchain_format_ {VK_FORMAT_UNDEFINED};
+    bool swapchain_srgb_ {false};
     VkExtent2D swapchain_extent_ {};
+    VkExtent2D logical_extent_ {};
+    VkSurfaceTransformFlagBitsKHR swapchain_pre_transform_ {VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR};
     std::vector<VkImage> swapchain_images_;
     std::vector<VkImageView> swapchain_image_views_;
     std::vector<VkFramebuffer> swapchain_framebuffers_;

@@ -10,6 +10,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -30,6 +31,50 @@ constexpr float kGamepadMenuThreshold = 0.55f;
 constexpr float kGamepadLookPixelsPerSecond = 720.0f;
 constexpr Sint16 kGamepadTriggerThreshold = 16000;
 
+#ifdef __ANDROID__
+constexpr SDL_AudioSpec kAndroidPlaybackSpec {SDL_AUDIO_F32, 2, 48000};
+constexpr float kAndroidUiGain = 0.65f;
+constexpr float kAndroidMusicGain = 0.32f;
+
+void apply_f32_gain(Uint8* audio, int byte_length, float gain) {
+    if (audio == nullptr || byte_length <= 0 || gain == 1.0f) {
+        return;
+    }
+    float* samples = reinterpret_cast<float*>(audio);
+    const int count = byte_length / static_cast<int>(sizeof(float));
+    for (int i = 0; i < count; ++i) {
+        samples[i] = std::clamp(samples[i] * gain, -1.0f, 1.0f);
+    }
+}
+
+bool convert_audio_for_android(
+    const SDL_AudioSpec& src_spec,
+    const Uint8* src_data,
+    Uint32 src_length,
+    float gain,
+    Uint8** dst_data,
+    Uint32* dst_length) {
+    if (src_data == nullptr || src_length == 0 || dst_data == nullptr || dst_length == nullptr) {
+        return false;
+    }
+    Uint8* converted = nullptr;
+    int converted_length = 0;
+    if (!SDL_ConvertAudioSamples(
+            &src_spec,
+            src_data,
+            static_cast<int>(src_length),
+            &kAndroidPlaybackSpec,
+            &converted,
+            &converted_length)) {
+        return false;
+    }
+    apply_f32_gain(converted, converted_length, gain);
+    *dst_data = converted;
+    *dst_length = static_cast<Uint32>(converted_length);
+    return true;
+}
+#endif
+
 float normalize_gamepad_axis(Sint16 value) {
     constexpr float deadzone = 8000.0f;
     const float axis = static_cast<float>(value);
@@ -42,6 +87,14 @@ float normalize_gamepad_axis(Sint16 value) {
     return std::max(-1.0f, (axis + deadzone) / (32768.0f - deadzone));
 }
 
+#ifdef __ANDROID__
+void normalize_landscape_size(std::uint32_t& width, std::uint32_t& height) {
+    if (width > 0 && height > 0 && height > width) {
+        std::swap(width, height);
+    }
+}
+#endif
+
 }
 
 void log_message(LogLevel level, std::string_view message) {
@@ -52,7 +105,11 @@ void log_message(LogLevel level, std::string_view message) {
         prefix = "[error]";
     }
 
+#ifdef __ANDROID__
+    SDL_Log("%s %.*s", prefix, static_cast<int>(message.size()), message.data());
+#else
     std::cout << prefix << ' ' << message << std::endl;
+#endif
 }
 
 std::optional<Key> PlatformApp::map_scancode(SDL_Scancode scancode) {
@@ -69,40 +126,67 @@ std::optional<Key> PlatformApp::map_scancode(SDL_Scancode scancode) {
 }
 
 bool PlatformApp::initialize() {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
+#ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
+#endif
+    log_message(LogLevel::Info, "PlatformApp: SDL_Init begin");
+    SDL_InitFlags init_flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD;
+    init_flags |= SDL_INIT_AUDIO;
+    if (!SDL_Init(init_flags)) {
         log_message(LogLevel::Error, SDL_GetError());
         return false;
     }
+    log_message(LogLevel::Info, "PlatformApp: SDL_Init ok");
 
+#ifdef __ANDROID__
+    window_.width = 2340;
+    window_.height = 1080;
+#else
     set_initial_window_size();
+#endif
+    SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#ifndef __ANDROID__
+    window_flags |= SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED;
+#endif
+    log_message(LogLevel::Info, "PlatformApp: SDL_CreateWindow begin");
     window_.handle = SDL_CreateWindow(
         "minecraft_legacy",
         static_cast<int>(window_.width),
         static_cast<int>(window_.height),
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_MAXIMIZED
+        window_flags
     );
 
     if (window_.handle == nullptr) {
         log_message(LogLevel::Error, SDL_GetError());
         return false;
     }
+    log_message(LogLevel::Info, "PlatformApp: SDL_CreateWindow ok");
+#ifndef __ANDROID__
     fullscreen_ = true;
     if (!SDL_SetWindowFullscreen(window_.handle, true)) {
         fullscreen_ = false;
         log_message(LogLevel::Warning, std::string("PlatformApp: failed to enter fullscreen at startup: ") + SDL_GetError());
     }
+#else
+    fullscreen_ = false;
+#endif
     update_window_pixel_size();
 
+    log_message(LogLevel::Info, "PlatformApp: SDL_Vulkan_LoadLibrary begin");
     if (!SDL_Vulkan_LoadLibrary(nullptr)) {
         log_message(LogLevel::Error, SDL_GetError());
         return false;
     }
+    log_message(LogLevel::Info, "PlatformApp: SDL_Vulkan_LoadLibrary ok");
 
     last_counter_ = SDL_GetPerformanceCounter();
     input_.capture_mouse = false;
     update_relative_mouse_mode();
     open_first_gamepad();
+    log_message(LogLevel::Info, "PlatformApp: initialize_audio begin");
     initialize_audio();
+    log_message(LogLevel::Info, "PlatformApp: initialize ok");
     return true;
 }
 
@@ -305,6 +389,9 @@ const PlatformWindow& PlatformApp::window() const {
 }
 
 std::string PlatformApp::shader_directory() const {
+#ifdef __ANDROID__
+    return "shaders";
+#else
     const char* base_path = SDL_GetBasePath();
     if (base_path == nullptr) {
         return "shaders";
@@ -316,6 +403,19 @@ std::string PlatformApp::shader_directory() const {
     }
     path += "shaders";
     return path;
+#endif
+}
+
+std::filesystem::path PlatformApp::save_root_directory() const {
+#ifdef __ANDROID__
+    char* pref_path = SDL_GetPrefPath("MinecraftLegacy", "MinecraftLegacy");
+    if (pref_path != nullptr) {
+        std::filesystem::path path(reinterpret_cast<const char8_t*>(pref_path));
+        SDL_free(pref_path);
+        return path / "saves";
+    }
+#endif
+    return std::filesystem::path("saves");
 }
 
 void PlatformApp::set_mouse_capture(bool enabled) {
@@ -405,10 +505,52 @@ bool PlatformApp::initialize_audio() {
 
 bool PlatformApp::load_ui_sound(const char* path, const char* name, UiSound& sound) {
     SDL_AudioSpec spec {};
+#ifdef __ANDROID__
+    std::size_t file_size = 0;
+    void* file_data = SDL_LoadFile(path, &file_size);
+    if (file_data == nullptr || file_size == 0) {
+        log_message(LogLevel::Warning, std::string("PlatformApp: failed to load ") + name + " sound asset " + path + ": " + SDL_GetError());
+        if (file_data != nullptr) {
+            SDL_free(file_data);
+        }
+        return false;
+    }
+
+    if (file_size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        SDL_free(file_data);
+        log_message(LogLevel::Warning, std::string("PlatformApp: ") + name + " sound asset is too large");
+        return false;
+    }
+
+    SDL_IOStream* io = SDL_IOFromConstMem(file_data, static_cast<int>(file_size));
+    if (io == nullptr) {
+        SDL_free(file_data);
+        log_message(LogLevel::Warning, std::string("PlatformApp: failed to open ") + name + " sound memory stream: " + SDL_GetError());
+        return false;
+    }
+
+    Uint8* loaded_buffer = nullptr;
+    Uint32 loaded_length = 0;
+    const bool loaded = SDL_LoadWAV_IO(io, true, &spec, &loaded_buffer, &loaded_length);
+    SDL_free(file_data);
+    if (!loaded) {
+        log_message(LogLevel::Warning, std::string("PlatformApp: failed to decode ") + name + " sound: " + SDL_GetError());
+        return false;
+    }
+
+    if (!convert_audio_for_android(spec, loaded_buffer, loaded_length, kAndroidUiGain, &sound.buffer, &sound.length)) {
+        SDL_free(loaded_buffer);
+        log_message(LogLevel::Warning, std::string("PlatformApp: failed to convert ") + name + " sound for Android: " + SDL_GetError());
+        return false;
+    }
+    SDL_free(loaded_buffer);
+    spec = kAndroidPlaybackSpec;
+#else
     if (!SDL_LoadWAV(path, &spec, &sound.buffer, &sound.length)) {
         log_message(LogLevel::Warning, std::string("PlatformApp: failed to load ") + name + " sound: " + SDL_GetError());
         return false;
     }
+#endif
 
     sound.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
     if (sound.stream == nullptr) {
@@ -419,6 +561,13 @@ bool PlatformApp::load_ui_sound(const char* path, const char* name, UiSound& sou
         return false;
     }
 
+#ifdef __ANDROID__
+    log_message(
+        LogLevel::Info,
+        std::string("PlatformApp: loaded ") + name + " sound bytes=" + std::to_string(sound.length) +
+            " freq=" + std::to_string(spec.freq) + " channels=" + std::to_string(spec.channels)
+    );
+#endif
     return true;
 }
 
@@ -445,6 +594,28 @@ void PlatformApp::discover_music_tracks() {
         return;
     }
     music_tracks_discovered_ = true;
+
+#ifdef __ANDROID__
+    {
+    const AssetPackResolver resolver;
+    constexpr std::array<const char*, 7> kAndroidMusicTracks {{
+        "beginning.ogg",
+        "chris.ogg",
+        "eleven.ogg",
+        "excuse.ogg",
+        "intro.ogg",
+        "mice_on_venus-old.ogg",
+        "moog_city.ogg"
+    }};
+
+    for (const char* file_name : kAndroidMusicTracks) {
+        const std::string relative_path = std::string(kMusicDirectory) + "/" + file_name;
+        music_tracks_.push_back({resolver.resolve_file_utf8(relative_path), file_name});
+    }
+    log_message(LogLevel::Info, std::string("PlatformApp: Android APK music manifest tracks=") + std::to_string(music_tracks_.size()));
+    return;
+    }
+#endif
 
     const AssetPackResolver resolver;
     const std::vector<std::filesystem::path> search_paths = resolver.resolve_directories(kMusicDirectory);
@@ -509,6 +680,9 @@ void PlatformApp::play_next_music_track() {
             log_message(LogLevel::Warning, std::string("PlatformApp: failed to load music ") + track.name + ": " + SDL_GetError());
             continue;
         }
+#ifdef __ANDROID__
+        log_message(LogLevel::Info, std::string("PlatformApp: loaded music asset ") + track.name + " bytes=" + std::to_string(file_size));
+#endif
 
         if (file_size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
             SDL_free(file_data);
@@ -535,34 +709,73 @@ void PlatformApp::play_next_music_track() {
             log_message(LogLevel::Warning, std::string("PlatformApp: failed to decode music ") + track.name);
             continue;
         }
+#ifdef __ANDROID__
+        log_message(
+            LogLevel::Info,
+            std::string("PlatformApp: decoded music ") + track.name +
+                " frames=" + std::to_string(sample_frames) +
+                " freq=" + std::to_string(sample_rate) +
+                " channels=" + std::to_string(channels)
+        );
+#endif
 
-        const std::int64_t byte_length = static_cast<std::int64_t>(sample_frames) * channels * static_cast<int>(sizeof(short));
-        if (byte_length <= 0 || byte_length > std::numeric_limits<int>::max()) {
+        const std::int64_t decoded_byte_length = static_cast<std::int64_t>(sample_frames) * channels * static_cast<int>(sizeof(short));
+        if (decoded_byte_length <= 0 || decoded_byte_length > std::numeric_limits<int>::max()) {
             std::free(samples);
             log_message(LogLevel::Warning, std::string("PlatformApp: decoded music too large ") + track.name);
             continue;
         }
 
-        const SDL_AudioSpec spec {SDL_AUDIO_S16, channels, sample_rate};
+        SDL_AudioSpec spec {SDL_AUDIO_S16, channels, sample_rate};
+        Uint8* playback_samples = reinterpret_cast<Uint8*>(samples);
+        int playback_byte_length = static_cast<int>(decoded_byte_length);
+#ifdef __ANDROID__
+        Uint8* converted_samples = nullptr;
+        Uint32 converted_byte_length = 0;
+        if (!convert_audio_for_android(
+                spec,
+                reinterpret_cast<const Uint8*>(samples),
+                static_cast<Uint32>(decoded_byte_length),
+                kAndroidMusicGain,
+                &converted_samples,
+                &converted_byte_length)) {
+            std::free(samples);
+            log_message(LogLevel::Warning, std::string("PlatformApp: failed to convert music ") + track.name + " for Android: " + SDL_GetError());
+            continue;
+        }
+        std::free(samples);
+        samples = nullptr;
+        playback_samples = converted_samples;
+        playback_byte_length = static_cast<int>(converted_byte_length);
+        spec = kAndroidPlaybackSpec;
+#endif
         SDL_AudioStream* stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
         if (stream == nullptr) {
-            std::free(samples);
+#ifdef __ANDROID__
+            SDL_free(playback_samples);
+#else
+            std::free(playback_samples);
+#endif
             log_message(LogLevel::Warning, std::string("PlatformApp: failed to open music stream: ") + SDL_GetError());
             return;
         }
 
-        if (!SDL_PutAudioStreamData(stream, samples, static_cast<int>(byte_length)) ||
+        if (!SDL_PutAudioStreamData(stream, playback_samples, playback_byte_length) ||
             !SDL_FlushAudioStream(stream) ||
             !SDL_ResumeAudioStreamDevice(stream)) {
             SDL_DestroyAudioStream(stream);
-            std::free(samples);
+#ifdef __ANDROID__
+            SDL_free(playback_samples);
+#else
+            std::free(playback_samples);
+#endif
             log_message(LogLevel::Warning, std::string("PlatformApp: failed to start music ") + track.name + ": " + SDL_GetError());
             continue;
         }
 
         music_.stream = stream;
-        music_.samples = samples;
-        music_.byte_length = static_cast<int>(byte_length);
+        music_.samples = playback_samples;
+        music_.byte_length = playback_byte_length;
         last_music_track_index_ = track_index;
         next_music_delay_seconds_ = 0.0f;
         log_message(LogLevel::Info, std::string("PlatformApp: playing music ") + track.name);
@@ -578,7 +791,11 @@ void PlatformApp::stop_music_track() {
         music_.stream = nullptr;
     }
     if (music_.samples != nullptr) {
+#ifdef __ANDROID__
+        SDL_free(music_.samples);
+#else
         std::free(music_.samples);
+#endif
         music_.samples = nullptr;
     }
     music_.byte_length = 0;
@@ -633,6 +850,9 @@ void PlatformApp::set_initial_window_size() {
 
     window_.width = static_cast<std::uint32_t>(mode->w);
     window_.height = static_cast<std::uint32_t>(mode->h);
+#ifdef __ANDROID__
+    normalize_landscape_size(window_.width, window_.height);
+#endif
     log_message(
         LogLevel::Info,
         std::string("PlatformApp: desktop resolution ") + std::to_string(window_.width) + "x" + std::to_string(window_.height)
@@ -644,11 +864,24 @@ void PlatformApp::update_window_pixel_size() {
         return;
     }
 
+    int sdl_width = 0;
+    int sdl_height = 0;
+    SDL_GetWindowSize(window_.handle, &sdl_width, &sdl_height);
+
     int pixel_width = 0;
     int pixel_height = 0;
     if (SDL_GetWindowSizeInPixels(window_.handle, &pixel_width, &pixel_height) && pixel_width > 0 && pixel_height > 0) {
         window_.width = static_cast<std::uint32_t>(pixel_width);
         window_.height = static_cast<std::uint32_t>(pixel_height);
+#ifdef __ANDROID__
+        normalize_landscape_size(window_.width, window_.height);
+#endif
+        log_message(
+            LogLevel::Info,
+            std::string("PlatformApp: SDL window=") + std::to_string(sdl_width) + "x" + std::to_string(sdl_height) +
+                " pixel=" + std::to_string(pixel_width) + "x" + std::to_string(pixel_height) +
+                " game=" + std::to_string(window_.width) + "x" + std::to_string(window_.height)
+        );
     }
 }
 
@@ -669,6 +902,9 @@ Vec2 PlatformApp::window_to_pixel_position(float x, float y) const {
 }
 
 void PlatformApp::toggle_fullscreen() {
+#ifdef __ANDROID__
+    return;
+#else
     if (window_.handle == nullptr) {
         return;
     }
@@ -682,6 +918,7 @@ void PlatformApp::toggle_fullscreen() {
 
     update_window_pixel_size();
     log_message(LogLevel::Info, fullscreen_ ? "PlatformApp: fullscreen enabled" : "PlatformApp: fullscreen disabled");
+#endif
 }
 
 void PlatformApp::open_first_gamepad() {
@@ -801,7 +1038,9 @@ void PlatformApp::update_gamepad_input() {
         input_.hotbar_scroll_delta -= 1;
     }
 
-    if (button_pressed(SDL_GAMEPAD_BUTTON_START)) {
+    if (button_pressed(SDL_GAMEPAD_BUTTON_START) ||
+        button_pressed(SDL_GAMEPAD_BUTTON_BACK) ||
+        button_pressed(SDL_GAMEPAD_BUTTON_GUIDE)) {
         input_.menu_confirm_pressed = true;
         input_.gamepad_start_pressed = true;
     }
@@ -834,12 +1073,16 @@ void PlatformApp::update_gamepad_input() {
 }
 
 void PlatformApp::update_relative_mouse_mode() {
+#ifdef __ANDROID__
+    return;
+#else
     SDL_SetWindowRelativeMouseMode(window_.handle, input_.capture_mouse);
     if (input_.capture_mouse) {
         SDL_HideCursor();
     } else {
         SDL_ShowCursor();
     }
+#endif
 }
 
 }

@@ -8,6 +8,7 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
+#include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
@@ -40,10 +41,107 @@ const AssetPackResolver& asset_pack_resolver() {
     return resolver;
 }
 
+stbi_uc* load_image_rgba_file(const std::string& path, int* width, int* height, int* channels) {
+#ifdef __ANDROID__
+    std::size_t file_size = 0;
+    void* file_data = SDL_LoadFile(path.c_str(), &file_size);
+    if (file_data == nullptr) {
+        return nullptr;
+    }
+    stbi_uc* pixels = stbi_load_from_memory(
+        static_cast<const stbi_uc*>(file_data),
+        static_cast<int>(file_size),
+        width,
+        height,
+        channels,
+        STBI_rgb_alpha
+    );
+    SDL_free(file_data);
+    return pixels;
+#else
+    return stbi_load(path.c_str(), width, height, channels, STBI_rgb_alpha);
+#endif
+}
+
+std::vector<unsigned char> load_binary_asset_file(const std::string& path) {
+#ifdef __ANDROID__
+    std::size_t file_size = 0;
+    void* file_data = SDL_LoadFile(path.c_str(), &file_size);
+    if (file_data == nullptr) {
+        return {};
+    }
+    const auto* bytes = static_cast<const unsigned char*>(file_data);
+    std::vector<unsigned char> buffer(bytes, bytes + file_size);
+    SDL_free(file_data);
+    return buffer;
+#else
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return {};
+    }
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+#endif
+}
+
 struct QueueFamilySelection {
     std::optional<std::uint32_t> graphics_family;
     std::optional<std::uint32_t> present_family;
 };
+
+const char* vk_result_name(VkResult result) {
+    switch (result) {
+    case VK_SUCCESS: return "VK_SUCCESS";
+    case VK_NOT_READY: return "VK_NOT_READY";
+    case VK_TIMEOUT: return "VK_TIMEOUT";
+    case VK_EVENT_SET: return "VK_EVENT_SET";
+    case VK_EVENT_RESET: return "VK_EVENT_RESET";
+    case VK_INCOMPLETE: return "VK_INCOMPLETE";
+    case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+    case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+    case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+    case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+    case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED";
+    case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
+    case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+    case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
+    case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+    case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
+    case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+    case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
+    case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR";
+    case VK_SUBOPTIMAL_KHR: return "VK_SUBOPTIMAL_KHR";
+    case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
+    default: return "VK_UNKNOWN_RESULT";
+    }
+}
+
+bool instance_extension_available(const char* name) {
+    std::uint32_t count = 0;
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr) != VK_SUCCESS) {
+        return false;
+    }
+    std::vector<VkExtensionProperties> extensions(count);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &count, extensions.data()) != VK_SUCCESS) {
+        return false;
+    }
+    return std::any_of(extensions.begin(), extensions.end(), [name](const VkExtensionProperties& extension) {
+        return std::strcmp(extension.extensionName, name) == 0;
+    });
+}
+
+bool instance_layer_available(const char* name) {
+    std::uint32_t count = 0;
+    if (vkEnumerateInstanceLayerProperties(&count, nullptr) != VK_SUCCESS) {
+        return false;
+    }
+    std::vector<VkLayerProperties> layers(count);
+    if (vkEnumerateInstanceLayerProperties(&count, layers.data()) != VK_SUCCESS) {
+        return false;
+    }
+    return std::any_of(layers.begin(), layers.end(), [name](const VkLayerProperties& layer) {
+        return std::strcmp(layer.layerName, name) == 0;
+    });
+}
 
 struct ClipPoint {
     float x {0.0f};
@@ -264,7 +362,73 @@ VkSurfaceFormatKHR choose_surface_format(const std::vector<VkSurfaceFormatKHR>& 
             return format;
         }
     }
+    for (const auto& format : formats) {
+        if (format.format == VK_FORMAT_R8G8B8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return format;
+        }
+    }
+    for (const auto& format : formats) {
+        if (format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR &&
+            (format.format == VK_FORMAT_A8B8G8R8_SRGB_PACK32 ||
+                format.format == VK_FORMAT_B8G8R8_SRGB ||
+                format.format == VK_FORMAT_R8G8B8_SRGB)) {
+            return format;
+        }
+    }
+    for (const auto& format : formats) {
+        if (format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return format;
+        }
+    }
     return formats.front();
+}
+
+bool is_srgb_format(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_R8_SRGB:
+    case VK_FORMAT_R8G8_SRGB:
+    case VK_FORMAT_R8G8B8_SRGB:
+    case VK_FORMAT_B8G8R8_SRGB:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
+    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
+    case VK_FORMAT_BC2_SRGB_BLOCK:
+    case VK_FORMAT_BC3_SRGB_BLOCK:
+    case VK_FORMAT_BC7_SRGB_BLOCK:
+        return true;
+    default:
+        return false;
+    }
+}
+
+const char* vulkan_format_name(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_B8G8R8A8_SRGB: return "VK_FORMAT_B8G8R8A8_SRGB";
+    case VK_FORMAT_R8G8B8A8_SRGB: return "VK_FORMAT_R8G8B8A8_SRGB";
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32: return "VK_FORMAT_A8B8G8R8_SRGB_PACK32";
+    case VK_FORMAT_B8G8R8A8_UNORM: return "VK_FORMAT_B8G8R8A8_UNORM";
+    case VK_FORMAT_R8G8B8A8_UNORM: return "VK_FORMAT_R8G8B8A8_UNORM";
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32: return "VK_FORMAT_A8B8G8R8_UNORM_PACK32";
+    case VK_FORMAT_R8G8B8_SRGB: return "VK_FORMAT_R8G8B8_SRGB";
+    case VK_FORMAT_B8G8R8_SRGB: return "VK_FORMAT_B8G8R8_SRGB";
+    default: return "VK_FORMAT_OTHER";
+    }
+}
+
+const char* vulkan_color_space_name(VkColorSpaceKHR color_space) {
+    switch (color_space) {
+    case VK_COLOR_SPACE_SRGB_NONLINEAR_KHR: return "VK_COLOR_SPACE_SRGB_NONLINEAR_KHR";
+    case VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT: return "VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT";
+    case VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT: return "VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT";
+    case VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT: return "VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT";
+    case VK_COLOR_SPACE_DCI_P3_NONLINEAR_EXT: return "VK_COLOR_SPACE_DCI_P3_NONLINEAR_EXT";
+    case VK_COLOR_SPACE_BT709_LINEAR_EXT: return "VK_COLOR_SPACE_BT709_LINEAR_EXT";
+    case VK_COLOR_SPACE_BT709_NONLINEAR_EXT: return "VK_COLOR_SPACE_BT709_NONLINEAR_EXT";
+    case VK_COLOR_SPACE_HDR10_ST2084_EXT: return "VK_COLOR_SPACE_HDR10_ST2084_EXT";
+    default: return "VK_COLOR_SPACE_OTHER";
+    }
 }
 
 VkPresentModeKHR choose_present_mode(const std::vector<VkPresentModeKHR>& modes) {
@@ -290,6 +454,35 @@ VkExtent2D choose_extent(const VkSurfaceCapabilitiesKHR& capabilities, std::uint
         std::clamp(preferred_width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
         std::clamp(preferred_height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
     };
+}
+
+VkSurfaceTransformFlagBitsKHR choose_pre_transform(const VkSurfaceCapabilitiesKHR& capabilities) {
+    if ((capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0) {
+        return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    }
+    return capabilities.currentTransform;
+}
+
+const char* surface_transform_name(VkSurfaceTransformFlagBitsKHR transform) {
+    switch (transform) {
+    case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR: return "IDENTITY";
+    case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: return "ROTATE_90";
+    case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: return "ROTATE_180";
+    case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: return "ROTATE_270";
+    case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR: return "HORIZONTAL_MIRROR";
+    case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR: return "HORIZONTAL_MIRROR_ROTATE_90";
+    case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR: return "HORIZONTAL_MIRROR_ROTATE_180";
+    case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR: return "HORIZONTAL_MIRROR_ROTATE_270";
+    case VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR: return "INHERIT";
+    default: return "UNKNOWN";
+    }
+}
+
+VkExtent2D landscape_extent(VkExtent2D extent) {
+    if (extent.height > extent.width) {
+        std::swap(extent.width, extent.height);
+    }
+    return extent;
 }
 
 QueueFamilySelection find_queue_families(VkPhysicalDevice device, VkSurfaceKHR surface) {
@@ -802,8 +995,9 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
         logged_push_constant_size_ = true;
     }
     recreate_swapchain_if_needed();
-    if (dynamic_hud_extent_.width != swapchain_extent_.width || dynamic_hud_extent_.height != swapchain_extent_.height) {
-        dynamic_hud_extent_ = swapchain_extent_;
+    const VkExtent2D hud_extent = logical_extent();
+    if (dynamic_hud_extent_.width != hud_extent.width || dynamic_hud_extent_.height != hud_extent.height) {
+        dynamic_hud_extent_ = hud_extent;
         mark_dynamic_hud_dirty();
     }
 
@@ -1482,7 +1676,11 @@ bool Renderer::create_instance() {
 
     std::vector<const char*> extensions(required_extensions, required_extensions + extension_count);
 #ifndef NDEBUG
-    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (instance_extension_available(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    } else {
+        log_message(LogLevel::Info, "Renderer: VK_EXT_debug_utils unavailable, continuing without it");
+    }
 #endif
 
     VkApplicationInfo app_info {VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -1490,11 +1688,15 @@ bool Renderer::create_instance() {
     app_info.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
     app_info.pEngineName = "minecraft_legacy";
     app_info.engineVersion = VK_MAKE_VERSION(0, 1, 0);
-    app_info.apiVersion = VK_API_VERSION_1_3;
+    app_info.apiVersion = VK_API_VERSION_1_1;
 
     std::vector<const char*> layers {};
 #ifndef NDEBUG
-    layers.push_back("VK_LAYER_KHRONOS_validation");
+    if (instance_layer_available("VK_LAYER_KHRONOS_validation")) {
+        layers.push_back("VK_LAYER_KHRONOS_validation");
+    } else {
+        log_message(LogLevel::Info, "Renderer: VK_LAYER_KHRONOS_validation unavailable, continuing without it");
+    }
 #endif
 
     VkInstanceCreateInfo create_info {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -1504,7 +1706,12 @@ bool Renderer::create_instance() {
     create_info.enabledLayerCount = static_cast<std::uint32_t>(layers.size());
     create_info.ppEnabledLayerNames = layers.data();
 
-    return vkCreateInstance(&create_info, nullptr, &instance_) == VK_SUCCESS;
+    const VkResult result = vkCreateInstance(&create_info, nullptr, &instance_);
+    if (result != VK_SUCCESS) {
+        log_message(LogLevel::Error, std::string("Renderer: vkCreateInstance failed: ") + vk_result_name(result));
+        return false;
+    }
+    return true;
 }
 
 bool Renderer::create_surface(const PlatformWindow& window) {
@@ -1593,6 +1800,15 @@ bool Renderer::create_swapchain() {
     vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device_, surface_, &format_count, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(format_count);
     vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device_, surface_, &format_count, formats.data());
+    for (const auto& format : formats) {
+        log_message(
+            LogLevel::Info,
+            std::string("Renderer: available surface format=") + vulkan_format_name(format.format) +
+                "(" + std::to_string(static_cast<int>(format.format)) + ")" +
+                " colorSpace=" + vulkan_color_space_name(format.colorSpace) +
+                "(" + std::to_string(static_cast<int>(format.colorSpace)) + ")"
+        );
+    }
 
     std::uint32_t present_mode_count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_, surface_, &present_mode_count, nullptr);
@@ -1602,6 +1818,7 @@ bool Renderer::create_swapchain() {
     const VkSurfaceFormatKHR surface_format = choose_surface_format(formats);
     const VkPresentModeKHR present_mode = choose_present_mode(present_modes);
     const VkExtent2D extent = current_surface_extent(capabilities);
+    const VkSurfaceTransformFlagBitsKHR pre_transform = choose_pre_transform(capabilities);
 
     std::uint32_t image_count = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount) {
@@ -1632,7 +1849,7 @@ bool Renderer::create_swapchain() {
     } else {
         create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
-    create_info.preTransform = capabilities.currentTransform;
+    create_info.preTransform = pre_transform;
     create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     create_info.presentMode = present_mode;
     create_info.clipped = VK_TRUE;
@@ -1646,7 +1863,10 @@ bool Renderer::create_swapchain() {
     vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, swapchain_images_.data());
 
     swapchain_format_ = surface_format.format;
+    swapchain_srgb_ = is_srgb_format(surface_format.format) && surface_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     swapchain_extent_ = extent;
+    logical_extent_ = landscape_extent(extent);
+    swapchain_pre_transform_ = pre_transform;
 
     viewport_ = {
         0.0f,
@@ -1658,6 +1878,19 @@ bool Renderer::create_swapchain() {
     };
     scissor_.offset = {0, 0};
     scissor_.extent = swapchain_extent_;
+
+    log_message(
+        LogLevel::Info,
+        std::string("Renderer: surface currentTransform=") + surface_transform_name(capabilities.currentTransform) +
+            " preTransform=" + surface_transform_name(swapchain_pre_transform_) +
+            " selectedFormat=" + vulkan_format_name(surface_format.format) +
+            "(" + std::to_string(static_cast<int>(surface_format.format)) + ")" +
+            " colorSpace=" + vulkan_color_space_name(surface_format.colorSpace) +
+            "(" + std::to_string(static_cast<int>(surface_format.colorSpace)) + ")" +
+            " swapchain_srgb=" + (swapchain_srgb_ ? "true" : "false") +
+            " swapchain=" + std::to_string(swapchain_extent_.width) + "x" + std::to_string(swapchain_extent_.height) +
+            " logical=" + std::to_string(logical_extent_.width) + "x" + std::to_string(logical_extent_.height)
+    );
 
     return true;
 }
@@ -1950,6 +2183,19 @@ bool Renderer::create_graphics_pipeline(
     fragment_stage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragment_stage.module = fragment_module;
     fragment_stage.pName = "main";
+    const VkBool32 encode_srgb_output = swapchain_srgb_ ? VK_FALSE : VK_TRUE;
+    const VkSpecializationMapEntry srgb_map_entry {
+        0,
+        0,
+        sizeof(VkBool32)
+    };
+    const VkSpecializationInfo srgb_specialization {
+        1,
+        &srgb_map_entry,
+        sizeof(VkBool32),
+        &encode_srgb_output
+    };
+    fragment_stage.pSpecializationInfo = &srgb_specialization;
 
     std::array shader_stages = {vertex_stage, fragment_stage};
 
@@ -2186,6 +2432,13 @@ VkExtent2D Renderer::current_surface_extent(const VkSurfaceCapabilitiesKHR& capa
     return choose_extent(capabilities, preferred_width, preferred_height);
 }
 
+VkExtent2D Renderer::logical_extent() const {
+    if (logical_extent_.width != 0 && logical_extent_.height != 0) {
+        return logical_extent_;
+    }
+    return landscape_extent(swapchain_extent_);
+}
+
 bool Renderer::recreate_swapchain_if_needed() {
     if (device_ == VK_NULL_HANDLE || surface_ == VK_NULL_HANDLE) {
         return false;
@@ -2211,7 +2464,8 @@ bool Renderer::recreate_swapchain_if_needed() {
     mark_dynamic_hud_dirty();
     log_message(
         LogLevel::Info,
-        std::string("Renderer: swapchain resized to ") + std::to_string(swapchain_extent_.width) + "x" + std::to_string(swapchain_extent_.height)
+        std::string("Renderer: swapchain resized to ") + std::to_string(swapchain_extent_.width) + "x" + std::to_string(swapchain_extent_.height) +
+            " logical=" + std::to_string(logical_extent_.width) + "x" + std::to_string(logical_extent_.height)
     );
     return true;
 }
@@ -2405,6 +2659,18 @@ VkShaderModule Renderer::create_shader_module(const std::vector<char>& code) con
 }
 
 std::vector<char> Renderer::read_binary_file(const std::string& path) const {
+#ifdef __ANDROID__
+    std::size_t file_size = 0;
+    void* file_data = SDL_LoadFile(path.c_str(), &file_size);
+    if (file_data == nullptr) {
+        log_message(LogLevel::Error, "Renderer: failed to open shader file at " + path + ": " + SDL_GetError());
+        return {};
+    }
+    const auto* bytes = static_cast<const char*>(file_data);
+    std::vector<char> buffer(bytes, bytes + file_size);
+    SDL_free(file_data);
+    return buffer;
+#else
 #ifdef _WIN32
     const int wide_length = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring wide_path(static_cast<std::size_t>(wide_length > 0 ? wide_length : 0), L'\0');
@@ -2428,6 +2694,7 @@ std::vector<char> Renderer::read_binary_file(const std::string& path) const {
     std::vector<char> buffer(static_cast<std::size_t>(size));
     file.read(buffer.data(), size);
     return buffer;
+#endif
 }
 
 Aabb Renderer::chunk_bounds(ChunkCoord coord) const {
@@ -2591,12 +2858,13 @@ void Renderer::update_target_block_outline_buffer() {
 }
 
 void Renderer::update_crosshair_buffer() {
+    const VkExtent2D extent = logical_extent();
     const Vec3 color {1.0f, 1.0f, 1.0f};
-    const float pixel_to_ndc_x = swapchain_extent_.width > 0
-        ? 2.0f / static_cast<float>(swapchain_extent_.width)
+    const float pixel_to_ndc_x = extent.width > 0
+        ? 2.0f / static_cast<float>(extent.width)
         : 0.0f;
-    const float pixel_to_ndc_y = swapchain_extent_.height > 0
-        ? 2.0f / static_cast<float>(swapchain_extent_.height)
+    const float pixel_to_ndc_y = extent.height > 0
+        ? 2.0f / static_cast<float>(extent.height)
         : 0.0f;
     const float arm_x = 7.0f * pixel_to_ndc_x;
     const float arm_y = 7.0f * pixel_to_ndc_y;
@@ -2623,7 +2891,8 @@ void Renderer::update_hotbar_buffer() {
     hotbar_outline_vertex_count_ = 0;
     hotbar_texture_vertex_count_ = 0;
 
-    if (hotbar_slot_count_ == 0 || swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+    const VkExtent2D extent = logical_extent();
+    if (hotbar_slot_count_ == 0 || extent.width == 0 || extent.height == 0) {
         return;
     }
 
@@ -2635,8 +2904,8 @@ void Renderer::update_hotbar_buffer() {
     constexpr float bottom_margin = 24.0f;
     constexpr float atlas_width = 204.0f;
     constexpr float atlas_height = 24.0f;
-    const float width = static_cast<float>(swapchain_extent_.width);
-    const float height = static_cast<float>(swapchain_extent_.height);
+    const float width = static_cast<float>(extent.width);
+    const float height = static_cast<float>(extent.height);
     const float total_width = static_cast<float>(hotbar_slot_count_) * slot_width;
     const float start_x = (width - total_width) * 0.5f;
     const float top = height - bottom_margin - slot_height;
@@ -2679,12 +2948,13 @@ void Renderer::update_hotbar_buffer() {
 
 void Renderer::update_debug_hud_buffer() {
     debug_hud_vertex_count_ = 0;
-    if (!debug_hud_enabled_ || swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+    const VkExtent2D extent = logical_extent();
+    if (!debug_hud_enabled_ || extent.width == 0 || extent.height == 0) {
         return;
     }
 
-    const float width = static_cast<float>(swapchain_extent_.width);
-    const float height = static_cast<float>(swapchain_extent_.height);
+    const float width = static_cast<float>(extent.width);
+    const float height = static_cast<float>(extent.height);
     const float left = 18.0f;
     const float top = height - 32.0f;
     const float scale = 2.0f;
@@ -2866,12 +3136,13 @@ void Renderer::draw_crosshair(const FrameResources& frame) {
 void Renderer::update_startup_splash_buffers(float time_seconds, float fade_multiplier) {
     startup_splash_vertex_count_ = 0;
     startup_splash_background_vertex_count_ = 0;
-    if (swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+    const VkExtent2D extent = logical_extent();
+    if (extent.width == 0 || extent.height == 0) {
         return;
     }
 
-    const float width = static_cast<float>(swapchain_extent_.width);
-    const float height = static_cast<float>(swapchain_extent_.height);
+    const float width = static_cast<float>(extent.width);
+    const float height = static_cast<float>(extent.height);
 
     std::vector<Vertex> background_vertices;
     background_vertices.reserve(6);
@@ -2942,12 +3213,13 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
     menu_overlay_vertex_count_ = 0;
     menu_text_vertex_count_ = 0;
     menu_font_vertex_count_ = 0;
-    if (swapchain_extent_.width == 0 || swapchain_extent_.height == 0) {
+    const VkExtent2D extent = logical_extent();
+    if (extent.width == 0 || extent.height == 0) {
         return;
     }
 
-    const float width = static_cast<float>(swapchain_extent_.width);
-    const float height = static_cast<float>(swapchain_extent_.height);
+    const float width = static_cast<float>(extent.width);
+    const float height = static_cast<float>(extent.height);
     const float scale = menu_layout_scale(width, height);
     const float ui_origin_x = (width - kMenuVirtualWidth * scale) * 0.5f;
     const float ui_origin_y = (height - kMenuVirtualHeight * scale) * 0.5f;
@@ -3136,7 +3408,7 @@ bool Renderer::load_textures() {
     for (int i = 0; i < array_layers; ++i) {
         const std::string resolved_path = asset_pack_resolver().resolve_file_utf8(texture_paths[static_cast<std::size_t>(i)]);
         int width, height, channels;
-        stbi_uc* pixels = stbi_load(resolved_path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        stbi_uc* pixels = load_image_rgba_file(resolved_path, &width, &height, &channels);
         if (!pixels) {
             log_message(LogLevel::Error, "Renderer: failed to load block texture " + texture_paths[static_cast<std::size_t>(i)] + " at " + resolved_path);
             vkUnmapMemory(device_, staging_buffer.memory);
@@ -3357,7 +3629,7 @@ bool Renderer::load_ui_textures() {
         int width = 0;
         int height = 0;
         int channels = 0;
-        stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        stbi_uc* pixels = load_image_rgba_file(path, &width, &height, &channels);
         if (pixels == nullptr) {
             log_message(LogLevel::Error, "Renderer: failed to load UI texture " + relative_path + " at " + path);
             return false;
@@ -3595,7 +3867,7 @@ bool Renderer::load_menu_texture(const std::string& path, bool repeat, bool pixe
     int width = 0;
     int height = 0;
     int channels = 0;
-    stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+    stbi_uc* pixels = load_image_rgba_file(path, &width, &height, &channels);
     if (pixels == nullptr || width <= 0 || height <= 0) {
         log_message(LogLevel::Error, "Renderer: failed to load menu texture " + path);
         return false;
@@ -4081,13 +4353,11 @@ bool Renderer::load_menu_texture_from_rgba(const std::vector<std::uint8_t>& pixe
 
 bool Renderer::load_menu_font() {
     const std::string font_path = asset_pack_resolver().resolve_file_utf8("fonts/RU/minecraft.ttf");
-    std::ifstream file(font_path, std::ios::binary);
-    if (!file) {
+    std::vector<unsigned char> ttf_buffer = load_binary_asset_file(font_path);
+    if (ttf_buffer.empty()) {
         log_message(LogLevel::Error, "Renderer: failed to open fonts/RU/minecraft.ttf at " + font_path);
         return false;
     }
-    
-    std::vector<unsigned char> ttf_buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     log_message(LogLevel::Info, "Renderer: loaded minecraft.ttf, size: " + std::to_string(ttf_buffer.size()) + " bytes");
     
     const float pixel_height = 64.0f;

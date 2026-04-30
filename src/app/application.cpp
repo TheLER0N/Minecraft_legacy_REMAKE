@@ -181,7 +181,7 @@ bool Application::initialize() {
 
 void Application::start_world() {
     if (world_streamer_ == nullptr) {
-        world_save_ = std::make_unique<WorldSave>(std::filesystem::path("saves") / "default");
+        world_save_ = std::make_unique<WorldSave>(platform_.save_root_directory() / "default");
         const WorldMetadata metadata = world_save_->load_or_create_metadata();
         world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, 6, world_save_.get());
         world_streamer_->set_leaves_render_mode(leaves_render_mode_);
@@ -397,10 +397,7 @@ int Application::run() {
             continue;
         }
 
-        if (input.gamepad_start_pressed) {
-            platform_.set_mouse_capture(!input.capture_mouse);
-        }
-        if (input.escape_pressed) {
+        if (input.escape_pressed || input.gamepad_start_pressed) {
             world_streamer_->flush_dirty_chunks(8);
             platform_.set_mouse_capture(false);
             platform_.start_menu_music();

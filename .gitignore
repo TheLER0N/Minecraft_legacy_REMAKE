@@ -1,6 +1,12 @@
 /build/
+/.gradle/
 /.vs/
 /out/
+local.properties
+/android/app/.cxx/
+/android/app/build/
+/.idea/
+/minecraft_legacy_release/saves/
 *.user
 *.suo
 *.pdb

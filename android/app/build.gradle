@@ -1,0 +1,50 @@
+plugins {
+    id "com.android.application"
+}
+
+def androidSdkRoot = "C:/Users/Пользователь/AppData/Local/Android/Sdk"
+def generatedAssetsDir = layout.buildDirectory.dir("generated/assets").get().asFile
+def sdlSourceDir = file("../../build/windows-msvc-debug/_deps/sdl3-src")
+
+android {
+    namespace "com.minecraftlegacy.app"
+    compileSdk 36
+    ndkVersion "30.0.14904198"
+
+    defaultConfig {
+        applicationId "com.minecraftlegacy.app"
+        minSdk 29
+        targetSdk 36
+        versionCode 1
+        versionName "0.1.0-debug"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++20"
+                arguments "-DANDROID_PLATFORM=android-29",
+                          "-DANDROID_STL=c++_static",
+                          "-DMINECRAFT_LEGACY_FETCH_SDL3=ON",
+                          "-DMINECRAFT_LEGACY_ANDROID_ASSET_DIR=${generatedAssetsDir.absolutePath.replace("\\", "/")}"
+                if (sdlSourceDir.exists()) {
+                    arguments "-DFETCHCONTENT_SOURCE_DIR_SDL3=${sdlSourceDir.absolutePath.replace("\\", "/")}"
+                }
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file("../../CMakeLists.txt")
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs = [file("../../assets"), generatedAssetsDir]
+        }
+    }
+}
