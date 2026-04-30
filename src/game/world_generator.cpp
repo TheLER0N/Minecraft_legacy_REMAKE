@@ -1092,6 +1092,53 @@ ChunkMesh build_mesh_from_sampler(
     return mesh;
 }
 
+BlockId sample_block_for_mesh(const ChunkData& chunk_data, const ChunkMeshNeighbors& neighbors, int x, int y, int z) {
+    if (y < 0 || y >= kChunkHeight) {
+        return BlockId::Air;
+    }
+    if (x < 0 && z < 0) {
+        return neighbors.northwest != nullptr
+            ? neighbors.northwest->get(y)
+            : BlockId::Air;
+    }
+    if (x >= kChunkWidth && z < 0) {
+        return neighbors.northeast != nullptr
+            ? neighbors.northeast->get(y)
+            : BlockId::Air;
+    }
+    if (x < 0 && z >= kChunkDepth) {
+        return neighbors.southwest != nullptr
+            ? neighbors.southwest->get(y)
+            : BlockId::Air;
+    }
+    if (x >= kChunkWidth && z >= kChunkDepth) {
+        return neighbors.southeast != nullptr
+            ? neighbors.southeast->get(y)
+            : BlockId::Air;
+    }
+    if (x < 0) {
+        return neighbors.west != nullptr && z >= 0 && z < kChunkDepth
+            ? neighbors.west->get(y, z)
+            : BlockId::Air;
+    }
+    if (x >= kChunkWidth) {
+        return neighbors.east != nullptr && z >= 0 && z < kChunkDepth
+            ? neighbors.east->get(y, z)
+            : BlockId::Air;
+    }
+    if (z < 0) {
+        return neighbors.north != nullptr && x >= 0 && x < kChunkWidth
+            ? neighbors.north->get(x, y)
+            : BlockId::Air;
+    }
+    if (z >= kChunkDepth) {
+        return neighbors.south != nullptr && x >= 0 && x < kChunkWidth
+            ? neighbors.south->get(x, y)
+            : BlockId::Air;
+    }
+    return chunk_data.get(x, y, z);
+}
+
 void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     static bool checked = false;
     if (checked) {
@@ -1241,6 +1288,61 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     assert(seam_neighbor_faces == 5);
     assert(seam_neighbor_mesh.opaque_mesh.vertices.size() == 20);
     assert(seam_neighbor_mesh.opaque_mesh.indices.size() == 30);
+
+    ChunkSideBorderX seam_east_border {};
+    for (int y = 0; y < kChunkHeight; ++y) {
+        for (int z = 0; z < kChunkDepth; ++z) {
+            seam_east_border.blocks[static_cast<std::size_t>(z + y * kChunkDepth)] = seam_right.get(0, y, z);
+        }
+    }
+    const ChunkMeshNeighbors seam_neighbors {
+        nullptr,
+        &seam_east_border,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr
+    };
+    std::size_t seam_neighbor_mesh_faces = 0;
+    const ChunkMesh seam_neighbor_mesh_from_snapshot = build_mesh_from_sampler(
+        [&](int x, int y, int z) {
+            return sample_block_for_mesh(seam_left, seam_neighbors, x, y, z);
+        },
+        block_registry,
+        LeavesRenderMode::Fancy,
+        &seam_neighbor_mesh_faces
+    );
+    assert(seam_neighbor_mesh_faces == 5);
+    assert(seam_neighbor_mesh_from_snapshot.opaque_mesh.vertices.size() == 20);
+    assert(seam_neighbor_mesh_from_snapshot.opaque_mesh.indices.size() == 30);
+
+    ChunkData diagonal_ao_chunk {};
+    diagonal_ao_chunk.set(0, 0, 0, BlockId::Stone);
+    ChunkCornerBorder northwest_corner {};
+    northwest_corner.blocks[1] = BlockId::Stone;
+    const ChunkMeshNeighbors diagonal_ao_neighbors {
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        &northwest_corner,
+        nullptr,
+        nullptr,
+        nullptr
+    };
+    const ChunkMesh diagonal_without_neighbor = build_chunk_mesh(diagonal_ao_chunk, {}, block_registry, {}, LeavesRenderMode::Fancy);
+    const ChunkMesh diagonal_with_neighbor = build_chunk_mesh(diagonal_ao_chunk, {}, block_registry, diagonal_ao_neighbors, LeavesRenderMode::Fancy);
+    const auto color_sum = [](const ChunkMesh& mesh) {
+        float sum = 0.0f;
+        for (const Vertex& vertex : mesh.opaque_mesh.vertices) {
+            sum += vertex.color.x + vertex.color.y + vertex.color.z;
+        }
+        return sum;
+    };
+    assert(diagonal_with_neighbor.opaque_mesh.indices.size() == diagonal_without_neighbor.opaque_mesh.indices.size());
+    assert(color_sum(diagonal_with_neighbor) < color_sum(diagonal_without_neighbor));
 
     ChunkData leaves_pair {};
     leaves_pair.set(0, 0, 0, BlockId::OakLeaves);
@@ -1805,50 +1907,7 @@ ChunkMesh build_chunk_mesh(
     run_mesh_builder_self_check(block_registry);
 
     const auto sample = [&](int x, int y, int z) -> BlockId {
-        if (y < 0 || y >= kChunkHeight) {
-            return BlockId::Air;
-        }
-        if (x < 0 && z < 0) {
-            return neighbors.northwest != nullptr
-                ? neighbors.northwest->get(y)
-                : BlockId::Air;
-        }
-        if (x >= kChunkWidth && z < 0) {
-            return neighbors.northeast != nullptr
-                ? neighbors.northeast->get(y)
-                : BlockId::Air;
-        }
-        if (x < 0 && z >= kChunkDepth) {
-            return neighbors.southwest != nullptr
-                ? neighbors.southwest->get(y)
-                : BlockId::Air;
-        }
-        if (x >= kChunkWidth && z >= kChunkDepth) {
-            return neighbors.southeast != nullptr
-                ? neighbors.southeast->get(y)
-                : BlockId::Air;
-        }
-        if (x < 0) {
-            return neighbors.west != nullptr && z >= 0 && z < kChunkDepth
-                ? neighbors.west->get(y, z)
-                : BlockId::Air;
-        }
-        if (x >= kChunkWidth) {
-            return neighbors.east != nullptr && z >= 0 && z < kChunkDepth
-                ? neighbors.east->get(y, z)
-                : BlockId::Air;
-        }
-        if (z < 0) {
-            return neighbors.north != nullptr
-                ? neighbors.north->get(x, y)
-                : BlockId::Air;
-        }
-        if (z >= kChunkDepth) {
-            return neighbors.south != nullptr
-                ? neighbors.south->get(x, y)
-                : BlockId::Air;
-        }
-        return chunk_data.get(x, y, z);
+        return sample_block_for_mesh(chunk_data, neighbors, x, y, z);
     };
 
     return build_mesh_from_sampler(sample, block_registry, leaves_mode);

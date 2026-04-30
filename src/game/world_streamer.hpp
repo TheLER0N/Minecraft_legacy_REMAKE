@@ -147,6 +147,7 @@ private:
     void queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data);
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
+    void queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
     void mark_chunk_dirty_for_save(ChunkCoord coord);
     void enqueue_dirty_save(ChunkCoord coord);
     std::optional<ChunkMeshSnapshot> make_rebuild_snapshot(ChunkCoord coord) const;

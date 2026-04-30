@@ -348,11 +348,7 @@ void WorldStreamer::tick_generation_jobs() {
             it->second.dirty_mesh = true;
             visible_chunks_.push_back({result.coord});
 
-            queue_rebuild_job_if_loaded_locked(result.coord);
-            queue_rebuild_job_if_loaded_locked({result.coord.x - 1, result.coord.z});
-            queue_rebuild_job_if_loaded_locked({result.coord.x + 1, result.coord.z});
-            queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z - 1});
-            queue_rebuild_job_if_loaded_locked({result.coord.x, result.coord.z + 1});
+            queue_rebuild_self_and_neighbors_if_loaded_locked(result.coord, true);
             continue;
         }
 
@@ -661,17 +657,33 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
     chunk_it->second.mesh_version = next_chunk_version_++;
     mark_chunk_dirty_for_save(chunk_coord);
     queue_rebuild_job_if_loaded(chunk_coord);
-    if (local_x == 0) {
+    const bool touches_west = local_x == 0;
+    const bool touches_east = local_x == kChunkWidth - 1;
+    const bool touches_north = local_z == 0;
+    const bool touches_south = local_z == kChunkDepth - 1;
+    if (touches_west) {
         queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
     }
-    if (local_x == kChunkWidth - 1) {
+    if (touches_east) {
         queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
     }
-    if (local_z == 0) {
+    if (touches_north) {
         queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z - 1});
     }
-    if (local_z == kChunkDepth - 1) {
+    if (touches_south) {
         queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z + 1});
+    }
+    if (touches_west && touches_north) {
+        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z - 1});
+    }
+    if (touches_east && touches_north) {
+        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z - 1});
+    }
+    if (touches_west && touches_south) {
+        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z + 1});
+    }
+    if (touches_east && touches_south) {
+        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z + 1});
     }
 
     return SetBlockResult::Success;
@@ -933,6 +945,21 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
     }
     push_job_locked({coord, snapshot->version, state.serial, ChunkJobType::BuildMesh, std::nullopt, std::move(snapshot)});
     cv_.notify_one();
+}
+
+void WorldStreamer::queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals) {
+    queue_rebuild_job_if_loaded_locked(coord);
+    queue_rebuild_job_if_loaded_locked({coord.x - 1, coord.z});
+    queue_rebuild_job_if_loaded_locked({coord.x + 1, coord.z});
+    queue_rebuild_job_if_loaded_locked({coord.x, coord.z - 1});
+    queue_rebuild_job_if_loaded_locked({coord.x, coord.z + 1});
+    if (!include_diagonals) {
+        return;
+    }
+    queue_rebuild_job_if_loaded_locked({coord.x - 1, coord.z - 1});
+    queue_rebuild_job_if_loaded_locked({coord.x + 1, coord.z - 1});
+    queue_rebuild_job_if_loaded_locked({coord.x - 1, coord.z + 1});
+    queue_rebuild_job_if_loaded_locked({coord.x + 1, coord.z + 1});
 }
 
 std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snapshot(ChunkCoord coord) const {
