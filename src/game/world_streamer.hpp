@@ -30,12 +30,20 @@ public:
         std::size_t queued_decorates {0};
         std::size_t queued_lights {0};
         std::size_t queued_meshes {0};
+        std::size_t queued_fast_meshes {0};
+        std::size_t queued_final_meshes {0};
         std::size_t pending_upload_bytes {0};
         std::size_t stale_results {0};
         std::size_t stale_uploads {0};
+        std::size_t provisional_uploads {0};
+        std::size_t light_stale_results {0};
+        std::size_t edge_fixups {0};
         std::size_t dropped_jobs {0};
         std::size_t dirty_save_chunks {0};
+        bool observer_light_borders_ready {false};
+        int observer_light_border_status {0};
         float last_generate_ms {0.0f};
+        float last_light_ms {0.0f};
         float last_mesh_ms {0.0f};
     };
 
@@ -85,6 +93,16 @@ private:
         std::optional<ChunkCornerBorder> northeast {};
         std::optional<ChunkCornerBorder> southwest {};
         std::optional<ChunkCornerBorder> southeast {};
+        ChunkLight light {};
+        std::optional<ChunkLightSideBorderX> light_west {};
+        std::optional<ChunkLightSideBorderX> light_east {};
+        std::optional<ChunkLightSideBorderZ> light_north {};
+        std::optional<ChunkLightSideBorderZ> light_south {};
+        std::optional<ChunkLightCornerBorder> light_northwest {};
+        std::optional<ChunkLightCornerBorder> light_northeast {};
+        std::optional<ChunkLightCornerBorder> light_southwest {};
+        std::optional<ChunkLightCornerBorder> light_southeast {};
+        bool provisional {true};
     };
 
     struct ChunkJob {
@@ -94,6 +112,7 @@ private:
         ChunkJobType type {ChunkJobType::GenerateTerrain};
         std::optional<ChunkData> chunk_data {};
         std::shared_ptr<ChunkMeshSnapshot> snapshot {};
+        std::shared_ptr<LightBuildSnapshot> light_snapshot {};
     };
 
     struct JobResult {
@@ -103,9 +122,12 @@ private:
         ChunkJobType type {ChunkJobType::GenerateTerrain};
         bool stale_rebuild {false};
         float generate_ms {0.0f};
+        float light_ms {0.0f};
         float mesh_ms {0.0f};
         std::optional<ChunkData> chunk_data {};
+        std::optional<ChunkLight> light {};
         ChunkMesh mesh {};
+        bool provisional {false};
     };
 
     enum class ChunkState {
@@ -113,6 +135,11 @@ private:
         Requested,
         TerrainGenerated,
         Decorated,
+        WaitingForNeighbors,
+        VerticalSkyReady,
+        LightPropagating,
+        EdgeCheckPending,
+        LightReady,
         LightCalculated,
         MeshQueued,
         MeshBuilt,
@@ -129,8 +156,11 @@ private:
         std::uint64_t last_touched_frame {0};
         bool uploaded_to_gpu {false};
         bool dirty_mesh {false};
+        bool dirty_light {false};
+        bool provisional_mesh {false};
         bool dirty_save {false};
         std::optional<ChunkData> data {};
+        std::optional<ChunkLight> light {};
     };
 
     struct RebuildState {
@@ -148,14 +178,19 @@ private:
     void push_job_locked(ChunkJob&& job);
     void queue_generate_job(ChunkCoord coord, std::uint64_t version);
     void queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data);
+    void queue_light_job_if_loaded(ChunkCoord coord);
+    void queue_light_job_if_loaded_locked(ChunkCoord coord);
+    void queue_light_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
     void queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
     void record_stale_upload_drop(ChunkCoord coord);
     void mark_chunk_dirty_for_save(ChunkCoord coord);
     void enqueue_dirty_save(ChunkCoord coord);
+    std::optional<LightBuildSnapshot> make_light_build_snapshot(ChunkCoord coord, const ChunkData& chunk) const;
     std::optional<ChunkMeshSnapshot> make_rebuild_snapshot(ChunkCoord coord) const;
     static ChunkMeshNeighbors neighbors_from_snapshot(const ChunkMeshSnapshot& snapshot);
+    static LightMeshSnapshot light_from_snapshot(const ChunkMeshSnapshot& snapshot);
 
     WorldSeed seed_ {0};
     WorldSave* world_save_ {nullptr};
@@ -167,6 +202,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<ChunkJob> job_queue_;
+    std::unordered_set<ChunkCoord, ChunkCoordHasher> queued_light_jobs_;
     std::queue<JobResult> completed_;
     std::unordered_map<ChunkCoord, RebuildState, ChunkCoordHasher> rebuild_states_;
     bool stop_requested_ {false};
@@ -184,11 +220,14 @@ private:
     std::uint64_t frame_counter_ {0};
     std::size_t stale_results_ {0};
     std::size_t stale_uploads_dropped_ {0};
+    std::size_t light_stale_results_ {0};
+    std::size_t edge_fixups_ {0};
     std::size_t dropped_jobs_ {0};
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
     std::size_t logged_stale_upload_count_ {0};
     float last_generate_ms_ {0.0f};
+    float last_light_ms_ {0.0f};
     float last_mesh_ms_ {0.0f};
     std::deque<ChunkCoord> dirty_save_queue_;
     std::unordered_set<ChunkCoord, ChunkCoordHasher> dirty_save_set_;

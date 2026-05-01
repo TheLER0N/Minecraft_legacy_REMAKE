@@ -111,6 +111,7 @@ set(MINECRAFT_LEGACY_SOURCES
     src/platform/stb_vorbis_impl.cpp
     src/render/renderer.cpp
     src/game/block.cpp
+    src/game/light.cpp
     src/game/world_generator.cpp
     src/game/world_save.cpp
     src/game/world_streamer.cpp

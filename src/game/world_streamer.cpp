@@ -8,6 +8,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace ml {
 
@@ -18,7 +19,7 @@ constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
 constexpr int kMaxChunkRadius = 100;
 constexpr std::size_t kMaxNewChunkRequestsPerFrame = 2;
-constexpr std::size_t kMaxResultsPerTick = 8;
+constexpr std::size_t kMaxResultsPerTick = 16;
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 bool nearly_equal(float lhs, float rhs) {
@@ -213,6 +214,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
                 std::erase_if(job_queue_, [&](const ChunkJob& job) {
                     return job.coord == unloaded_coord;
                 });
+                queued_light_jobs_.erase(unloaded_coord);
                 dropped_jobs_ += before - job_queue_.size();
             }
             pending_unloads_.push_back(unloaded_coord);
@@ -249,6 +251,10 @@ void WorldStreamer::tick_generation_jobs() {
         JobResult result = std::move(completed_.front());
         completed_.pop();
         ++processed;
+
+        if (result.type == ChunkJobType::CalculateLight) {
+            queued_light_jobs_.erase(result.coord);
+        }
 
         auto it = chunks_.find(result.coord);
         if (it == chunks_.end() || it->second.generation_version != result.version || !desired_chunk(observer_chunk_, result.coord)) {
@@ -302,6 +308,9 @@ void WorldStreamer::tick_generation_jobs() {
             last_mesh_ms_ = result.mesh_ms;
             it->second.state = ChunkState::UploadQueued;
             it->second.dirty_mesh = false;
+            if (it->second.provisional_mesh && !result.provisional) {
+                ++edge_fixups_;
+            }
 
             if (result.mesh.empty()) {
                 log_message(LogLevel::Warning, "WorldStreamer: rebuilt chunk mesh is empty");
@@ -318,19 +327,23 @@ void WorldStreamer::tick_generation_jobs() {
             const ChunkVisibilityMetadata visibility = it->second.data.has_value()
                 ? build_visibility_metadata(*it->second.data, block_registry_)
                 : ChunkVisibilityMetadata {};
+            std::size_t replaced_stale_uploads = 0;
             const auto old_end = std::remove_if(
                 pending_uploads_.begin(),
                 pending_uploads_.end(),
                 [&](const PendingChunkUpload& upload) {
+                    if (upload.coord == result.coord && (!upload.provisional || result.provisional)) {
+                        ++replaced_stale_uploads;
+                    }
                     return upload.coord == result.coord;
                 }
             );
-            const std::size_t replaced_uploads = static_cast<std::size_t>(std::distance(old_end, pending_uploads_.end()));
-            for (std::size_t i = 0; i < replaced_uploads; ++i) {
+            for (std::size_t i = 0; i < replaced_stale_uploads; ++i) {
                 record_stale_upload_drop(result.coord);
             }
             pending_uploads_.erase(old_end, pending_uploads_.end());
-            pending_uploads_.push_back({result.coord, result.rebuild_serial, std::move(result.mesh), visibility});
+            it->second.provisional_mesh = result.provisional;
+            pending_uploads_.push_back({result.coord, result.rebuild_serial, result.provisional, std::move(result.mesh), visibility});
             continue;
         }
 
@@ -351,16 +364,46 @@ void WorldStreamer::tick_generation_jobs() {
             it->second.state = ChunkState::Decorated;
             it->second.data = *result.chunk_data;
             queue_stage_job_locked(result.coord, result.version, ChunkJobType::CalculateLight, std::move(result.chunk_data));
+            const std::array<ChunkCoord, 4> cardinal_neighbors {
+                ChunkCoord {result.coord.x - 1, result.coord.z},
+                ChunkCoord {result.coord.x + 1, result.coord.z},
+                ChunkCoord {result.coord.x, result.coord.z - 1},
+                ChunkCoord {result.coord.x, result.coord.z + 1}
+            };
+            for (const ChunkCoord neighbor : cardinal_neighbors) {
+                const auto neighbor_it = chunks_.find(neighbor);
+                if (neighbor_it != chunks_.end() &&
+                    neighbor_it->second.data.has_value() &&
+                    (!neighbor_it->second.light.has_value() || !neighbor_it->second.light->borders_ready)) {
+                    queue_light_job_if_loaded_locked(neighbor);
+                }
+            }
             continue;
         }
 
         if (result.type == ChunkJobType::CalculateLight) {
-            it->second.state = ChunkState::LightCalculated;
+            if (!result.light.has_value()) {
+                ++light_stale_results_;
+                continue;
+            }
+            last_light_ms_ = result.light_ms;
+            it->second.state = result.provisional ? ChunkState::WaitingForNeighbors : ChunkState::LightReady;
             it->second.data = std::move(result.chunk_data);
+            it->second.light = std::move(result.light);
+            it->second.dirty_light = false;
             it->second.dirty_mesh = true;
-            visible_chunks_.push_back({result.coord});
+            const auto visible_it = std::find_if(
+                visible_chunks_.begin(),
+                visible_chunks_.end(),
+                [&](const ActiveChunk& active) {
+                    return active.coord == result.coord;
+                }
+            );
+            if (visible_it == visible_chunks_.end()) {
+                visible_chunks_.push_back({result.coord});
+            }
 
-            queue_rebuild_self_and_neighbors_if_loaded_locked(result.coord, true);
+            queue_rebuild_job_if_loaded_locked(result.coord);
             continue;
         }
 
@@ -488,6 +531,8 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
     std::size_t queued_decorates = 0;
     std::size_t queued_lights = 0;
     std::size_t queued_meshes = 0;
+    std::size_t queued_fast_meshes = 0;
+    std::size_t queued_final_meshes = 0;
     for (const ChunkJob& job : job_queue_) {
         if (job.type == ChunkJobType::GenerateTerrain) {
             ++queued_generates;
@@ -497,11 +542,50 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
             ++queued_lights;
         } else if (job.type == ChunkJobType::BuildMesh) {
             ++queued_meshes;
+            if (job.snapshot != nullptr && job.snapshot->provisional) {
+                ++queued_fast_meshes;
+            } else {
+                ++queued_final_meshes;
+            }
         }
     }
     std::size_t pending_upload_bytes = 0;
+    std::size_t provisional_uploads = 0;
     for (const PendingChunkUpload& upload : pending_uploads_) {
         pending_upload_bytes += mesh_byte_count(upload.mesh);
+        if (upload.provisional) {
+            ++provisional_uploads;
+        }
+    }
+    bool observer_light_borders_ready = false;
+    int observer_light_border_status = 0;
+    if (const auto observer_it = chunks_.find(observer_chunk_);
+        observer_it != chunks_.end() && observer_it->second.light.has_value()) {
+        observer_light_borders_ready = observer_it->second.light->borders_ready;
+        observer_light_border_status = observer_light_borders_ready ? 1 : 0;
+        const std::array<ChunkCoord, 4> cardinal_neighbors {
+            ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z},
+            ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z},
+            ChunkCoord {observer_chunk_.x, observer_chunk_.z - 1},
+            ChunkCoord {observer_chunk_.x, observer_chunk_.z + 1}
+        };
+        const std::array<ChunkCoord, 4> diagonal_neighbors {
+            ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z - 1},
+            ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z - 1},
+            ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z + 1},
+            ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z + 1}
+        };
+        const auto has_light = [this](ChunkCoord coord) {
+            const auto it = chunks_.find(coord);
+            return it != chunks_.end() && it->second.light.has_value();
+        };
+        const bool cardinal_ready = std::all_of(cardinal_neighbors.begin(), cardinal_neighbors.end(), has_light);
+        const bool diagonal_ready = std::all_of(diagonal_neighbors.begin(), diagonal_neighbors.end(), has_light);
+        if (cardinal_ready && diagonal_ready) {
+            observer_light_border_status = 2;
+        } else if (cardinal_ready) {
+            observer_light_border_status = 1;
+        }
     }
 
     return {
@@ -512,12 +596,20 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
         queued_decorates,
         queued_lights,
         queued_meshes,
+        queued_fast_meshes,
+        queued_final_meshes,
         pending_upload_bytes,
         stale_results_,
         stale_uploads_dropped_,
+        provisional_uploads,
+        light_stale_results_,
+        edge_fixups_,
         dropped_jobs_,
         dirty_save_set_.size(),
+        observer_light_borders_ready,
+        observer_light_border_status,
         last_generate_ms_,
+        last_light_ms_,
         last_mesh_ms_
     };
 }
@@ -688,37 +780,57 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
     }
 
     chunk.set(local_x, local_y, local_z, block);
+    const bool light_affecting_change =
+        block_registry_.light_dampening(existing) != block_registry_.light_dampening(block) ||
+        block_registry_.light_emission(existing) != block_registry_.light_emission(block);
+    if (light_affecting_change) {
+        chunk_it->second.dirty_light = true;
+        chunk_it->second.state = ChunkState::LightPropagating;
+    }
     chunk_it->second.dirty_mesh = true;
     chunk_it->second.mesh_version = next_chunk_version_++;
     mark_chunk_dirty_for_save(chunk_coord);
-    queue_rebuild_job_if_loaded(chunk_coord);
     const bool touches_west = local_x < kLightBorder;
     const bool touches_east = local_x >= kChunkWidth - kLightBorder;
     const bool touches_north = local_z < kLightBorder;
     const bool touches_south = local_z >= kChunkDepth - kLightBorder;
-    if (touches_west) {
-        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z});
-    }
-    if (touches_east) {
-        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z});
-    }
-    if (touches_north) {
-        queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z - 1});
-    }
-    if (touches_south) {
-        queue_rebuild_job_if_loaded({chunk_coord.x, chunk_coord.z + 1});
-    }
-    if (touches_west && touches_north) {
-        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z - 1});
-    }
-    if (touches_east && touches_north) {
-        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z - 1});
-    }
-    if (touches_west && touches_south) {
-        queue_rebuild_job_if_loaded({chunk_coord.x - 1, chunk_coord.z + 1});
-    }
-    if (touches_east && touches_south) {
-        queue_rebuild_job_if_loaded({chunk_coord.x + 1, chunk_coord.z + 1});
+
+    const auto queue_affected = [&](auto&& queue_fn) {
+        queue_fn(chunk_coord);
+        if (touches_west) {
+            queue_fn({chunk_coord.x - 1, chunk_coord.z});
+        }
+        if (touches_east) {
+            queue_fn({chunk_coord.x + 1, chunk_coord.z});
+        }
+        if (touches_north) {
+            queue_fn({chunk_coord.x, chunk_coord.z - 1});
+        }
+        if (touches_south) {
+            queue_fn({chunk_coord.x, chunk_coord.z + 1});
+        }
+        if (touches_west && touches_north) {
+            queue_fn({chunk_coord.x - 1, chunk_coord.z - 1});
+        }
+        if (touches_east && touches_north) {
+            queue_fn({chunk_coord.x + 1, chunk_coord.z - 1});
+        }
+        if (touches_west && touches_south) {
+            queue_fn({chunk_coord.x - 1, chunk_coord.z + 1});
+        }
+        if (touches_east && touches_south) {
+            queue_fn({chunk_coord.x + 1, chunk_coord.z + 1});
+        }
+    };
+
+    if (light_affecting_change) {
+        queue_affected([&](ChunkCoord affected) {
+            queue_light_job_if_loaded(affected);
+        });
+    } else {
+        queue_affected([&](ChunkCoord affected) {
+            queue_rebuild_job_if_loaded(affected);
+        });
     }
 
     return SetBlockResult::Success;
@@ -839,12 +951,23 @@ void WorldStreamer::worker_loop() {
             }
             const auto end = std::chrono::steady_clock::now();
             result.generate_ms = std::chrono::duration<float, std::milli>(end - start).count();
-        } else if (job.type == ChunkJobType::Decorate || job.type == ChunkJobType::CalculateLight) {
+        } else if (job.type == ChunkJobType::Decorate) {
             result.chunk_data = std::move(job.chunk_data);
+        } else if (job.type == ChunkJobType::CalculateLight) {
+            const auto start = std::chrono::steady_clock::now();
+            if (job.light_snapshot != nullptr) {
+                ChunkLightResult light_result = calculate_chunk_light(*job.light_snapshot, block_registry_);
+                result.provisional = light_result.provisional;
+                result.light = std::move(light_result.light);
+                result.chunk_data = std::move(job.light_snapshot->chunk);
+            }
+            const auto end = std::chrono::steady_clock::now();
+            result.light_ms = std::chrono::duration<float, std::milli>(end - start).count();
         } else if (job.snapshot != nullptr) {
             const ChunkMeshSnapshot& snapshot = *job.snapshot;
             const auto start = std::chrono::steady_clock::now();
-            result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), snapshot.leaves_mode);
+            result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), light_from_snapshot(snapshot), snapshot.leaves_mode);
+            result.provisional = snapshot.provisional;
             const auto end = std::chrono::steady_clock::now();
             result.mesh_ms = std::chrono::duration<float, std::milli>(end - start).count();
         }
@@ -905,7 +1028,7 @@ float WorldStreamer::job_priority_score_locked(const ChunkJob& job) const {
     } else if (job.type == ChunkJobType::CalculateLight) {
         score += 100000.0f;
     } else if (job.type == ChunkJobType::BuildMesh) {
-        score += 500000.0f;
+        score += 150000.0f;
     }
     return score;
 }
@@ -925,14 +1048,69 @@ void WorldStreamer::push_job_locked(ChunkJob&& job) {
 void WorldStreamer::queue_generate_job(ChunkCoord coord, std::uint64_t version) {
     {
         std::lock_guard lock(mutex_);
-        push_job_locked({coord, version, 0, ChunkJobType::GenerateTerrain, std::nullopt, nullptr});
+        push_job_locked({coord, version, 0, ChunkJobType::GenerateTerrain, std::nullopt, nullptr, nullptr});
     }
     cv_.notify_one();
 }
 
 void WorldStreamer::queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data) {
-    push_job_locked({coord, version, 0, type, std::move(chunk_data), nullptr});
+    if (type == ChunkJobType::CalculateLight && chunk_data.has_value()) {
+        if (queued_light_jobs_.contains(coord)) {
+            return;
+        }
+        std::optional<LightBuildSnapshot> light_snapshot = make_light_build_snapshot(coord, *chunk_data);
+        if (light_snapshot.has_value()) {
+            queued_light_jobs_.insert(coord);
+            push_job_locked({
+                coord,
+                version,
+                0,
+                type,
+                std::nullopt,
+                nullptr,
+                std::make_shared<LightBuildSnapshot>(std::move(*light_snapshot))
+            });
+            cv_.notify_one();
+            return;
+        }
+    }
+    push_job_locked({coord, version, 0, type, std::move(chunk_data), nullptr, nullptr});
     cv_.notify_one();
+}
+
+void WorldStreamer::queue_light_job_if_loaded(ChunkCoord coord) {
+    std::lock_guard lock(mutex_);
+    queue_light_job_if_loaded_locked(coord);
+}
+
+void WorldStreamer::queue_light_job_if_loaded_locked(ChunkCoord coord) {
+    const auto it = chunks_.find(coord);
+    if (it == chunks_.end() || !it->second.data.has_value()) {
+        return;
+    }
+    if (queued_light_jobs_.contains(coord)) {
+        it->second.dirty_light = true;
+        return;
+    }
+    it->second.dirty_light = true;
+    it->second.state = ChunkState::LightPropagating;
+    std::optional<ChunkData> chunk_copy {*it->second.data};
+    queue_stage_job_locked(coord, it->second.generation_version, ChunkJobType::CalculateLight, std::move(chunk_copy));
+}
+
+void WorldStreamer::queue_light_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals) {
+    queue_light_job_if_loaded_locked(coord);
+    queue_light_job_if_loaded_locked({coord.x - 1, coord.z});
+    queue_light_job_if_loaded_locked({coord.x + 1, coord.z});
+    queue_light_job_if_loaded_locked({coord.x, coord.z - 1});
+    queue_light_job_if_loaded_locked({coord.x, coord.z + 1});
+    if (!include_diagonals) {
+        return;
+    }
+    queue_light_job_if_loaded_locked({coord.x - 1, coord.z - 1});
+    queue_light_job_if_loaded_locked({coord.x + 1, coord.z - 1});
+    queue_light_job_if_loaded_locked({coord.x - 1, coord.z + 1});
+    queue_light_job_if_loaded_locked({coord.x + 1, coord.z + 1});
 }
 
 void WorldStreamer::queue_rebuild_job_if_loaded(ChunkCoord coord) {
@@ -988,7 +1166,8 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
         state.serial,
         ChunkJobType::BuildMesh,
         std::nullopt,
-        std::make_shared<ChunkMeshSnapshot>(std::move(*snapshot))
+        std::make_shared<ChunkMeshSnapshot>(std::move(*snapshot)),
+        nullptr
     });
     cv_.notify_one();
 }
@@ -1021,6 +1200,103 @@ void WorldStreamer::record_stale_upload_drop(ChunkCoord coord) {
     ++logged_stale_upload_count_;
 }
 
+std::optional<LightBuildSnapshot> WorldStreamer::make_light_build_snapshot(ChunkCoord coord, const ChunkData& chunk) const {
+    const auto find_chunk_data = [this](ChunkCoord neighbor_coord) -> const ChunkData* {
+        const auto it = chunks_.find(neighbor_coord);
+        if (it == chunks_.end() || !it->second.data.has_value()) {
+            return nullptr;
+        }
+        return &*it->second.data;
+    };
+
+    const auto side_x = [&](ChunkCoord neighbor_coord, int source_x_start) -> std::optional<LightBlockSideBorderX> {
+        const ChunkData* neighbor = find_chunk_data(neighbor_coord);
+        if (neighbor == nullptr) {
+            return std::nullopt;
+        }
+
+        LightBlockSideBorderX border {};
+        for (int strip_x = 0; strip_x < kLightBorder; ++strip_x) {
+            const int source_x = source_x_start + strip_x;
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    border.blocks[static_cast<std::size_t>(strip_x + kLightBorder * (z + y * kChunkDepth))] =
+                        neighbor->get(source_x, y, z);
+                }
+            }
+        }
+        return border;
+    };
+
+    const auto side_z = [&](ChunkCoord neighbor_coord, int source_z_start) -> std::optional<LightBlockSideBorderZ> {
+        const ChunkData* neighbor = find_chunk_data(neighbor_coord);
+        if (neighbor == nullptr) {
+            return std::nullopt;
+        }
+
+        LightBlockSideBorderZ border {};
+        for (int strip_z = 0; strip_z < kLightBorder; ++strip_z) {
+            const int source_z = source_z_start + strip_z;
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int x = 0; x < kChunkWidth; ++x) {
+                    border.blocks[static_cast<std::size_t>(x + kChunkWidth * (strip_z + y * kLightBorder))] =
+                        neighbor->get(x, y, source_z);
+                }
+            }
+        }
+        return border;
+    };
+
+    const auto corner = [&](ChunkCoord neighbor_coord, int source_x_start, int source_z_start) -> std::optional<LightBlockCornerBorder> {
+        const ChunkData* neighbor = find_chunk_data(neighbor_coord);
+        if (neighbor == nullptr) {
+            return std::nullopt;
+        }
+
+        LightBlockCornerBorder border {};
+        for (int strip_z = 0; strip_z < kLightBorder; ++strip_z) {
+            const int source_z = source_z_start + strip_z;
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int strip_x = 0; strip_x < kLightBorder; ++strip_x) {
+                    const int source_x = source_x_start + strip_x;
+                    border.blocks[static_cast<std::size_t>(strip_x + kLightBorder * (strip_z + y * kLightBorder))] =
+                        neighbor->get(source_x, y, source_z);
+                }
+            }
+        }
+        return border;
+    };
+
+    auto west = side_x({coord.x - 1, coord.z}, kChunkWidth - kLightBorder);
+    auto east = side_x({coord.x + 1, coord.z}, 0);
+    auto north = side_z({coord.x, coord.z - 1}, kChunkDepth - kLightBorder);
+    auto south = side_z({coord.x, coord.z + 1}, 0);
+    auto northwest = corner({coord.x - 1, coord.z - 1}, kChunkWidth - kLightBorder, kChunkDepth - kLightBorder);
+    auto northeast = corner({coord.x + 1, coord.z - 1}, 0, kChunkDepth - kLightBorder);
+    auto southwest = corner({coord.x - 1, coord.z + 1}, kChunkWidth - kLightBorder, 0);
+    auto southeast = corner({coord.x + 1, coord.z + 1}, 0, 0);
+
+    const bool complete_cardinal_borders =
+        west.has_value() && east.has_value() && north.has_value() && south.has_value();
+    const bool complete_borders =
+        complete_cardinal_borders &&
+        northwest.has_value() && northeast.has_value() && southwest.has_value() && southeast.has_value();
+
+    return LightBuildSnapshot {
+        chunk,
+        std::move(west),
+        std::move(east),
+        std::move(north),
+        std::move(south),
+        std::move(northwest),
+        std::move(northeast),
+        std::move(southwest),
+        std::move(southeast),
+        complete_cardinal_borders,
+        complete_borders
+    };
+}
+
 std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snapshot(ChunkCoord coord) const {
     const auto find_chunk_data = [this](ChunkCoord neighbor_coord) -> const ChunkData* {
         const auto it = chunks_.find(neighbor_coord);
@@ -1028,6 +1304,13 @@ std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snap
             return nullptr;
         }
         return &*it->second.data;
+    };
+    const auto find_chunk_light = [this](ChunkCoord neighbor_coord) -> const ChunkLight* {
+        const auto it = chunks_.find(neighbor_coord);
+        if (it == chunks_.end() || !it->second.light.has_value()) {
+            return nullptr;
+        }
+        return &*it->second.light;
     };
 
     const auto side_x = [&](ChunkCoord neighbor_coord, int source_x_start) -> std::optional<ChunkSideBorderX> {
@@ -1087,24 +1370,112 @@ std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snap
         }
         return border;
     };
+    const auto light_side_x = [&](ChunkCoord neighbor_coord, int source_x_start) -> std::optional<ChunkLightSideBorderX> {
+        const ChunkLight* light = find_chunk_light(neighbor_coord);
+        if (light == nullptr) {
+            return std::nullopt;
+        }
+
+        ChunkLightSideBorderX border {};
+        for (int strip_x = 0; strip_x < kLightBorder; ++strip_x) {
+            const int source_x = source_x_start + strip_x;
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int z = 0; z < kChunkDepth; ++z) {
+                    border.sky[static_cast<std::size_t>(strip_x + kLightBorder * (z + y * kChunkDepth))] =
+                        light->sky(source_x, y, z);
+                }
+            }
+        }
+        return border;
+    };
+
+    const auto light_side_z = [&](ChunkCoord neighbor_coord, int source_z_start) -> std::optional<ChunkLightSideBorderZ> {
+        const ChunkLight* light = find_chunk_light(neighbor_coord);
+        if (light == nullptr) {
+            return std::nullopt;
+        }
+
+        ChunkLightSideBorderZ border {};
+        for (int strip_z = 0; strip_z < kLightBorder; ++strip_z) {
+            const int source_z = source_z_start + strip_z;
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int x = 0; x < kChunkWidth; ++x) {
+                    border.sky[static_cast<std::size_t>(x + kChunkWidth * (strip_z + y * kLightBorder))] =
+                        light->sky(x, y, source_z);
+                }
+            }
+        }
+        return border;
+    };
+
+    const auto light_corner = [&](ChunkCoord neighbor_coord, int source_x_start, int source_z_start) -> std::optional<ChunkLightCornerBorder> {
+        const ChunkLight* light = find_chunk_light(neighbor_coord);
+        if (light == nullptr) {
+            return std::nullopt;
+        }
+
+        ChunkLightCornerBorder border {};
+        for (int strip_z = 0; strip_z < kLightBorder; ++strip_z) {
+            const int source_z = source_z_start + strip_z;
+            for (int y = 0; y < kChunkHeight; ++y) {
+                for (int strip_x = 0; strip_x < kLightBorder; ++strip_x) {
+                    const int source_x = source_x_start + strip_x;
+                    border.sky[static_cast<std::size_t>(strip_x + kLightBorder * (strip_z + y * kLightBorder))] =
+                        light->sky(source_x, y, source_z);
+                }
+            }
+        }
+        return border;
+    };
 
     const auto chunk_it = chunks_.find(coord);
-    if (chunk_it == chunks_.end() || !chunk_it->second.data.has_value()) {
+    if (chunk_it == chunks_.end() || !chunk_it->second.data.has_value() || !chunk_it->second.light.has_value()) {
         return std::nullopt;
     }
+
+    auto west = side_x({coord.x - 1, coord.z}, kChunkWidth - kLightBorder);
+    auto east = side_x({coord.x + 1, coord.z}, 0);
+    auto north = side_z({coord.x, coord.z - 1}, kChunkDepth - kLightBorder);
+    auto south = side_z({coord.x, coord.z + 1}, 0);
+    auto northwest = corner({coord.x - 1, coord.z - 1}, kChunkWidth - kLightBorder, kChunkDepth - kLightBorder);
+    auto northeast = corner({coord.x + 1, coord.z - 1}, 0, kChunkDepth - kLightBorder);
+    auto southwest = corner({coord.x - 1, coord.z + 1}, kChunkWidth - kLightBorder, 0);
+    auto southeast = corner({coord.x + 1, coord.z + 1}, 0, 0);
+
+    auto light_west = light_side_x({coord.x - 1, coord.z}, kChunkWidth - kLightBorder);
+    auto light_east = light_side_x({coord.x + 1, coord.z}, 0);
+    auto light_north = light_side_z({coord.x, coord.z - 1}, kChunkDepth - kLightBorder);
+    auto light_south = light_side_z({coord.x, coord.z + 1}, 0);
+    auto light_northwest = light_corner({coord.x - 1, coord.z - 1}, kChunkWidth - kLightBorder, kChunkDepth - kLightBorder);
+    auto light_northeast = light_corner({coord.x + 1, coord.z - 1}, 0, kChunkDepth - kLightBorder);
+    auto light_southwest = light_corner({coord.x - 1, coord.z + 1}, kChunkWidth - kLightBorder, 0);
+    auto light_southeast = light_corner({coord.x + 1, coord.z + 1}, 0, 0);
+    const bool provisional =
+        !west.has_value() || !east.has_value() || !north.has_value() || !south.has_value() ||
+        !light_west.has_value() || !light_east.has_value() || !light_north.has_value() || !light_south.has_value();
 
     return ChunkMeshSnapshot {
         chunk_it->second.generation_version,
         leaves_render_mode_,
         *chunk_it->second.data,
-        side_x({coord.x - 1, coord.z}, kChunkWidth - kLightBorder),
-        side_x({coord.x + 1, coord.z}, 0),
-        side_z({coord.x, coord.z - 1}, kChunkDepth - kLightBorder),
-        side_z({coord.x, coord.z + 1}, 0),
-        corner({coord.x - 1, coord.z - 1}, kChunkWidth - kLightBorder, kChunkDepth - kLightBorder),
-        corner({coord.x + 1, coord.z - 1}, 0, kChunkDepth - kLightBorder),
-        corner({coord.x - 1, coord.z + 1}, kChunkWidth - kLightBorder, 0),
-        corner({coord.x + 1, coord.z + 1}, 0, 0)
+        std::move(west),
+        std::move(east),
+        std::move(north),
+        std::move(south),
+        std::move(northwest),
+        std::move(northeast),
+        std::move(southwest),
+        std::move(southeast),
+        *chunk_it->second.light,
+        std::move(light_west),
+        std::move(light_east),
+        std::move(light_north),
+        std::move(light_south),
+        std::move(light_northwest),
+        std::move(light_northeast),
+        std::move(light_southwest),
+        std::move(light_southeast),
+        provisional
     };
 }
 
@@ -1118,6 +1489,21 @@ ChunkMeshNeighbors WorldStreamer::neighbors_from_snapshot(const ChunkMeshSnapsho
         snapshot.northeast.has_value() ? &*snapshot.northeast : nullptr,
         snapshot.southwest.has_value() ? &*snapshot.southwest : nullptr,
         snapshot.southeast.has_value() ? &*snapshot.southeast : nullptr
+    };
+}
+
+LightMeshSnapshot WorldStreamer::light_from_snapshot(const ChunkMeshSnapshot& snapshot) {
+    return {
+        &snapshot.light,
+        snapshot.light_west.has_value() ? &*snapshot.light_west : nullptr,
+        snapshot.light_east.has_value() ? &*snapshot.light_east : nullptr,
+        snapshot.light_north.has_value() ? &*snapshot.light_north : nullptr,
+        snapshot.light_south.has_value() ? &*snapshot.light_south : nullptr,
+        snapshot.light_northwest.has_value() ? &*snapshot.light_northwest : nullptr,
+        snapshot.light_northeast.has_value() ? &*snapshot.light_northeast : nullptr,
+        snapshot.light_southwest.has_value() ? &*snapshot.light_southwest : nullptr,
+        snapshot.light_southeast.has_value() ? &*snapshot.light_southeast : nullptr,
+        snapshot.provisional
     };
 }
 

@@ -3,15 +3,15 @@
 namespace ml {
 
 BlockRegistry::BlockRegistry() {
-    defs_[static_cast<std::size_t>(BlockId::Air)] = {BlockId::Air, "air", BlockFlags::None, BlockRenderType::Opaque, {0.0f, 0.0f, 0.0f}, 0, 0, 0, 0.0f};
-    defs_[static_cast<std::size_t>(BlockId::Grass)] = {BlockId::Grass, "grass", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.46f, 0.72f, 0.34f}, 1, 0, 2, 0.5f};
-    defs_[static_cast<std::size_t>(BlockId::Dirt)] = {BlockId::Dirt, "dirt", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.50f, 0.31f, 0.16f}, 0, 0, 0, 0.5f};
-    defs_[static_cast<std::size_t>(BlockId::Stone)] = {BlockId::Stone, "stone", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.55f, 0.58f, 0.60f}, 3, 3, 3, 1.5f};
-    defs_[static_cast<std::size_t>(BlockId::Water)] = {BlockId::Water, "water", BlockFlags::None, BlockRenderType::Transparent, {0.52f, 0.72f, 0.94f}, 4, 4, 4, 0.0f};
-    defs_[static_cast<std::size_t>(BlockId::Sand)] = {BlockId::Sand, "sand", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.86f, 0.84f, 0.60f}, 5, 5, 5, 0.5f};
-    defs_[static_cast<std::size_t>(BlockId::Gravel)] = {BlockId::Gravel, "gravel", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.52f, 0.51f, 0.50f}, 6, 6, 6, 0.6f};
-    defs_[static_cast<std::size_t>(BlockId::OakLog)] = {BlockId::OakLog, "oak_log", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.60f, 0.42f, 0.24f}, 8, 8, 7, 2.0f};
-    defs_[static_cast<std::size_t>(BlockId::OakLeaves)] = {BlockId::OakLeaves, "oak_leaves", BlockFlags::Solid, BlockRenderType::Cutout, {0.36f, 0.62f, 0.25f}, 9, 9, 9, 0.2f};
+    defs_[static_cast<std::size_t>(BlockId::Air)] = {BlockId::Air, "air", BlockFlags::None, BlockRenderType::Opaque, {0.0f, 0.0f, 0.0f}, 0, 0, 0, 0, 1, 0.0f};
+    defs_[static_cast<std::size_t>(BlockId::Grass)] = {BlockId::Grass, "grass", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.46f, 0.72f, 0.34f}, 1, 0, 2, 0, 15, 0.5f};
+    defs_[static_cast<std::size_t>(BlockId::Dirt)] = {BlockId::Dirt, "dirt", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.50f, 0.31f, 0.16f}, 0, 0, 0, 0, 15, 0.5f};
+    defs_[static_cast<std::size_t>(BlockId::Stone)] = {BlockId::Stone, "stone", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.55f, 0.58f, 0.60f}, 3, 3, 3, 0, 15, 1.5f};
+    defs_[static_cast<std::size_t>(BlockId::Water)] = {BlockId::Water, "water", BlockFlags::None, BlockRenderType::Transparent, {0.52f, 0.72f, 0.94f}, 4, 4, 4, 0, 2, 0.0f};
+    defs_[static_cast<std::size_t>(BlockId::Sand)] = {BlockId::Sand, "sand", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.86f, 0.84f, 0.60f}, 5, 5, 5, 0, 15, 0.5f};
+    defs_[static_cast<std::size_t>(BlockId::Gravel)] = {BlockId::Gravel, "gravel", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.52f, 0.51f, 0.50f}, 6, 6, 6, 0, 15, 0.6f};
+    defs_[static_cast<std::size_t>(BlockId::OakLog)] = {BlockId::OakLog, "oak_log", BlockFlags::Opaque | BlockFlags::Solid, BlockRenderType::Opaque, {0.60f, 0.42f, 0.24f}, 8, 8, 7, 0, 15, 2.0f};
+    defs_[static_cast<std::size_t>(BlockId::OakLeaves)] = {BlockId::OakLeaves, "oak_leaves", BlockFlags::Solid, BlockRenderType::Cutout, {0.36f, 0.62f, 0.25f}, 9, 9, 9, 0, 2, 0.2f};
 }
 
 const BlockDef& BlockRegistry::get(BlockId id) const {
@@ -36,6 +36,14 @@ bool BlockRegistry::is_renderable(BlockId id) const {
 
 BlockRenderType BlockRegistry::render_type(BlockId id) const {
     return get(id).render_type;
+}
+
+std::uint8_t BlockRegistry::light_emission(BlockId id) const {
+    return get(id).light_emission;
+}
+
+std::uint8_t BlockRegistry::light_dampening(BlockId id) const {
+    return get(id).light_dampening;
 }
 
 float BlockRegistry::hardness(BlockId id) const {

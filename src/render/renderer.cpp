@@ -1637,13 +1637,21 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.queued_decorates != data.queued_decorates ||
         debug_hud_data_.queued_lights != data.queued_lights ||
         debug_hud_data_.queued_meshes != data.queued_meshes ||
+        debug_hud_data_.queued_fast_meshes != data.queued_fast_meshes ||
+        debug_hud_data_.queued_final_meshes != data.queued_final_meshes ||
         debug_hud_data_.pending_upload_bytes != data.pending_upload_bytes ||
         debug_hud_data_.uploaded_bytes_this_frame != data.uploaded_bytes_this_frame ||
         debug_hud_data_.stale_results != data.stale_results ||
         debug_hud_data_.stale_uploads != data.stale_uploads ||
+        debug_hud_data_.provisional_uploads != data.provisional_uploads ||
+        debug_hud_data_.light_stale_results != data.light_stale_results ||
+        debug_hud_data_.edge_fixups != data.edge_fixups ||
         debug_hud_data_.dropped_jobs != data.dropped_jobs ||
         debug_hud_data_.dirty_save_chunks != data.dirty_save_chunks ||
+        debug_hud_data_.light_borders_ready != data.light_borders_ready ||
+        debug_hud_data_.light_border_status != data.light_border_status ||
         debug_hud_data_.generate_ms != data.generate_ms ||
+        debug_hud_data_.light_ms != data.light_ms ||
         debug_hud_data_.mesh_ms != data.mesh_ms ||
         debug_hud_data_.upload_ms != data.upload_ms ||
         debug_hud_data_.drawn_chunks != data.drawn_chunks ||
@@ -2987,13 +2995,23 @@ void Renderer::update_debug_hud_buffer() {
     const std::string queues = "GENQ:" + std::to_string(debug_hud_data_.queued_generates) +
         " DECORQ:" + std::to_string(debug_hud_data_.queued_decorates);
     const std::string queues2 = "LIGHTQ:" + std::to_string(debug_hud_data_.queued_lights) +
-        " MESHQ:" + std::to_string(debug_hud_data_.queued_meshes);
+        " MESHQ:" + std::to_string(debug_hud_data_.queued_meshes) +
+        " FASTQ:" + std::to_string(debug_hud_data_.queued_fast_meshes) +
+        " FINALQ:" + std::to_string(debug_hud_data_.queued_final_meshes);
     const std::string upload_queue = "UPLOADQ:" + std::to_string(debug_hud_data_.pending_upload_bytes / 1024) + "KB";
     const std::string scheduler = "STALE:" + std::to_string(debug_hud_data_.stale_results) +
         " STALEUP:" + std::to_string(debug_hud_data_.stale_uploads) +
+        " LIGHT_STALE:" + std::to_string(debug_hud_data_.light_stale_results) +
+        " EDGEFIX:" + std::to_string(debug_hud_data_.edge_fixups) +
         " DROPPED:" + std::to_string(debug_hud_data_.dropped_jobs);
+    const char* light_border_status = debug_hud_data_.light_border_status >= 2
+        ? "FINAL"
+        : (debug_hud_data_.light_border_status == 1 ? "CARD" : "MISS");
+    const std::string provisional = "PROV:" + std::to_string(debug_hud_data_.provisional_uploads) +
+        " LBORD:" + light_border_status;
     const std::string saves = "SAVEQ:" + std::to_string(debug_hud_data_.dirty_save_chunks);
     const std::string timings = "GENms:" + std::to_string(static_cast<int>(debug_hud_data_.generate_ms + 0.5f)) +
+        " LIGHTms:" + std::to_string(static_cast<int>(debug_hud_data_.light_ms + 0.5f)) +
         " MESHms:" + std::to_string(static_cast<int>(debug_hud_data_.mesh_ms + 0.5f)) +
         " UPms:" + std::to_string(static_cast<int>(debug_hud_data_.upload_ms + 0.5f));
     const std::string uploaded = "UPKB:" + std::to_string(debug_hud_data_.uploaded_bytes_this_frame / 1024);
@@ -3014,7 +3032,7 @@ void Renderer::update_debug_hud_buffer() {
         (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
             chunks.size() + drawn.size() + sections.size() + culled.size() + draw_calls.size() +
             occ_culled.size() + geometry.size() + memory.size() + uploads.size() + pending.size() + rebuilds.size() +
-            queues.size() + queues2.size() + upload_queue.size() + scheduler.size() + saves.size() + timings.size() + uploaded.size() +
+            queues.size() + queues2.size() + upload_queue.size() + scheduler.size() + provisional.size() + saves.size() + timings.size() + uploaded.size() +
             culling_modes.size() + cavevis.size() + cave_culled.size() + surface_culled.size() + mixed.size() +
             leaves.size() + world_y.size() + sea.size() + caves.size()) * 16
     );
@@ -3041,18 +3059,19 @@ void Renderer::update_debug_hud_buffer() {
     append_left_text(queues2, top - 300.0f);
     append_left_text(upload_queue, top - 320.0f);
     append_left_text(scheduler, top - 340.0f);
-    append_left_text(saves, top - 360.0f);
-    append_left_text(timings, top - 380.0f);
-    append_left_text(uploaded, top - 400.0f);
-    append_left_text(culling_modes, top - 420.0f);
-    append_left_text(cavevis, top - 440.0f);
-    append_left_text(cave_culled, top - 460.0f);
-    append_left_text(surface_culled, top - 480.0f);
-    append_left_text(mixed, top - 500.0f);
-    append_left_text(leaves, top - 520.0f);
-    append_left_text(world_y, top - 540.0f);
-    append_left_text(sea, top - 560.0f);
-    append_left_text(caves, top - 580.0f);
+    append_left_text(provisional, top - 360.0f);
+    append_left_text(saves, top - 380.0f);
+    append_left_text(timings, top - 400.0f);
+    append_left_text(uploaded, top - 420.0f);
+    append_left_text(culling_modes, top - 440.0f);
+    append_left_text(cavevis, top - 460.0f);
+    append_left_text(cave_culled, top - 480.0f);
+    append_left_text(surface_culled, top - 500.0f);
+    append_left_text(mixed, top - 520.0f);
+    append_left_text(leaves, top - 540.0f);
+    append_left_text(world_y, top - 560.0f);
+    append_left_text(sea, top - 580.0f);
+    append_left_text(caves, top - 600.0f);
 
     debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
     upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);

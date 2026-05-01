@@ -49,6 +49,8 @@ struct BlockDef {
     std::uint32_t tex_top {0};
     std::uint32_t tex_bottom {0};
     std::uint32_t tex_side {0};
+    std::uint8_t light_emission {0};
+    std::uint8_t light_dampening {15};
     float hardness {0.0f};
 };
 
@@ -61,6 +63,8 @@ public:
     bool is_replaceable(BlockId id) const;
     bool is_renderable(BlockId id) const;
     BlockRenderType render_type(BlockId id) const;
+    std::uint8_t light_emission(BlockId id) const;
+    std::uint8_t light_dampening(BlockId id) const;
     float hardness(BlockId id) const;
 
 private:

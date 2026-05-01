@@ -105,6 +105,38 @@ struct ChunkVisibilityMetadata {
     std::array<ChunkSectionVisibility, kChunkSectionCount> sections {};
 };
 
+struct ChunkLight {
+    std::vector<std::uint8_t> sky_light;
+    std::vector<std::uint8_t> block_light;
+    bool dirty {true};
+    bool borders_ready {false};
+
+    ChunkLight()
+        : sky_light(static_cast<std::size_t>(kChunkWidth * kChunkDepth * kChunkHeight), 0)
+        , block_light(static_cast<std::size_t>(kChunkWidth * kChunkDepth * kChunkHeight), 0) {
+    }
+
+    static std::size_t index(int x, int y, int z) {
+        return static_cast<std::size_t>(x + z * kChunkWidth + y * kChunkWidth * kChunkDepth);
+    }
+
+    std::uint8_t sky(int x, int y, int z) const {
+        return sky_light[index(x, y, z)];
+    }
+
+    void set_sky(int x, int y, int z, std::uint8_t value) {
+        sky_light[index(x, y, z)] = value;
+    }
+
+    std::uint8_t block(int x, int y, int z) const {
+        return block_light[index(x, y, z)];
+    }
+
+    void set_block(int x, int y, int z, std::uint8_t value) {
+        block_light[index(x, y, z)] = value;
+    }
+};
+
 struct ChunkData {
     std::vector<BlockId> blocks;
 
@@ -132,6 +164,7 @@ struct ActiveChunk {
 struct PendingChunkUpload {
     ChunkCoord coord {};
     std::uint64_t rebuild_serial {0};
+    bool provisional {false};
     ChunkMesh mesh {};
     ChunkVisibilityMetadata visibility {};
 };

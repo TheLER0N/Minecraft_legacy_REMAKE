@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/block.hpp"
+#include "game/light.hpp"
 #include "game/world_types.hpp"
 
 #include <array>
@@ -83,6 +84,14 @@ ChunkMesh build_chunk_mesh(
     ChunkCoord coord,
     const BlockRegistry& block_registry,
     const ChunkMeshNeighbors& neighbors,
+    LeavesRenderMode leaves_mode = LeavesRenderMode::Fancy
+);
+ChunkMesh build_chunk_mesh(
+    const ChunkData& chunk_data,
+    ChunkCoord coord,
+    const BlockRegistry& block_registry,
+    const ChunkMeshNeighbors& neighbors,
+    const LightMeshSnapshot& light,
     LeavesRenderMode leaves_mode = LeavesRenderMode::Fancy
 );
 
