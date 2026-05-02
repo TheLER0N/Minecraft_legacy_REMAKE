@@ -111,6 +111,35 @@ std::uint8_t propagated_light(std::uint8_t current, BlockId target, const BlockR
     return current > dampening ? static_cast<std::uint8_t>(current - dampening) : 0;
 }
 
+constexpr std::uint64_t kFnvOffset = 1469598103934665603ull;
+constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+
+void hash_u8(std::uint64_t& hash, std::uint8_t value) {
+    hash ^= static_cast<std::uint64_t>(value);
+    hash *= kFnvPrime;
+}
+
+std::uint64_t compute_border_signature(const ChunkLight& light) {
+    std::uint64_t hash = kFnvOffset;
+
+    for (int y = 0; y < kChunkHeight; ++y) {
+        for (int z = 0; z < kChunkDepth; ++z) {
+            hash_u8(hash, light.sky(0, y, z));
+            hash_u8(hash, light.block(0, y, z));
+            hash_u8(hash, light.sky(kChunkWidth - 1, y, z));
+            hash_u8(hash, light.block(kChunkWidth - 1, y, z));
+        }
+        for (int x = 0; x < kChunkWidth; ++x) {
+            hash_u8(hash, light.sky(x, y, 0));
+            hash_u8(hash, light.block(x, y, 0));
+            hash_u8(hash, light.sky(x, y, kChunkDepth - 1));
+            hash_u8(hash, light.block(x, y, kChunkDepth - 1));
+        }
+    }
+
+    return hash;
+}
+
 }
 
 ChunkLightResult calculate_chunk_light(const LightBuildSnapshot& snapshot, const BlockRegistry& block_registry) {
@@ -181,8 +210,11 @@ ChunkLightResult calculate_chunk_light(const LightBuildSnapshot& snapshot, const
     }
 
     light.dirty = false;
-    light.borders_ready = snapshot.complete_cardinal_borders;
-    result.provisional = !snapshot.complete_cardinal_borders;
+    light.borders_ready = snapshot.complete_borders;
+    light.border_signature = compute_border_signature(light);
+    result.provisional = !snapshot.complete_borders;
+    result.borders_ready = light.borders_ready;
+    result.border_signature = light.border_signature;
     return result;
 }
 

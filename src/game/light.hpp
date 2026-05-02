@@ -74,6 +74,8 @@ struct LightBuildSnapshot {
 struct ChunkLightResult {
     ChunkLight light {};
     bool provisional {true};
+    bool borders_ready {false};
+    std::uint64_t border_signature {0};
 };
 
 struct LightMeshSnapshot {

@@ -110,6 +110,7 @@ struct ChunkLight {
     std::vector<std::uint8_t> block_light;
     bool dirty {true};
     bool borders_ready {false};
+    std::uint64_t border_signature {0};
 
     ChunkLight()
         : sky_light(static_cast<std::size_t>(kChunkWidth * kChunkDepth * kChunkHeight), 0)
@@ -163,7 +164,9 @@ struct ActiveChunk {
 
 struct PendingChunkUpload {
     ChunkCoord coord {};
+    std::uint64_t version {0};
     std::uint64_t rebuild_serial {0};
+    std::uint64_t upload_token {0};
     bool provisional {false};
     ChunkMesh mesh {};
     ChunkVisibilityMetadata visibility {};

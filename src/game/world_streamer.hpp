@@ -108,6 +108,7 @@ private:
     struct ChunkJob {
         ChunkCoord coord {};
         std::uint64_t version {0};
+        std::uint64_t light_job_token {0};
         std::uint64_t rebuild_serial {0};
         ChunkJobType type {ChunkJobType::GenerateTerrain};
         std::optional<ChunkData> chunk_data {};
@@ -118,6 +119,7 @@ private:
     struct JobResult {
         ChunkCoord coord {};
         std::uint64_t version {0};
+        std::uint64_t light_job_token {0};
         std::uint64_t rebuild_serial {0};
         ChunkJobType type {ChunkJobType::GenerateTerrain};
         bool stale_rebuild {false};
@@ -127,6 +129,8 @@ private:
         std::optional<ChunkData> chunk_data {};
         std::optional<ChunkLight> light {};
         ChunkMesh mesh {};
+        std::uint64_t border_signature {0};
+        bool borders_ready {false};
         bool provisional {false};
     };
 
@@ -152,11 +156,15 @@ private:
         ChunkState state {ChunkState::Requested};
         std::uint64_t generation_version {0};
         std::uint64_t mesh_version {0};
+        std::uint64_t latest_light_job_token {0};
         std::uint64_t latest_rebuild_serial {0};
+        std::uint64_t latest_upload_token {0};
+        std::uint64_t border_signature {0};
         std::uint64_t last_touched_frame {0};
         bool uploaded_to_gpu {false};
         bool dirty_mesh {false};
         bool dirty_light {false};
+        bool needs_final_light {false};
         bool provisional_mesh {false};
         bool dirty_save {false};
         std::optional<ChunkData> data {};
@@ -216,7 +224,9 @@ private:
     Vec3 observer_position_ {};
     Vec3 observer_forward_ {0.0f, 0.0f, -1.0f};
     std::uint64_t next_chunk_version_ {1};
+    std::uint64_t next_light_job_token_ {1};
     std::uint64_t next_rebuild_serial_ {1};
+    std::uint64_t next_upload_token_ {1};
     std::uint64_t frame_counter_ {0};
     std::size_t stale_results_ {0};
     std::size_t stale_uploads_dropped_ {0};

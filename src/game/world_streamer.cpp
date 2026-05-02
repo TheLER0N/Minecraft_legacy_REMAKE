@@ -191,7 +191,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
         if (!chunks_.contains(coord)) {
             ChunkRecord record {};
             record.generation_version = next_chunk_version_++;
-            record.mesh_version = record.generation_version;
+            record.mesh_version = 0;
             record.last_touched_frame = frame_counter_;
             const std::uint64_t version = record.generation_version;
             chunks_.emplace(coord, std::move(record));
@@ -257,7 +257,60 @@ void WorldStreamer::tick_generation_jobs() {
         }
 
         auto it = chunks_.find(result.coord);
-        if (it == chunks_.end() || it->second.generation_version != result.version || !desired_chunk(observer_chunk_, result.coord)) {
+        if (it == chunks_.end() || !desired_chunk(observer_chunk_, result.coord)) {
+            ++stale_results_;
+            continue;
+        }
+
+        if (result.type == ChunkJobType::CalculateLight) {
+            ChunkRecord& record = it->second;
+            if (!result.light.has_value()) {
+                ++light_stale_results_;
+                if (record.dirty_light || record.needs_final_light) {
+                    queue_light_job_if_loaded_locked(result.coord);
+                }
+                continue;
+            }
+            if (record.generation_version != result.version || record.latest_light_job_token != result.light_job_token) {
+                ++light_stale_results_;
+                if (record.dirty_light || record.needs_final_light) {
+                    queue_light_job_if_loaded_locked(result.coord);
+                }
+                continue;
+            }
+
+            last_light_ms_ = result.light_ms;
+            const bool had_ready = record.light.has_value() && record.light->borders_ready;
+            const std::uint64_t old_signature = record.border_signature;
+
+            record.state = result.provisional ? ChunkState::WaitingForNeighbors : ChunkState::LightReady;
+            record.light = std::move(result.light);
+            record.border_signature = result.border_signature;
+            record.dirty_light = result.provisional;
+            record.needs_final_light = result.provisional;
+            record.dirty_mesh = true;
+
+            const bool boundaries_changed =
+                (!had_ready && result.borders_ready) ||
+                old_signature != result.border_signature;
+
+            queue_rebuild_job_if_loaded_locked(result.coord);
+            if (boundaries_changed) {
+                queue_rebuild_self_and_neighbors_if_loaded_locked(result.coord, true);
+            }
+            continue;
+        }
+
+        if (result.type == ChunkJobType::BuildMesh && it->second.generation_version != result.version) {
+            ++stale_results_;
+            if (auto state_it = rebuild_states_.find(result.coord); state_it != rebuild_states_.end()) {
+                state_it->second.queued = false;
+            }
+            queue_rebuild_job_if_loaded_locked(result.coord);
+            continue;
+        }
+
+        if (it->second.generation_version != result.version) {
             ++stale_results_;
             continue;
         }
@@ -343,7 +396,18 @@ void WorldStreamer::tick_generation_jobs() {
             }
             pending_uploads_.erase(old_end, pending_uploads_.end());
             it->second.provisional_mesh = result.provisional;
-            pending_uploads_.push_back({result.coord, result.rebuild_serial, result.provisional, std::move(result.mesh), visibility});
+            const std::uint64_t upload_token = next_upload_token_++;
+            it->second.latest_upload_token = upload_token;
+            it->second.mesh_version = result.version;
+            pending_uploads_.push_back({
+                result.coord,
+                result.version,
+                result.rebuild_serial,
+                upload_token,
+                result.provisional,
+                std::move(result.mesh),
+                visibility
+            });
             continue;
         }
 
@@ -363,47 +427,9 @@ void WorldStreamer::tick_generation_jobs() {
         if (result.type == ChunkJobType::Decorate) {
             it->second.state = ChunkState::Decorated;
             it->second.data = *result.chunk_data;
-            queue_stage_job_locked(result.coord, result.version, ChunkJobType::CalculateLight, std::move(result.chunk_data));
-            const std::array<ChunkCoord, 4> cardinal_neighbors {
-                ChunkCoord {result.coord.x - 1, result.coord.z},
-                ChunkCoord {result.coord.x + 1, result.coord.z},
-                ChunkCoord {result.coord.x, result.coord.z - 1},
-                ChunkCoord {result.coord.x, result.coord.z + 1}
-            };
-            for (const ChunkCoord neighbor : cardinal_neighbors) {
-                const auto neighbor_it = chunks_.find(neighbor);
-                if (neighbor_it != chunks_.end() &&
-                    neighbor_it->second.data.has_value() &&
-                    (!neighbor_it->second.light.has_value() || !neighbor_it->second.light->borders_ready)) {
-                    queue_light_job_if_loaded_locked(neighbor);
-                }
-            }
-            continue;
-        }
-
-        if (result.type == ChunkJobType::CalculateLight) {
-            if (!result.light.has_value()) {
-                ++light_stale_results_;
-                continue;
-            }
-            last_light_ms_ = result.light_ms;
-            it->second.state = result.provisional ? ChunkState::WaitingForNeighbors : ChunkState::LightReady;
-            it->second.data = std::move(result.chunk_data);
-            it->second.light = std::move(result.light);
-            it->second.dirty_light = false;
-            it->second.dirty_mesh = true;
-            const auto visible_it = std::find_if(
-                visible_chunks_.begin(),
-                visible_chunks_.end(),
-                [&](const ActiveChunk& active) {
-                    return active.coord == result.coord;
-                }
-            );
-            if (visible_it == visible_chunks_.end()) {
-                visible_chunks_.push_back({result.coord});
-            }
-
-            queue_rebuild_job_if_loaded_locked(result.coord);
+            it->second.dirty_light = true;
+            it->second.needs_final_light = true;
+            queue_light_self_and_neighbors_if_loaded_locked(result.coord, true);
             continue;
         }
 
@@ -419,7 +445,10 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads() {
     uploads.reserve(pending_uploads_.size());
     for (PendingChunkUpload& upload : pending_uploads_) {
         const auto it = chunks_.find(upload.coord);
-        if (it == chunks_.end() || it->second.latest_rebuild_serial != upload.rebuild_serial) {
+        if (it == chunks_.end() ||
+            it->second.generation_version != upload.version ||
+            it->second.latest_rebuild_serial != upload.rebuild_serial ||
+            it->second.latest_upload_token != upload.upload_token) {
             record_stale_upload_drop(upload.coord);
             continue;
         }
@@ -460,7 +489,10 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
     while (consumed_count < upload_count) {
         PendingChunkUpload& pending = pending_uploads_[consumed_count];
         auto it = chunks_.find(pending.coord);
-        if (it == chunks_.end() || it->second.latest_rebuild_serial != pending.rebuild_serial) {
+        if (it == chunks_.end() ||
+            it->second.generation_version != pending.version ||
+            it->second.latest_rebuild_serial != pending.rebuild_serial ||
+            it->second.latest_upload_token != pending.upload_token) {
             record_stale_upload_drop(pending.coord);
             ++consumed_count;
             continue;
@@ -495,7 +527,10 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(s
     for (; selected_count < pending_uploads_.size(); ++selected_count) {
         PendingChunkUpload& pending = pending_uploads_[selected_count];
         auto chunk_it = chunks_.find(pending.coord);
-        if (chunk_it == chunks_.end() || chunk_it->second.latest_rebuild_serial != pending.rebuild_serial) {
+        if (chunk_it == chunks_.end() ||
+            chunk_it->second.generation_version != pending.version ||
+            chunk_it->second.latest_rebuild_serial != pending.rebuild_serial ||
+            chunk_it->second.latest_upload_token != pending.upload_token) {
             record_stale_upload_drop(pending.coord);
             continue;
         }
@@ -575,12 +610,14 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
             ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z + 1},
             ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z + 1}
         };
-        const auto has_light = [this](ChunkCoord coord) {
+        const auto has_final_light = [this](ChunkCoord coord) {
             const auto it = chunks_.find(coord);
-            return it != chunks_.end() && it->second.light.has_value();
+            return it != chunks_.end() &&
+                it->second.light.has_value() &&
+                it->second.light->borders_ready;
         };
-        const bool cardinal_ready = std::all_of(cardinal_neighbors.begin(), cardinal_neighbors.end(), has_light);
-        const bool diagonal_ready = std::all_of(diagonal_neighbors.begin(), diagonal_neighbors.end(), has_light);
+        const bool cardinal_ready = std::all_of(cardinal_neighbors.begin(), cardinal_neighbors.end(), has_final_light);
+        const bool diagonal_ready = std::all_of(diagonal_neighbors.begin(), diagonal_neighbors.end(), has_final_light);
         if (cardinal_ready && diagonal_ready) {
             observer_light_border_status = 2;
         } else if (cardinal_ready) {
@@ -780,15 +817,18 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
     }
 
     chunk.set(local_x, local_y, local_z, block);
+    const std::uint64_t new_version = next_chunk_version_++;
+    chunk_it->second.generation_version = new_version;
+    chunk_it->second.mesh_version = 0;
     const bool light_affecting_change =
         block_registry_.light_dampening(existing) != block_registry_.light_dampening(block) ||
         block_registry_.light_emission(existing) != block_registry_.light_emission(block);
     if (light_affecting_change) {
         chunk_it->second.dirty_light = true;
+        chunk_it->second.needs_final_light = true;
         chunk_it->second.state = ChunkState::LightPropagating;
     }
     chunk_it->second.dirty_mesh = true;
-    chunk_it->second.mesh_version = next_chunk_version_++;
     mark_chunk_dirty_for_save(chunk_coord);
     const bool touches_west = local_x < kLightBorder;
     const bool touches_east = local_x >= kChunkWidth - kLightBorder;
@@ -938,6 +978,7 @@ void WorldStreamer::worker_loop() {
         JobResult result {};
         result.coord = job.coord;
         result.version = job.version;
+        result.light_job_token = job.light_job_token;
         result.rebuild_serial = job.rebuild_serial;
         result.type = job.type;
 
@@ -958,8 +999,9 @@ void WorldStreamer::worker_loop() {
             if (job.light_snapshot != nullptr) {
                 ChunkLightResult light_result = calculate_chunk_light(*job.light_snapshot, block_registry_);
                 result.provisional = light_result.provisional;
+                result.borders_ready = light_result.borders_ready;
+                result.border_signature = light_result.border_signature;
                 result.light = std::move(light_result.light);
-                result.chunk_data = std::move(job.light_snapshot->chunk);
             }
             const auto end = std::chrono::steady_clock::now();
             result.light_ms = std::chrono::duration<float, std::milli>(end - start).count();
@@ -1048,22 +1090,32 @@ void WorldStreamer::push_job_locked(ChunkJob&& job) {
 void WorldStreamer::queue_generate_job(ChunkCoord coord, std::uint64_t version) {
     {
         std::lock_guard lock(mutex_);
-        push_job_locked({coord, version, 0, ChunkJobType::GenerateTerrain, std::nullopt, nullptr, nullptr});
+        push_job_locked({coord, version, 0, 0, ChunkJobType::GenerateTerrain, std::nullopt, nullptr, nullptr});
     }
     cv_.notify_one();
 }
 
 void WorldStreamer::queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data) {
-    if (type == ChunkJobType::CalculateLight && chunk_data.has_value()) {
-        if (queued_light_jobs_.contains(coord)) {
+    if (type == ChunkJobType::CalculateLight) {
+        auto chunk_it = chunks_.find(coord);
+        if (chunk_it == chunks_.end() || !chunk_it->second.data.has_value()) {
             return;
         }
-        std::optional<LightBuildSnapshot> light_snapshot = make_light_build_snapshot(coord, *chunk_data);
+        if (queued_light_jobs_.contains(coord)) {
+            chunk_it->second.dirty_light = true;
+            chunk_it->second.needs_final_light = true;
+            chunk_it->second.latest_light_job_token = next_light_job_token_++;
+            return;
+        }
+        std::optional<LightBuildSnapshot> light_snapshot = make_light_build_snapshot(coord, *chunk_it->second.data);
         if (light_snapshot.has_value()) {
+            const std::uint64_t light_job_token = next_light_job_token_++;
+            chunk_it->second.latest_light_job_token = light_job_token;
             queued_light_jobs_.insert(coord);
             push_job_locked({
                 coord,
                 version,
+                light_job_token,
                 0,
                 type,
                 std::nullopt,
@@ -1074,7 +1126,7 @@ void WorldStreamer::queue_stage_job_locked(ChunkCoord coord, std::uint64_t versi
             return;
         }
     }
-    push_job_locked({coord, version, 0, type, std::move(chunk_data), nullptr, nullptr});
+    push_job_locked({coord, version, 0, 0, type, std::move(chunk_data), nullptr, nullptr});
     cv_.notify_one();
 }
 
@@ -1090,12 +1142,14 @@ void WorldStreamer::queue_light_job_if_loaded_locked(ChunkCoord coord) {
     }
     if (queued_light_jobs_.contains(coord)) {
         it->second.dirty_light = true;
+        it->second.needs_final_light = true;
+        it->second.latest_light_job_token = next_light_job_token_++;
         return;
     }
     it->second.dirty_light = true;
+    it->second.needs_final_light = true;
     it->second.state = ChunkState::LightPropagating;
-    std::optional<ChunkData> chunk_copy {*it->second.data};
-    queue_stage_job_locked(coord, it->second.generation_version, ChunkJobType::CalculateLight, std::move(chunk_copy));
+    queue_stage_job_locked(coord, it->second.generation_version, ChunkJobType::CalculateLight, std::nullopt);
 }
 
 void WorldStreamer::queue_light_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals) {
@@ -1163,6 +1217,7 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
     push_job_locked({
         coord,
         snapshot->version,
+        0,
         state.serial,
         ChunkJobType::BuildMesh,
         std::nullopt,
@@ -1451,8 +1506,11 @@ std::optional<WorldStreamer::ChunkMeshSnapshot> WorldStreamer::make_rebuild_snap
     auto light_southwest = light_corner({coord.x - 1, coord.z + 1}, kChunkWidth - kLightBorder, 0);
     auto light_southeast = light_corner({coord.x + 1, coord.z + 1}, 0, 0);
     const bool provisional =
+        !chunk_it->second.light->borders_ready ||
         !west.has_value() || !east.has_value() || !north.has_value() || !south.has_value() ||
-        !light_west.has_value() || !light_east.has_value() || !light_north.has_value() || !light_south.has_value();
+        !northwest.has_value() || !northeast.has_value() || !southwest.has_value() || !southeast.has_value() ||
+        !light_west.has_value() || !light_east.has_value() || !light_north.has_value() || !light_south.has_value() ||
+        !light_northwest.has_value() || !light_northeast.has_value() || !light_southwest.has_value() || !light_southeast.has_value();
 
     return ChunkMeshSnapshot {
         chunk_it->second.generation_version,
