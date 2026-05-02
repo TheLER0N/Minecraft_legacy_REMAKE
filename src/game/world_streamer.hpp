@@ -58,8 +58,12 @@ public:
     std::vector<PendingChunkUpload> drain_pending_uploads();
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position);
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position, Vec3 observer_forward);
-    std::vector<PendingChunkUpload> drain_pending_uploads_by_budget(std::size_t byte_budget, Vec3 observer_position, Vec3 observer_forward);
-    std::vector<ChunkCoord> drain_pending_unloads();
+    std::vector<PendingChunkUpload> drain_pending_uploads_by_budget(
+        std::size_t byte_budget,
+        std::size_t max_count,
+        Vec3 observer_position,
+        Vec3 observer_forward
+    );    std::vector<ChunkCoord> drain_pending_unloads();
     StreamingStats stats() const;
     BlockQueryResult query_block_at_world(int x, int y, int z) const;
     BlockId block_at_world(int x, int y, int z) const;

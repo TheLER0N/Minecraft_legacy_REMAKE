@@ -19,9 +19,9 @@ constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
 constexpr int kMaxChunkRadius = 100;
 
-constexpr std::size_t kMaxNewChunkRequestsPerFrame = 4;
+constexpr std::size_t kMaxNewChunkRequestsPerFrame = 8;
 
-constexpr std::size_t kMaxResultsPerTick = 32;
+constexpr std::size_t kMaxResultsPerTick = 48;
 
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
@@ -181,21 +181,35 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 
     observer_chunk_ = origin;
 
+    //
     std::vector<ChunkCoord> wanted;
     wanted.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+
     for (int dz = -chunk_radius_; dz <= chunk_radius_; ++dz) {
         for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
-            wanted.push_back({origin.x + dx, origin.z + dz});
+            wanted.push_back({ origin.x + dx, origin.z + dz });
         }
     }
-    std::sort(
+
+    // Нам не нужна идеальная сортировка всех чанков.
+    // Нам нужны только ближайшие/важные чанки, которые попадут в request прямо сейчас.
+    const std::size_t priority_count = std::min<std::size_t>(
+        wanted.size(),
+        kMaxNewChunkRequestsPerFrame * 4
+    );
+
+    const auto priority_end = wanted.begin() + static_cast<std::ptrdiff_t>(priority_count);
+
+    std::partial_sort(
         wanted.begin(),
+        priority_end,
         wanted.end(),
         [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
             return chunk_priority_score(lhs, observer_position_, observer_forward_) <
                 chunk_priority_score(rhs, observer_position_, observer_forward_);
         }
     );
+    //
 
     std::size_t requested_this_frame = 0;
     for (const ChunkCoord& coord : wanted) {
@@ -521,19 +535,27 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
     return uploads;
 }
 
-std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(std::size_t byte_budget, Vec3 observer_position, Vec3 observer_forward) {
-    if (byte_budget == 0 || pending_uploads_.empty()) {
+
+//
+std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
+    std::size_t byte_budget,
+    std::size_t max_count,
+    Vec3 observer_position,
+    Vec3 observer_forward
+) {
+    if (byte_budget == 0 || max_count == 0 || pending_uploads_.empty()) {
         return {};
     }
 
-
-    //замена
     const Vec3 planar_forward = normalize({ observer_forward.x, 0.0f, observer_forward.z });
 
-    // Не сортируем всю очередь pending_uploads_.
-    // Нам нужны ближайшие и самые важные чанки, а не идеальная сортировка всего списка.
-    // Это уменьшает нагрузку на CPU, особенно когда очередь загрузки большая.
-    const std::size_t sort_count = std::min<std::size_t>(pending_uploads_.size(), 96);
+    // Не сортируем всю очередь. Берём только верхнюю часть, которая реально может попасть в upload.
+    // Это снижает CPU-нагрузку при большом pending_uploads_.
+    const std::size_t sort_count = std::min<std::size_t>(
+        pending_uploads_.size(),
+        std::max<std::size_t>(max_count * 4, 32)
+    );
+
     const auto sort_end = pending_uploads_.begin() + static_cast<std::ptrdiff_t>(sort_count);
 
     std::partial_sort(
@@ -547,11 +569,14 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(s
     );
 
     std::vector<PendingChunkUpload> uploads;
+    uploads.reserve(max_count);
+
     std::size_t selected_bytes = 0;
     std::size_t selected_count = 0;
-    for (; selected_count < sort_count; ++selected_count)  
-    {
+
+    for (; selected_count < sort_count; ++selected_count) {
         PendingChunkUpload& pending = pending_uploads_[selected_count];
+
         auto chunk_it = chunks_.find(pending.coord);
         if (chunk_it == chunks_.end() ||
             chunk_it->second.generation_version != pending.version ||
@@ -560,18 +585,33 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(s
             record_stale_upload_drop(pending.coord);
             continue;
         }
+
         const std::size_t upload_bytes = mesh_byte_count(pending.mesh);
+
         if (!uploads.empty() && selected_bytes + upload_bytes > byte_budget) {
             break;
         }
+
         selected_bytes += upload_bytes;
         chunk_it->second.state = ChunkState::UploadedToGPU;
         chunk_it->second.uploaded_to_gpu = true;
+
         uploads.push_back(std::move(pending));
+
+        if (uploads.size() >= max_count) {
+            ++selected_count;
+            break;
+        }
     }
-    pending_uploads_.erase(pending_uploads_.begin(), pending_uploads_.begin() + static_cast<std::ptrdiff_t>(selected_count));
+
+    pending_uploads_.erase(
+        pending_uploads_.begin(),
+        pending_uploads_.begin() + static_cast<std::ptrdiff_t>(selected_count)
+    );
+
     return uploads;
 }
+//
 
 std::vector<ChunkCoord> WorldStreamer::drain_pending_unloads() {
     std::vector<ChunkCoord> unloads;

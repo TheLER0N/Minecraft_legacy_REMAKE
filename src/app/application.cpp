@@ -23,8 +23,11 @@ constexpr float kPlacementBodyPadding = 0.02f;
 constexpr float kDebugFpsRefreshSeconds = 0.25f;
 constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
-constexpr std::size_t kChunkUploadByteBudgetPerFrame = 6ull * 1024ull * 1024ull;
-constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 3ull * 1024ull * 1024ull;
+
+constexpr std::size_t kChunkUploadByteBudgetPerFrame = 8ull * 1024ull * 1024ull;
+constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 4ull * 1024ull * 1024ull;
+constexpr std::size_t kChunkUploadMaxCountPerFrame = 6;
+
 constexpr int kPlayGameButtonIndex = 0;
 constexpr int kExitGameButtonIndex = 5;
 constexpr float kMenuExitDelaySeconds = 0.18f;
@@ -487,8 +490,12 @@ int Application::run() {
         const std::size_t upload_budget = pre_upload_stats.pending_uploads > 4
             ? kChunkUploadBacklogBudgetPerFrame
             : kChunkUploadByteBudgetPerFrame;
-        auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(upload_budget, observer_position, observer_forward);
-        if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
+        auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(
+            upload_budget,
+            kChunkUploadMaxCountPerFrame,
+            observer_position,
+            observer_forward
+        );        if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
             log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
             ++pending_upload_log_count;
         }
