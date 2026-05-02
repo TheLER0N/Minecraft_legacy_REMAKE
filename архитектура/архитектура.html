@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minecraft Legacy Remake — архитектурная карта v9 — обновлено по release-version</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'dark',
+  securityLevel: 'loose',
+  flowchart: { htmlLabels: true, curve: 'basis', useMaxWidth: true },
+  sequence: { useMaxWidth: true },
+  themeVariables: {
+    background: '#07111f',
+    primaryColor: '#10243f',
+    primaryBorderColor: '#60a5fa',
+    primaryTextColor: '#f8fbff',
+    lineColor: '#93c5fd',
+    secondaryColor: '#0f172a',
+    tertiaryColor: '#111827',
+    noteBkgColor: '#1f2937',
+    noteTextColor: '#e5e7eb'
+  }
+});
+</script>
+<style>
+:root{
+  --bg:#050914; --paper:#0b1220; --panel:#111c31; --panel2:#0f1a2d; --line:#263c5f;
+  --text:#eaf2ff; --muted:#a9b7cf; --accent:#67e8f9; --accent2:#60a5fa;
+  --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --code:#111827;
+}
+*{box-sizing:border-box} html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(circle at 20% 0%,#10243f 0,transparent 35%),linear-gradient(180deg,#06101e,#050914 40%);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;line-height:1.55}
+header{padding:46px 56px 34px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(15,23,42,.92),rgba(7,17,31,.96));position:relative;overflow:hidden}
+header:after{content:"";position:absolute;right:-80px;top:-80px;width:320px;height:320px;background:radial-gradient(circle,rgba(103,232,249,.18),transparent 62%)}
+header h1{margin:0 0 12px;font-size:42px;letter-spacing:-.045em;max-width:1180px} header p{max-width:1180px;color:var(--muted);font-size:17px}
+main{max-width:1500px;margin:0 auto;padding:30px 24px 80px}
+section{margin:28px 0;padding:28px;border:1px solid var(--line);border-radius:24px;background:rgba(11,18,32,.9);box-shadow:0 24px 80px rgba(0,0,0,.24);page-break-inside:avoid}
+section.page{position:relative;counter-increment:page} body{counter-reset:page}
+section.page:before{content:"Страница " counter(page);position:absolute;right:22px;top:18px;color:#7dd3fc;border:1px solid #1f4c73;background:#081626;border-radius:999px;padding:2px 10px;font-size:12px}
+h2{margin:0 0 14px;font-size:28px;letter-spacing:-.025em} h3{font-size:20px;margin:18px 0 8px;color:#eaf2ff} h4{margin:12px 0 6px;color:var(--accent)}
+p,li{color:var(--muted)} strong{color:#f8fbff}.muted{color:var(--muted)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre{background:var(--code);color:#c7d2fe;border-radius:8px} code{padding:2px 6px} pre{padding:14px;border:1px solid var(--line);overflow:auto}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:18px;padding:16px}.card h3,.card h4{margin-top:0}
+.kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:22px}.kpi div{background:#081626;border:1px solid #1d3555;border-radius:16px;padding:15px}.kpi b{display:block;color:var(--accent);font-size:26px;line-height:1.1}.kpi span{color:var(--muted);font-size:13px}
+.callout{border-left:4px solid var(--accent2);background:#0a1628;border-radius:14px;padding:14px 18px;color:var(--muted)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top}th{background:#101d33;color:#eaf2ff}td{color:#bdc7d9}
+.diagram-card{margin:20px 0;padding:20px;border-radius:18px;border:1px solid #29476f;background:#081323;overflow-x:auto}.diagram-card p{margin-top:0}.mermaid{min-width:820px;background:#060d18;border:1px solid #172942;border-radius:16px;padding:16px}
+.tag{display:inline-block;border:1px solid #2d5f99;background:#10233e;color:#93c5fd;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}.toc{columns:2}.small{font-size:12px}.mono{font-family:Consolas,Menlo,monospace}
+@media(max-width:900px){header{padding:30px 20px}.grid,.grid3,.grid4,.kpi{grid-template-columns:1fr}.toc{columns:1}section{padding:18px}.mermaid{min-width:720px}}
+@media print{body{background:white;color:black}header,section{box-shadow:none;background:white;color:black;border-color:#999}.card,.diagram-card,.callout{background:#fff;color:#111}.mermaid{background:#fff}.page{break-after:page}a{color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Minecraft Legacy Remake — архитектурная карта v9</h1>
+  <p><strong>Обновлено по текущей ветке <code>release-version</code> на 1 мая 2026.</strong> Документ пересобран после новой сверки с репозиторием: добавлен <code>PerfRecorder</code>, исправлены числа по CMake target, уточнены метрики debug/perf, GPU upload budget, Light Borders на 8 направлений и места, которые являются архитектурной картой, а не отдельными физическими подсистемами.</p>
+  <div class="kpi">
+    <div><b>40+</b><span>блок-схемы и sequence diagrams</span></div>
+    <div><b>31</b><span>страница/раздел с подписью</span></div>
+    <div><b>30</b><span>файлов в src: .cpp/.hpp</span></div>
+    <div><b>14</b><span>.cpp файлов в CMake target</span></div>
+    <div><b>8</b><span>light border neighbors</span></div>
+  </div>
+</header>
+<main>
+
+<section class="page" id="p01">
+<h2>1. Проверка актуальности v9</h2>
+<div class="callout"><strong>Вывод после сверки v9:</strong> загруженный HTML v9 в целом совпадал с веткой <code>release-version</code>, но требовал обновления по новым фактам из кода. Главное исправление: <code>CMakeLists.txt</code> теперь собирает 14 <code>.cpp</code> файлов, потому что добавлен <code>src/common/perf_recorder.cpp</code>. В <code>Application</code> появился <code>PerfRecorder</code>, который пишет CSV-профиль кадра по переменной окружения <code>MINECRAFT_LEGACY_PERF_LOG</code>. Также оставлены уточнения по <code>Cave Visibility</code>, <code>Light Borders</code> на 8 направлений и состояниям <code>ChunkState</code>.</div>
+<table><thead><tr><th>Пункт проверки</th><th>Что реально есть в ветке</th><th>Как обновлено в HTML</th></tr></thead><tbody>
+<tr><td>Сборка</td><td><code>CMakeLists.txt</code> собирает target из 14 <code>.cpp</code>: <code>main</code>, <code>application</code>, <code>asset_pack</code>, <code>perf_recorder</code>, <code>platform_app</code>, <code>stb_vorbis_impl</code>, <code>renderer</code>, <code>block</code>, <code>light</code>, <code>world_generator</code>, <code>world_save</code>, <code>world_streamer</code>, <code>debug_camera</code>, <code>player_controller</code>.</td><td>KPI исправлен: теперь указаны <code>30</code> src-файлов и <code>14</code> .cpp в CMake target.</td></tr>
+<tr><td>Файловая архитектура</td><td>В <code>src</code> реально есть группы <code>app</code>, <code>common</code>, <code>game</code>, <code>platform</code>, <code>render</code> и <code>main.cpp</code>.</td><td>Оставлена модульная карта, но добавлена пометка: это modular monolith, не ECS и не полностью разделённый движок.</td></tr>
+<tr><td>Освещение</td><td>Есть <code>src/game/light.cpp/.hpp</code>, <code>LightBuildSnapshot</code>, 4 стороны + 4 угла, <code>LightMeshSnapshot</code>, <code>calculate_chunk_light</code>, <code>calculate_fast_chunk_light</code> и <code>sample_sky_light</code>.</td><td>Разделы про border lighting сохранены, но добавлено уточнение: основной исправляемый слой сейчас <code>Sky Light</code>; <code>Block Light</code> хранится и принимает emission, но полноценное распространение block-light лучше считать отдельной будущей задачей.</td></tr>
+<tr><td>Модель мира</td><td><code>kChunkWidth=16</code>, <code>kChunkDepth=16</code>, <code>kLightBorder=4</code>, высота мира <code>-64..319</code>, <code>kChunkHeight=384</code>, секции по 16 блоков.</td><td>Раздел World data model уточнён: 384 блока высоты = 24 секции.</td></tr>
+<tr><td>Стриминг чанков</td><td><code>WorldStreamer</code> содержит job-типы <code>GenerateTerrain</code>, <code>Decorate</code>, <code>CalculateLight</code>, <code>BuildFastMesh</code>, <code>BuildFinalMesh</code>, очереди, stale/drop счётчики, dirty save и upload budget.</td><td>План pipeline оставлен, но рядом с state machine добавлена пометка, что это карта жизненного цикла, а не доказательство идеальной реализации каждого перехода.</td></tr>
+<tr><td>Cave Visibility</td><td><code>Application::update_cave_visibility_frame</code> считает roof blocks и hysteresis, затем передаёт <code>Renderer::CaveVisibilityFrame</code> в renderer.</td><td>Раздел Cave Visibility исправлен: это текущая связка подсчёта и отсечения, а не отдельная подсистема в отдельной папке.</td></tr>
+<tr><td>Renderer</td><td><code>Renderer</code> хранит секционные GPU-буферы, принимает <code>ChunkVisibilityMetadata</code>, имеет счётчики frustum/occlusion/cave/surface culling и debug HUD data.</td><td>Раздел Renderer оставлен, но усилил акцент на section-level rendering и debug-причинах отсечения.</td></tr>
+<tr><td>Документация</td><td>В <code>docs</code> есть <code>Project_Report_Expert_Deep_Dive.docx</code> и <code>TZ_Minecraft_Legacy.md</code>.</td><td>Список документов оставлен актуальным.</td></tr>
+</tbody></table>
+<h3>Главные изменения относительно загруженного HTML v9</h3>
+<ul>
+<li>Исправлены точные числа в шапке: <code>30</code> файлов <code>src</code> и <code>14</code> CMake translation units.</li>
+<li>Добавлено честное ограничение по <code>Block Light</code>: сейчас он не должен подаваться как полностью готовая система распространения света.</li>
+<li>Уточнено, что <code>Cave Visibility</code> — runtime-логика между <code>Application</code> и <code>Renderer</code>, а не отдельный каталог.</li>
+<li>Добавлен <code>PerfRecorder</code> как отдельная часть диагностики: он помогает измерять FPS, upload, очереди чанков и GPU-buffer churn.</li>
+<li>Сохранены все важные схемы: они полезны для преподавателя как архитектурная карта “куда смотреть в коде”.</li>
+</ul>
+</section>
+
+<section class="page" id="p02">
+<h2>2. Навигация по документу</h2>
+<ol class="toc">
+<li><a href="#p01">Что обновлено</a></li><li><a href="#p03">Краткая архитектура</a></li><li><a href="#p04">Фактическая структура файлов</a></li><li><a href="#p05">Build и зависимости</a></li><li><a href="#p06">Entry point и Application</a></li><li><a href="#p07">Game loop</a></li><li><a href="#p08">Platform/Input/Audio</a></li><li><a href="#p09">Renderer/Vulkan</a></li><li><a href="#p10">World data model</a></li><li><a href="#p11">Block registry</a></li><li><a href="#p12">World generator</a></li><li><a href="#p13">Light subsystem</a></li><li><a href="#p14">World streamer</a></li><li><a href="#p15">Chunk state machine</a></li><li><a href="#p16">Fast/final mesh</a></li><li><a href="#p17">Border lighting fix</a></li><li><a href="#p18">Greedy meshing</a></li><li><a href="#p19">GPU upload</a></li><li><a href="#p20">Culling</a></li><li><a href="#p21">Cave visibility</a></li><li><a href="#p22">Block interaction</a></li><li><a href="#p23">Save system</a></li><li><a href="#p24">Assets</a></li><li><a href="#p25">Android</a></li><li><a href="#p26">Diagnostics/Perf</a></li><li><a href="#p27">Риски</a></li><li><a href="#p28">План доработок</a></li><li><a href="#p29">Карта “куда лезть”</a></li><li><a href="#p30">Sequence diagrams</a></li><li><a href="#p31">Итог</a></li>
+</ol>
+</section>
+
+<section class="page" id="p03">
+<h2>3. Краткая архитектурная характеристика</h2>
+<div class="grid">
+<div class="card"><h3>Тип архитектуры</h3><p><strong>Game loop architecture + modular monolith + engine/runtime split.</strong> Это не ECS: нет отдельного entity/component registry, основные роли распределены между <code>Application</code>, <code>WorldStreamer</code>, <code>Renderer</code>, <code>PlatformApp</code>, <code>WorldGenerator</code>, <code>BlockRegistry</code> и <code>PlayerController</code>.</p></div>
+<div class="card"><h3>Центр сборки</h3><p><code>Application</code> остаётся composition root: создаёт platform, renderer, block registry, player, save и world streamer. Минус: класс всё ещё перегружен меню, игровым циклом, debug HUD, взаимодействием с блоками и состояниями мира.</p></div>
+<div class="card"><h3>Самое важное изменение</h3><p><code>Light subsystem</code> выделен отдельно. Теперь lighting — это не просто цвет вершин, а отдельный runtime stage между генерацией чанка и построением меша.</p></div>
+<div class="card"><h3>Горячие зоны</h3><p>CPU: генерация, освещение, greedy meshing, player collision. GPU/driver: upload буферов чанков, draw calls по секциям, occlusion/cave/frustum culling. IO: сохранение dirty чанков.</p></div>
+</div>
+<div class="diagram-card"><h3>Общая карта runtime</h3><div class="mermaid">
+flowchart TD
+    OS["Windows / Android / будущие платформы"] --> Main["src/main.cpp"]
+    Main --> App["Application"]
+    App --> Platform["PlatformApp SDL3 window input audio"]
+    App --> Renderer["Renderer Vulkan HUD menu"]
+    App --> Registry["BlockRegistry"]
+    App --> Save["WorldSave"]
+    App --> Streamer["WorldStreamer"]
+    App --> Player["PlayerController"]
+    Streamer --> Generator["WorldGenerator terrain caves trees"]
+    Streamer --> Light["Light subsystem calculate_chunk_light"]
+    Streamer --> Mesh["build_chunk_mesh fast/final"]
+    Light --> Mesh
+    Mesh --> Upload["PendingChunkUpload"]
+    Upload --> Renderer
+    Renderer --> GPU["Vulkan buffers pipelines swapchain"]
+    Platform --> Assets["AssetPackResolver"]
+    Renderer --> Assets
+</div></div>
+</section>
+
+<section class="page" id="p04">
+<h2>4. Фактическая структура файлов после обновления</h2>
+<p>Ниже — список файлов и групп, которые надо учитывать при защите. Важно: <code>minecraft_legacy_release</code> и <code>Minecraft_Legacy_Release.zip</code> относятся к опубликованной сборке/пакету, а не к исходному runtime-коду.</p>
+<div class="callout"><strong>Уточнение v9:</strong> по текущей ветке CMake target содержит 14 <code>.cpp</code> файлов, а каталог <code>src</code> содержит около 30 основных C++ файлов с учётом заголовков. Поэтому в защите лучше говорить не “32+ source/header”, а “14 translation units и 30 файлов в src”.</div>
+<table><thead><tr><th>Путь</th><th>Роль</th><th>Статус в v6</th></tr></thead><tbody>
+<tr><td><code>README.md</code></td><td>Краткое описание проекта, фичи, управление, сборка</td><td>Учтён</td></tr>
+<tr><td><code>AI.md</code></td><td>Архитектурные правила для будущих изменений: кроссплатформенность, P2P, модули, куда лезть</td><td>Добавлен в v6</td></tr>
+<tr><td><code>.editorconfig</code></td><td>Единый стиль файлов: UTF-8, LF, 4 пробела</td><td>Добавлен в v6</td></tr>
+<tr><td><code>.gitignore</code></td><td>Игнор build, Gradle, VS, Android build, saves, binaries, SPIR-V</td><td>Уточнён</td></tr>
+<tr><td><code> .gitignore</code> с пробелом в начале</td><td>Дублирующий/ошибочно названный ignore-файл</td><td>Помечен как технический мусор-кандидат на удаление</td></tr>
+<tr><td><code>CMakeLists.txt</code></td><td>Главная сборка C++20, SDL3, Vulkan, shaders, список C++ sources</td><td>Обновлён: учитывает <code>src/game/light.cpp</code> и <code>src/common/perf_recorder.cpp</code></td></tr>
+<tr><td><code>CMakePresets.json</code>, <code>build.bat</code>, <code>build_release.bat</code></td><td>Windows Debug/Release build pipeline</td><td>Учтены</td></tr>
+<tr><td><code>build.gradle</code>, <code>settings.gradle</code>, <code>gradle.properties</code>, <code>gradlew*</code></td><td>Gradle/Android wrapper</td><td>Учтены</td></tr>
+<tr><td><code>android/app/**</code></td><td>Android application wrapper, Manifest, Java Activity, externalNativeBuild</td><td>Учтён</td></tr>
+<tr><td><code>src/app/**</code></td><td>Application, состояния меню/мира, игровой цикл</td><td>Учтён</td></tr>
+<tr><td><code>src/common/**</code></td><td>math, log, asset_pack</td><td>Учтён</td></tr>
+<tr><td><code>src/common/perf_recorder.hpp</code>, <code>src/common/perf_recorder.cpp</code></td><td>CSV-профилирование кадра: frame time, p50/p95/p99, upload, очереди чанков, stale/provisional counters, new/pooled GPU buffers</td><td><strong>Добавлен в v9</strong></td></tr>
+<tr><td><code>src/game/light.hpp</code>, <code>src/game/light.cpp</code></td><td>Расчёт sky light, block light storage, light borders, readiness</td><td><strong>Новый ключевой модуль v6</strong></td></tr>
+<tr><td><code>src/game/world_streamer.*</code></td><td>Асинхронные jobs, состояния чанков, uploads, raycast, set block, saves</td><td>Обновлён pipeline</td></tr>
+<tr><td><code>src/game/world_generator.*</code></td><td>Генерация terrain/caves/aquifers/trees и build_chunk_mesh</td><td>Lighting вынесен наружу, mesh принимает LightMeshSnapshot</td></tr>
+<tr><td><code>src/render/renderer.*</code></td><td>Vulkan renderer, chunk buffers, HUD/menu, culling, debug stats</td><td>Debug HUD расширен light/chunk метриками</td></tr>
+<tr><td><code>assets/textures/texture_pack/classic/**</code></td><td>Текстуры, UI, шейдеры, звуки, музыка</td><td>Группа ассетов</td></tr>
+<tr><td><code>docs/Project_Report_Expert_Deep_Dive.docx</code></td><td>Полный технический отчёт (deep dive) по проекту</td><td>Добавлен в v7</td></tr>
+<tr><td><code>docs/TZ_Minecraft_Legacy.md</code></td><td>Техническое задание и план реализации</td><td>Добавлен в v7</td></tr>
+<tr><td><code>publish_repo</code>, <code>minecraft_legacy_release/**</code>, <code>Minecraft_Legacy_Release.zip</code></td><td>Публикация/готовый релизный пакет</td><td>Не считать исходниками runtime</td></tr>
+<tr><td><code>фото/пример меню/**</code></td><td>Визуальные материалы/референсы меню</td><td>Группа ассетов/доков</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p05">
+<h2>5. Build system и зависимости</h2>
+<div class="grid">
+<div class="card"><h3>CMake</h3><p>Проект собирается как C++20. На desktop создаётся <code>minecraft_legacy</code>, на Android — shared library <code>main</code>. SDL3 подтягивается через FetchContent, Vulkan ищется через SDK или Android library.</p></div>
+<div class="card"><h3>Shaders</h3><p>GLSL лежит в <code>assets/textures/texture_pack/classic/shaders</code>. CMake вызывает <code>glslc</code> и генерирует <code>*.spv</code>. Поэтому <code>*.spv</code> — generated output, а не главный исходник.</p></div>
+<div class="card"><h3>Windows</h3><p><code>build.bat</code> и <code>build_release.bat</code> запускают CMake presets. После сборки CMake копирует <code>assets</code> и <code>shaders</code> рядом с exe.</p></div>
+<div class="card"><h3>Android</h3><p><code>android/app/build.gradle</code> использует externalNativeBuild CMake, <code>compileSdk 36</code>, <code>minSdk 29</code>, <code>ndkVersion 30.0.14904198</code>, <code>arm64-v9a</code>.</p></div>
+<div class="card"><h3>Perf logging</h3><p><code>PerfRecorder</code> включается через переменную окружения <code>MINECRAFT_LEGACY_PERF_LOG</code> и пишет CSV. Это удобно для проверки оптимизации чанков до/после, а не только “на глаз”.</p></div>
+</div>
+<div class="diagram-card"><h3>Build pipeline</h3><div class="mermaid">
+flowchart TD
+    Source["C++ sources + assets + GLSL"] --> CMake["CMakeLists.txt"]
+    CMake --> SDL["FetchContent SDL3 release-3.2.10"]
+    CMake --> Vulkan["Vulkan SDK or Android vulkan lib"]
+    CMake --> GLSLC["glslc compile shaders"]
+    GLSLC --> SPV["generated *.spv"]
+    CMake --> Desktop{"Desktop?"}
+    CMake --> Android{"Android?"}
+    Desktop --> Exe["minecraft_legacy.exe"]
+    Desktop --> Copy["copy assets + shaders near exe"]
+    Android --> SO["libmain.so"]
+    Android --> APKAssets["assets.srcDirs source assets + generated shaders"]
+    SO --> APK["APK"]
+    APKAssets --> APK
+</div></div>
+</section>
+
+<section class="page" id="p06">
+<h2>6. Entry point и Application</h2>
+<p><code>src/main.cpp</code> создаёт <code>Application</code>, вызывает <code>initialize()</code>, затем <code>run()</code>. На уровне <code>Application</code> находятся состояния <code>StartupSplash</code>, <code>MainMenu</code>, <code>InWorld</code>, меню, hotbar, debug flags, player/debug camera, save, world streamer и <code>PerfRecorder</code>.</p>
+<div class="diagram-card"><h3>Точка входа</h3><div class="mermaid">
+flowchart TD
+    Desktop["Desktop main"] --> RunApp["run_application"]
+    Android["Android SDL_main"] --> RunApp
+    RunApp --> App["Application application"]
+    App --> Init["initialize platform renderer menu music"]
+    Init -->|false| Fail["return 1"]
+    Init -->|true| Loop["run game loop"]
+    Loop --> Exit["return exit code"]
+</div></div>
+<div class="diagram-card"><h3>Application как composition root</h3><div class="mermaid">
+flowchart LR
+    App["Application"] --> Platform["PlatformApp"]
+    App --> Renderer["Renderer"]
+    App --> Perf["PerfRecorder"]
+    App --> Blocks["BlockRegistry"]
+    App --> Player["PlayerController"]
+    App --> Camera["DebugCamera"]
+    App --> Save["WorldSave unique_ptr"]
+    App --> Streamer["WorldStreamer unique_ptr"]
+    App --> UI["menu hotbar debug HUD"]
+    App --> State["StartupSplash MainMenu InWorld"]
+</div></div>
+</section>
+
+<section class="page" id="p07">
+<h2>7. Главный game loop</h2>
+<p>Кадр начинается с событий SDL, затем по текущему состоянию выполняется splash, menu или in-world simulation. В режиме мира кадр дополнительно обновляет игрока, observer position, streaming, uploads, raycast, block interaction, debug HUD и renderer.</p>
+<div class="diagram-card"><h3>Game loop</h3><div class="mermaid">
+flowchart TD
+    Loop["while not close"] --> Pump["platform.pump_events"]
+    Pump --> Input["InputState + delta time"]
+    Input --> Music["platform.update_music"]
+    Music --> State{"AppState"}
+    State -->|StartupSplash| Splash["draw startup splash"]
+    State -->|MainMenu| Menu["menu navigation draw menu"]
+    State -->|InWorld| World["world update streaming render"]
+    Splash --> End["renderer.end_frame"]
+    Menu --> End
+    World --> End
+    End --> Loop
+</div></div>
+<div class="diagram-card"><h3>InWorld frame</h3><div class="mermaid">
+flowchart TD
+    Start["InWorld frame"] --> Toggles["debug toggles render distance leaves culling"]
+    Toggles --> Move{Debug fly?}
+    Move -->|yes| DebugCam["DebugCamera.update"]
+    Move -->|no| Player["PlayerController.update"]
+    DebugCam --> Obs["observer position forward"]
+    Player --> Obs
+    Obs --> Stream["WorldStreamer.update_observer"]
+    Stream --> Jobs["tick_generation_jobs"]
+    Jobs --> Saves["flush_dirty_chunks"]
+    Saves --> Uploads["drain_pending_uploads_by_budget"]
+    Uploads --> GPU["renderer.upload_chunk_mesh"]
+    GPU --> Raycast["world_streamer.raycast"]
+    Raycast --> Blocks["break/place block"]
+    Blocks --> HUD["debug HUD data"]
+    HUD --> Perf["perf_recorder.record_frame if enabled"]
+    Perf --> Render["begin_frame draw_visible_chunks end_frame"]
+</div></div>
+</section>
+
+<section class="page" id="p08">
+<h2>8. Platform, Input и Audio</h2>
+<div class="grid">
+<div class="card"><h3>PlatformApp</h3><p>Слой SDL3: окно, fullscreen, Vulkan surface, keyboard/mouse/gamepad events, mouse capture, audio stream, UI sounds, music.</p></div>
+<div class="card"><h3>InputState</h3><p>Единая структура ввода, чтобы <code>Application</code>, <code>PlayerController</code> и <code>DebugCamera</code> не зависели напрямую от SDL events.</p></div>
+<div class="card"><h3>Audio</h3><p>WAV используется для UI-событий, OGG — для фоновой музыки через STB Vorbis. На Android нужны отдельные asset-пути и иногда другой способ чтения.</p></div>
+<div class="card"><h3>Граница ответственности</h3><p><code>platform</code> не должен знать про блоки, чанки и правила игры. Он только отдаёт состояние ввода и базовые platform services.</p></div>
+</div>
+<div class="diagram-card"><h3>SDL events → InputState</h3><div class="mermaid">
+flowchart LR
+    SDL["SDL_PollEvent"] --> Keyboard["key down/up"]
+    SDL --> Mouse["mouse motion buttons wheel"]
+    SDL --> Gamepad["gamepad buttons axes"]
+    SDL --> Window["quit resize fullscreen"]
+    Keyboard --> Input["InputState"]
+    Mouse --> Input
+    Gamepad --> Input
+    Window --> Platform["PlatformApp flags"]
+    Input --> App["Application"]
+    Input --> Player["PlayerController"]
+    Input --> Camera["DebugCamera"]
+</div></div>
+</section>
+
+<section class="page" id="p09">
+<h2>9. Renderer/Vulkan</h2>
+<p>Renderer владеет Vulkan objects, swapchain, pipelines, GPU buffers, menu textures, font atlas, chunk buffers, dynamic HUD buffers, culling flags and stats. Он не должен принимать gameplay-решения; он получает уже подготовленные mesh/visibility данные.</p>
+<table><thead><tr><th>Зона</th><th>Что делает</th><th>Риск</th></tr></thead><tbody>
+<tr><td>Swapchain</td><td>Создание images/views/framebuffers, recreate при изменении окна</td><td>Stutter/ошибки lifecycle</td></tr>
+<tr><td>Pipelines</td><td>fill/cutout/water/wireframe/UI/hotbar/crosshair</td><td>Дублирование настроек pipeline</td></tr>
+<tr><td>Chunk buffers</td><td>Создание/переиспользование vertex/index buffers по секциям</td><td>Частые allocation/copy при стриминге</td></tr>
+<tr><td>Culling</td><td>Frustum, cave/surface, optional occlusion</td><td>Ложное скрытие или лишняя отрисовка</td></tr>
+<tr><td>Debug HUD</td><td>FPS, queues, upload bytes, light status, culling stats</td><td>HUD должен помогать находить bottleneck</td></tr>
+</tbody></table>
+<div class="diagram-card"><h3>Renderer frame pipeline</h3><div class="mermaid">
+flowchart TD
+    Begin["begin_frame camera"] --> Acquire["acquire swapchain image"]
+    Acquire --> Cmd["begin command buffer"]
+    Cmd --> Pass["begin render pass"]
+    Pass --> Chunks["draw_visible_chunks"]
+    Chunks --> HUD["crosshair hotbar debug menu overlays"]
+    HUD --> EndPass["end render pass"]
+    EndPass --> Submit["submit"]
+    Submit --> Present["present"]
+    Present --> Retire["retire deferred buffers"]
+</div></div>
+</section>
+
+<section class="page" id="p10">
+<h2>10. World data model</h2>
+<p>Мир хранится чанками <code>16 x 384 x 16</code>: <code>kWorldMinY = -64</code>, <code>kWorldMaxY = 319</code>. Высота 384 блока разделена на <strong>24 секции</strong> по 16 блоков, что позволяет renderer и culling работать не только целыми чанками, но и вертикальными секциями.</p>
+<table><thead><tr><th>Тип</th><th>Назначение</th></tr></thead><tbody>
+<tr><td><code>ChunkData</code></td><td>Массив <code>BlockId</code> размером <code>16*16*384</code>.</td></tr>
+<tr><td><code>ChunkLight</code></td><td>Массивы <code>sky_light</code> и <code>block_light</code>, флаги dirty/borders_ready/readiness.</td></tr>
+<tr><td><code>ChunkMesh</code></td><td>Opaque/cutout/transparent meshes + prebuilt section meshes.</td></tr>
+<tr><td><code>ChunkVisibilityMetadata</code></td><td>Сведения для culling: geometry, surface/cave geometry, sky access, solid roof.</td></tr>
+<tr><td><code>PendingChunkUpload</code></td><td>Координата, serial, provisional-флаг, mesh и visibility metadata.</td></tr>
+<tr><td><code>BlockHit</code></td><td>Результат raycast: найденный блок, normal, placement block, distance.</td></tr>
+</tbody></table>
+<div class="diagram-card"><h3>Поток данных одного чанка</h3><div class="mermaid">
+flowchart LR
+    Coord["ChunkCoord"] --> Data["ChunkData blocks"]
+    Data --> Light["ChunkLight sky/block"]
+    Data --> Mesh["ChunkMesh section meshes"]
+    Light --> Mesh
+    Mesh --> Visibility["ChunkVisibilityMetadata"]
+    Visibility --> Upload["PendingChunkUpload"]
+    Upload --> GPU["Renderer ChunkRenderData"]
+</div></div>
+</section>
+
+<section class="page" id="p11">
+<h2>11. Block registry</h2>
+<p><code>BlockRegistry</code> описывает все текущие блоки: air, grass, dirt, stone, water, sand, gravel, oak log, oak leaves. У каждого блока есть флаги solid/opaque, render type, texture indices, light emission, light dampening и hardness.</p>
+<table><thead><tr><th>Свойство</th><th>Зачем нужно</th></tr></thead><tbody>
+<tr><td><code>BlockFlags::Opaque</code></td><td>Блок перекрывает свет и скрывает соседние faces.</td></tr>
+<tr><td><code>BlockFlags::Solid</code></td><td>Коллизия игрока и raycast.</td></tr>
+<tr><td><code>BlockRenderType</code></td><td>Opaque, cutout или transparent pipeline.</td></tr>
+<tr><td><code>light_emission</code></td><td>Заложена поддержка block light, даже если текущие блоки почти не светятся.</td></tr>
+<tr><td><code>light_dampening</code></td><td>Насколько блок ослабляет sky light. Вода/листья пропускают свет сильнее, камень/земля блокируют.</td></tr>
+<tr><td><code>hardness</code></td><td>Основа для будущей системы скорости ломания блоков.</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p12">
+<h2>12. WorldGenerator</h2>
+<p><code>WorldGenerator</code> отвечает за генерацию terrain data: высоты, continentalness, caves, aquifers, gravel, underwater bottom, oak trees. Построение меша всё ещё объявлено рядом с генератором, но само освещение теперь приходит через <code>LightMeshSnapshot</code>.</p>
+<div class="diagram-card"><h3>Генерация чанка</h3><div class="mermaid">
+flowchart TD
+    Gen["generate_chunk coord seed"] --> Height["sample height continentalness"]
+    Height --> Layers["stone dirt grass sand water"]
+    Layers --> Caves["apply caves and aquifers"]
+    Caves --> Shore["shore gravel disks"]
+    Shore --> Bottom["underwater gravel bottom"]
+    Bottom --> Blobs["underground gravel blobs"]
+    Blobs --> Trees["oak trees"]
+    Trees --> Data["ChunkData"]
+</div></div>
+<div class="diagram-card"><h3>Mesh builder signature после обновления</h3><div class="mermaid">
+flowchart LR
+    ChunkData["ChunkData"] --> Mesh["build_chunk_mesh"]
+    Neighbors["ChunkMeshNeighbors block borders"] --> Mesh
+    LightMesh["LightMeshSnapshot light borders"] --> Mesh
+    Leaves["LeavesRenderMode fast/fancy"] --> Mesh
+    Mesh --> ChunkMesh["ChunkMesh opaque cutout transparent sections"]
+</div></div>
+</section>
+
+<section class="page" id="p13">
+<h2>13. Light subsystem — проверено в v9</h2>
+<div class="callout"><strong>Смысл:</strong> <code>calculate_chunk_light()</code> строит sky light не только по центру чанка, а в padded-области с границей <code>kLightBorder = 4</code>. Для устранения "тёмных углов" теперь используются не только 4 стороны (W/E/N/S), но и 4 диагональных угла (NW/NE/SW/SE).</div>
+<div class="callout"><strong>Ограничение текущей реализации:</strong> по коду основной расчёт сейчас направлен на <code>Sky Light</code>. <code>ChunkLight.block_light</code> и <code>light_emission</code> уже есть в модели, но полноценное распространение света от факелов/лавы как отдельный BFS-слой лучше вынести в следующий этап, чтобы не обещать больше, чем реально делает текущая ветка.</div>
+<table><thead><tr><th>Тип</th><th>Назначение</th></tr></thead><tbody>
+<tr><td><code>LightBuildSnapshot</code></td><td>Центр + 8 окружающих границ блоков (4 стороны + 4 угла).</td></tr>
+<tr><td><code>ChunkLightResult</code></td><td>Результат расчёта: <code>ChunkLight</code> и флаг provisional.</td></tr>
+<tr><td><code>LightMeshSnapshot</code></td><td>Центральный light + 8 границ освещения для выборки при построении faces на краях.</td></tr>
+<tr><td><code>sample_sky_light</code></td><td>Умная выборка: проверяет центр, затем стороны, затем углы. Если соседа нет — fallback на край центра.</td></tr>
+</tbody></table>
+<div class="diagram-card"><h3>Поток освещения с учётом 8 соседей</h3><div class="mermaid">
+flowchart TD
+    Snapshot["LightBuildSnapshot (Center + 8 borders)"] --> Padded["PaddedSkyLight (24x384x24 area)"]
+    Padded --> Vertical["Vertical sky pass (top down)"]
+    Vertical --> Queue["Sky propagation queue"]
+    Queue --> BFS["BFS propagate in 6 directions"]
+    BFS --> Copy["Extract center 16x384x16 to ChunkLight"]
+    Copy --> Ready{"Borders complete?"}
+    Ready -->|8 borders OK| Final["FinalReady (provisional false)"]
+    Ready -->|Partial/None| Provisional["Provisional (temporary light)"]
+</div></div>
+<div class="diagram-card"><h3>Почему это связано с тёмными стыками чанков</h3><div class="mermaid">
+flowchart TD
+    Edge["face near chunk edge"] --> Need["needs neighbor light samples"]
+    Need --> Has{"neighbor light border exists?"}
+    Has -->|yes| Border["sample neighbor side/corner"]
+    Has -->|no| Fallback["sample center edge fallback"]
+    Border --> Smooth["smooth seam"]
+    Fallback --> Provisional["temporary seam risk"]
+    Provisional --> FinalRebuild["when borders ready -> final mesh rebuild"]
+    FinalRebuild --> Smooth
+</div></div>
+</section>
+
+<section class="page" id="p14">
+<h2>14. WorldStreamer после сверки с веткой release-version</h2>
+<p><code>WorldStreamer</code> стал ещё важнее: он управляет worker threads, очередями generate/decorate/light/mesh, состояниями чанков, fast/final rebuild, stale results, uploads, unloads, dirty saves, raycast и изменениями блоков.</p>
+<div class="diagram-card"><h3>Новый pipeline задач чанка</h3><div class="mermaid">
+flowchart LR
+    Request["request chunk"] --> GenQ["GenerateTerrain"]
+    GenQ --> Terrain["TerrainGenerated"]
+    Terrain --> DecorQ["Decorate"]
+    DecorQ --> Decorated["Decorated"]
+    Decorated --> LightQ["CalculateLight"]
+    LightQ --> LightReady["ChunkLight result"]
+    LightReady --> Fast["BuildFastMesh if provisional or not uploaded"]
+    Fast --> Upload1["provisional upload"]
+    LightReady --> Final["BuildFinalMesh if stable ready"]
+    Upload1 --> Final
+    Final --> Upload2["final upload replaces provisional"]
+    Upload1 --> Renderer["Renderer"]
+    Upload2 --> Renderer
+</div></div>
+<table><thead><tr><th>Метрика stats/debug HUD</th><th>Что показывает</th></tr></thead><tbody>
+<tr><td><code>queued_lights</code></td><td>Сколько задач CalculateLight ждёт выполнения.</td></tr>
+<tr><td><code>queued_fast_meshes</code></td><td>Сколько быстрых provisional rebuild в очереди.</td></tr>
+<tr><td><code>queued_final_meshes</code></td><td>Сколько финальных rebuild после готовности границ.</td></tr>
+<tr><td><code>light_stale_results</code></td><td>Сколько light results устарело из-за выгрузки/версии.</td></tr>
+<tr><td><code>edge_fixups</code></td><td>Сколько provisional мешей было исправлено финальными.</td></tr>
+<tr><td><code>observer_light_border_status</code></td><td>Текущий статус readiness у чанка наблюдателя.</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p15">
+<h2>15. Chunk state machine</h2>
+<p>Актуальная state machine стала более подробной. Это полезно для защиты, потому что можно показать, где именно чанк ожидает соседей и почему сначала может появиться временный меш.</p>
+<div class="diagram-card"><h3>Состояния чанка</h3><div class="mermaid">
+stateDiagram-v2
+    [*] --> Requested
+    Requested --> TerrainGenerated: GenerateTerrain complete
+    TerrainGenerated --> Decorated: Decorate complete
+    Decorated --> WaitingForNeighbors: light provisional
+    Decorated --> LightReady: light final enough
+    WaitingForNeighbors --> LightReady: borders ready / relight
+    LightReady --> MeshQueued: BuildFastMesh or BuildFinalMesh queued
+    MeshQueued --> MeshBuilt: worker complete
+    MeshBuilt --> UploadQueued: pending upload
+    UploadQueued --> UploadedToGPU: drained by Application
+    UploadedToGPU --> Visible: visible_chunks
+    Visible --> MeshQueued: block changed / leaves mode / final edge fix
+    Visible --> [*]: outside radius unload
+</div></div>
+<div class="callout"><strong>Примечание после сверки:</strong> в enum действительно присутствуют промежуточные статусы <code>VerticalSkyReady</code>, <code>LightPropagating</code>, <code>EdgeCheckPending</code>. Этот блок надо защищать как архитектурную карту жизненного цикла чанка: часть стадий сейчас может быть подготовлена в enum/дизайне, но не обязана существовать как отдельный полностью завершённый runtime-проход.</div>
+</section>
+
+<section class="page" id="p16">
+<h2>16. Fast mesh и Final mesh</h2>
+<p>Fast mesh нужен, чтобы игрок быстрее увидел новый чанк. Final mesh нужен, чтобы исправить свет/границы после готовности соседних данных. Это компромисс между responsiveness и визуальной стабильностью.</p>
+<div class="grid">
+<div class="card"><h3>BuildFastMesh</h3><p>Создаётся, когда чанк ещё provisional или ещё не загружен в GPU. Может иметь временные неточности на границах освещения.</p></div>
+<div class="card"><h3>BuildFinalMesh</h3><p>Создаётся, когда light readiness выше и можно корректно использовать границы соседей. Он заменяет provisional upload.</p></div>
+</div>
+<div class="diagram-card"><h3>Замена provisional на final</h3><div class="mermaid">
+flowchart TD
+    Light["CalculateLight"] --> Provisional{"provisional?"}
+    Provisional -->|yes| Fast["queue BuildFastMesh"]
+    Fast --> UploadFast["upload provisional mesh"]
+    UploadFast --> Borders{"light borders ready?"}
+    Borders -->|no| Wait["wait / relight neighbors"]
+    Wait --> Borders
+    Borders -->|yes| Final["queue BuildFinalMesh"]
+    Provisional -->|no| Final
+    Final --> UploadFinal["upload final mesh"]
+    UploadFinal --> Replace["replace stale/provisional upload"]
+</div></div>
+</section>
+
+<section class="page" id="p17">
+<h2>17. Border lighting fix</h2>
+<p>Твой баг с резкой темнотой на границе чанка относится именно сюда. Когда чанк строит face на краю, ему нужны не только свои блоки, но и соседние блоки/свет. Без этого один чанк считает край “открытым”, другой “закрытым”, и появляется ломаный свет.</p>
+<table><thead><tr><th>Что нужно для стабильного света</th><th>Где находится</th><th>Что проверять при баге</th></tr></thead><tbody>
+<tr><td>Block borders сторон и углов</td><td><code>LightBuildSnapshot</code></td><td>Все ли соседние данные попали в snapshot?</td></tr>
+<tr><td>Light borders сторон и углов</td><td><code>LightMeshSnapshot</code></td><td>Есть ли свет соседей при построении меша?</td></tr>
+<tr><td>Readiness</td><td><code>ChunkLight.readiness</code></td><td>Не остаётся ли чанк слишком долго provisional?</td></tr>
+<tr><td>Rebuild соседей</td><td><code>queue_light_self_and_neighbors...</code> и <code>queue_rebuild_self_and_neighbors...</code></td><td>Пересчитываются ли соседние чанки после изменения блока у края?</td></tr>
+<tr><td>Fallback sample</td><td><code>sample_center_edge_sky_light</code></td><td>Не создаёт ли fallback слишком резкую разницу?</td></tr>
+</tbody></table>
+<div class="diagram-card"><h3>Border fix flow</h3><div class="mermaid">
+flowchart TD
+    Change["block generated or changed near edge"] --> Mark["dirty_light dirty_mesh"]
+    Mark --> Relight["queue light self and neighbors"]
+    Relight --> BuildSnapshot["make LightBuildSnapshot"]
+    BuildSnapshot --> Complete{"complete borders?"}
+    Complete -->|no| Provisional["calculate provisional light"]
+    Complete -->|yes| FinalLight["calculate final light"]
+    Provisional --> FastMesh["fast mesh"]
+    FinalLight --> FinalMesh["final mesh"]
+    FastMesh --> UploadFast["temporary upload"]
+    FinalMesh --> UploadFinal["replace with corrected edge lighting"]
+</div></div>
+</section>
+
+<section class="page" id="p18">
+<h2>18. Greedy meshing</h2>
+<p>Greedy meshing объединяет соседние faces с одинаковыми свойствами. После обновления ключевым условием становится не только одинаковый блок/текстура/render type, но и совместимость lighting key, иначе нельзя объединять лица с разной освещённостью.</p>
+<div class="diagram-card"><h3>Решение по face</h3><div class="mermaid">
+flowchart TD
+    Block["current BlockId"] --> Type{"render type"}
+    Type -->|Opaque| Opaque{"neighbor hides face?"}
+    Type -->|Cutout leaves| Cutout{"fast or fancy leaves?"}
+    Type -->|Transparent water| Water{"same water neighbor?"}
+    Opaque -->|hidden| Skip["skip face"]
+    Opaque -->|visible| LightKey["sample light + AO"]
+    Cutout --> LightKey
+    Water --> LightKey
+    LightKey --> Mask["put FaceKey into greedy mask"]
+    Mask --> Merge["merge same texture direction light"]
+    Merge --> Section["append to opaque/cutout/transparent section"]
+</div></div>
+</section>
+
+<section class="page" id="p19">
+<h2>19. GPU upload budget — проверено в v9</h2>
+<p>Чтобы генерация чанков не создавала резкие просадки FPS, <code>Application</code> забирает задачи на загрузку через <code>drain_pending_uploads_by_budget</code>. <code>WorldStreamer</code> сортирует их по приоритету (дистанция + конус взгляда) и отдает только тот объем, который вписывается в лимиты байт и количества секций на кадр.</p>
+<div class="diagram-card"><h3>Upload pipeline с троттлингом</h3><div class="mermaid">
+flowchart TD
+    Pending["pending_uploads vector"] --> Sort["Sort by priority observer position + forward"]
+    Sort --> Budget["drain_pending_uploads_by_budget byte/section limit"]
+    Budget --> Validate["check expected rebuild serial"]
+    Validate -->|stale| Drop["record stale upload drop"]
+    Validate -->|valid| Renderer["renderer.upload_chunk_mesh"]
+    Renderer --> Buffers["create/reuse GPU buffers per section"]
+    Buffers --> Ready["chunk ready for draw calls"]
+</div></div>
+<table><thead><tr><th>Параметр бюджета</th><th>Значение</th><th>Роль</th></tr></thead><tbody>
+<tr><td><code>byte_budget</code></td><td>~10-20 MB/frame</td><td>Ограничивает суммарный размер передаваемых вершин/индексов.</td></tr>
+<tr><td><code>section_budget</code></td><td>~24-64 sections/frame</td><td>Ограничивает количество аллокаций буферов в Vulkan.</td></tr>
+<tr><td><code>max_uploads</code></td><td>8-16 chunks/frame</td><td>Гарантирует, что драйвер не будет перегружен запросами на маппинг.</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p20">
+<h2>20. Culling и отрисовка лишних полигонов</h2>
+<p>Проект уже имеет несколько уровней отсечения: frustum culling, section culling, cave/surface culling и экспериментальный occlusion culling. Самая важная идея для оптимизации — скрывать не только целые чанки, но и вертикальные секции, а ещё лучше — связные области, если они гарантированно не видны.</p>
+<table><thead><tr><th>Уровень</th><th>Что отсекает</th><th>Что улучшить дальше</th></tr></thead><tbody>
+<tr><td>Hidden faces в meshing</td><td>Внутренние грани между блоками</td><td>Строго учитывать прозрачность/листья/воду</td></tr>
+<tr><td>Frustum culling</td><td>Секции вне камеры</td><td>Проверить AABB секций, а не только чанков</td></tr>
+<tr><td>Cave/surface culling</td><td>Пещеры, когда игрок на поверхности, и поверхность, когда игрок под крышей</td><td>Добавить portal/connected visibility</td></tr>
+<tr><td>Occlusion culling</td><td>Секции закрытые ближней геометрией</td><td>Сделать hierarchical Z или software occluder grid стабильнее</td></tr>
+<tr><td>Greedy mesh</td><td>Сокращает количество faces/draw data</td><td>Не ломать lighting/AO при объединении</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p21">
+<h2>21. Cave visibility — проверено в v9</h2>
+<p>Система определяет, находится ли игрок под “крышей”, через <code>Application::update_cave_visibility_frame()</code>: она сэмплирует несколько колонн над камерой, считает непрозрачные <code>roof_blocks</code>, применяет hysteresis и передаёт в renderer структуру <code>Renderer::CaveVisibilityFrame</code>. Это позволяет отсекать поверхностные секции в пещерах и наоборот.</p>
+<div class="grid">
+<div class="card"><h3>CaveVisibilityFrame</h3><p><strong>cave_mode:</strong> активен ли режим пещеры.<br><strong>roof_blocks:</strong> количество непрозрачных блоков над камерой.<br><strong>camera_chunk_x/z:</strong> текущий чанк для точной привязки отсечения.</p></div>
+<div class="card"><h3>Логика отсечения</h3><p>Секция считается Cave, если она ниже <code>kSeaLevel</code> и закрыта сверху. Секция считается Surface, если она выше или открыта небу. В cave_mode Surface-секции отбрасываются.</p></div>
+</div>
+<div class="diagram-card"><h3>Cave visibility mode</h3><div class="mermaid">
+flowchart TD
+    Camera["observer position"] --> Columns["sample roof columns above camera"]
+    Columns --> Roof["count roof blocks"]
+    Roof --> Candidate{"roof >= threshold (e.g. 4)"}
+    Candidate --> Pending["pending mode"]
+    Pending --> Hysteresis{"stable frames enough?"}
+    Hysteresis -->|yes| Mode["cave_visibility_cave_mode = true"]
+    Hysteresis -->|no| Keep["keep previous mode"]
+    Mode --> Renderer["Renderer set_cave_visibility_frame"]
+    Renderer --> Sections["Surface culling in cave / Cave culling on surface"]
+</div></div>
+</section>
+
+<section class="page" id="p22">
+<h2>22. Block interaction: raycast, break, place</h2>
+<p>Игрок смотрит вперёд, <code>WorldStreamer::raycast()</code> делает DDA-подобный обход блоков, затем Application решает: ломать блок или ставить выбранный hotbar block. После изменения блока чанк и соседи должны попасть в light/mesh rebuild.</p>
+<div class="diagram-card"><h3>Break/place pipeline</h3><div class="mermaid">
+flowchart TD
+    Input["mouse/gamepad break or place"] --> Raycast["raycast from eye forward"]
+    Raycast --> Hit{"hit block?"}
+    Hit -->|no| End["nothing"]
+    Hit -->|yes| Action{break or place}
+    Action -->|break| Air["set block to Air"]
+    Action -->|place| Validate["check replaceable unloaded player AABB"]
+    Validate -->|invalid| Deny["deny placement"]
+    Validate -->|valid| Set["set selected block"]
+    Air --> Dirty["dirty save light mesh"]
+    Set --> Dirty
+    Dirty --> Neighbor["queue rebuild/light self and neighbors if edge"]
+</div></div>
+</section>
+
+<section class="page" id="p23">
+<h2>23. WorldSave</h2>
+<p>Сохранения отделены от генерации. <code>WorldSave</code> хранит metadata мира, seed и chunk snapshots. Dirty chunks сохраняются постепенно, чтобы не блокировать кадр.</p>
+<div class="diagram-card"><h3>Save/load flow</h3><div class="mermaid">
+flowchart TD
+    Start["start_world"] --> Save["WorldSave saves/default"]
+    Save --> Meta{world.json exists?}
+    Meta -->|yes| LoadSeed["load seed"]
+    Meta -->|no| NewSeed["generate random seed write metadata"]
+    LoadSeed --> Streamer["WorldStreamer"]
+    NewSeed --> Streamer
+    Streamer --> Change["block change"]
+    Change --> Dirty["dirty_save queue"]
+    Dirty --> Flush["flush_dirty_chunks max per tick"]
+    Flush --> File["chunks/c.X.Z.mlchunk"]
+</div></div>
+</section>
+
+<section class="page" id="p24">
+<h2>24. Assets и AssetPackResolver</h2>
+<p>Assets лежат в <code>assets/textures/texture_pack/classic</code>. Renderer и PlatformApp не должны жёстко зашивать абсолютные пути. Для desktop assets копируются рядом с exe, для Android попадают в APK assets.</p>
+<div class="diagram-card"><h3>Asset resolving</h3><div class="mermaid">
+flowchart TD
+    Request["relative asset path"] --> Platform{Platform}
+    Platform -->|Android| APK["read from APK assets"]
+    Platform -->|Desktop| Search["search project path and exe base path"]
+    Search --> Overlay["overlay packs then classic"]
+    Overlay --> Found{file exists?}
+    Found -->|yes| Return["return path/content"]
+    Found -->|no| Fallback["fallback classic or error log"]
+    APK --> Return
+</div></div>
+</section>
+
+<section class="page" id="p25">
+<h2>25. Android-ветка</h2>
+<p>Android-сборка подключает общий <code>CMakeLists.txt</code>, создаёт native library <code>main</code>, использует SDLActivity wrapper и кладёт исходные assets плюс generated shaders в APK. На текущем этапе в Gradle есть локальный путь к Android SDK, который лучше заменить на стандартный <code>local.properties</code> или переменные окружения.</p>
+<table><thead><tr><th>Файл</th><th>Роль</th></tr></thead><tbody>
+<tr><td><code>settings.gradle</code></td><td>Подключает модуль <code>:app</code>.</td></tr>
+<tr><td><code>android/app/build.gradle</code></td><td>Namespace, SDK/NDK, ABI, externalNativeBuild, assets.srcDirs.</td></tr>
+<tr><td><code>AndroidManifest.xml</code></td><td>Activity, fullscreen/landscape, Vulkan feature.</td></tr>
+<tr><td><code>MainActivity.java</code></td><td>SDLActivity wrapper, lifecycle/fullscreen behavior.</td></tr>
+<tr><td><code>res/values/*.xml</code></td><td>Название и тема приложения.</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p26">
+<h2>26. Диагностика, Debug HUD и PerfRecorder — проверено в v9</h2>
+<p>Диагностика теперь состоит из двух уровней. <strong>Debug HUD</strong> показывает состояние игры прямо во время запуска, а <strong><code>PerfRecorder</code></strong> пишет CSV-лог кадра, если задана переменная окружения <code>MINECRAFT_LEGACY_PERF_LOG</code>. Это важно для оптимизации: можно сравнивать не только FPS, но и очереди чанков, upload, stutter, provisional mesh и churn GPU-буферов.</p>
+<div class="grid3">
+<div class="card"><h4>Стриминг</h4><ul>
+<li><code>queued_generates</code>, <code>queued_decorates</code></li>
+<li><code>queued_lights</code></li>
+<li><code>queued_fast_meshes</code> / <code>queued_final_meshes</code></li>
+<li><code>pending_uploads</code>, <code>pending_upload_sections</code></li>
+<li><code>no_mesh_near_chunks</code></li>
+</ul></div>
+<div class="card"><h4>Освещение</h4><ul>
+<li><code>observer_light_borders_ready</code></li>
+<li><code>observer_light_border_status</code></li>
+<li><code>missing_light_borders</code></li>
+<li><code>light_stale_results</code></li>
+<li><code>edge_fixups</code></li>
+</ul></div>
+<div class="card"><h4>Рендер и GPU</h4><ul>
+<li><code>visible_sections</code>, <code>drawn_sections</code></li>
+<li><code>frustum/occlusion/cave/surface culled</code></li>
+<li><code>uploaded_bytes_this_frame</code></li>
+<li><code>uploaded_sections_this_frame</code></li>
+<li><code>new_gpu_buffers</code>, <code>pooled_gpu_buffers</code></li>
+</ul></div>
+</div>
+<div class="diagram-card"><h3>Как читать диагностику оптимизации</h3><div class="mermaid">
+flowchart TD
+    FPS["FPS скачет / frame_ms растёт"] --> Upload{"upload_ms высокий?"}
+    Upload -->|yes| Budget["уменьшить max uploads / section budget / byte budget"]
+    Upload -->|no| Queues{"очереди generate/light/mesh растут?"}
+    Queues -->|yes| Jobs["проверить worker jobs, приоритеты и генерацию чанков"]
+    Queues -->|no| GPU{"new_gpu_buffers много?"}
+    GPU -->|yes| Pool["улучшить reuse GPU buffer pool"]
+    GPU -->|no| Culling{"drawn_sections слишком много?"}
+    Culling -->|yes| Cull["усилить section/cave/occlusion culling"]
+    Culling -->|no| Light{"missing_light_borders / edge_fixups растут?"}
+    Light -->|yes| Borders["проверить light snapshots и rebuild соседей"]
+</div></div>
+<div class="callout"><strong>Подсказка:</strong> Если <code>no_mesh_near_chunks</code> растёт, значит меш-билдер не может построить чанк из-за отсутствия данных о соседях. Если <code>edge_fixups</code> велик, система часто исправляет временный свет на финальный. Если <code>new_gpu_buffers</code> постоянно растёт, значит Vulkan-буферы плохо переиспользуются и нужно усиливать pool.</div>
+<table><thead><tr><th>CSV-поле PerfRecorder</th><th>Что показывает</th><th>Что делать при плохом значении</th></tr></thead><tbody>
+<tr><td><code>frame_p95_ms</code>, <code>frame_p99_ms</code></td><td>Редкие просадки кадра, которые пользователь ощущает как фризы</td><td>Сравнить с <code>upload_ms</code>, <code>generate_ms</code>, <code>mesh_ms</code>, <code>light_ms</code></td></tr>
+<tr><td><code>upload_ms</code></td><td>Сколько времени кадр тратит на загрузку mesh в renderer</td><td>Уменьшить budget, добавить staging/reuse/pooling</td></tr>
+<tr><td><code>queued_fast_meshes</code>, <code>queued_final_meshes</code></td><td>Нагрузка mesh pipeline</td><td>Приоритизировать ближние чанки и чанки в направлении камеры</td></tr>
+<tr><td><code>missing_light_borders</code></td><td>Нехватка соседних light border snapshots</td><td>Проверить очередь relight self + neighbors и готовность 8 соседей</td></tr>
+<tr><td><code>new_gpu_buffers</code>, <code>pooled_gpu_buffers</code></td><td>Создание новых буферов против переиспользования</td><td>Сделать pool основным путём для chunk buffers</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p27">
+<h2>27. Слабые места текущей архитектуры</h2>
+<table><thead><tr><th>Проблема</th><th>Почему опасно</th><th>Что делать</th></tr></thead><tbody>
+<tr><td><code>Application</code> слишком много знает</td><td>Сложно менять меню, gameplay, debug и world flow независимо</td><td>Выделить <code>MenuController</code>, <code>WorldRuntime</code>, <code>BlockInteractionSystem</code>, <code>DebugHudSystem</code>.</td></tr>
+<tr><td><code>WorldStreamer</code> перегружен</td><td>В одном классе jobs, states, queries, saves, raycast, mutation</td><td>Разделить на <code>ChunkJobSystem</code>, <code>ChunkStore</code>, <code>RebuildScheduler</code>, <code>WorldQuery</code>, <code>ChunkSaveQueue</code>.</td></tr>
+<tr><td>Lighting provisional/final может давать скачки</td><td>Игрок видит временные тёмные края</td><td>Стабилизировать readiness, чаще relight соседей, мягче fallback, логировать missing borders.</td></tr>
+<tr><td>GPU upload создаёт stutter</td><td>Большие буферы создаются в кадре</td><td>Буферный пул, staging batching, upload budget, приоритет по направлению камеры.</td></tr>
+<tr><td>Недостаточно регулярных perf-замеров</td><td>Без CSV сложно доказать, что оптимизация реально помогла</td><td>Перед/после каждой крупной правки запускать <code>PerfRecorder</code> и сравнивать <code>p95/p99</code>, <code>upload_ms</code>, очереди и buffer churn.</td></tr>
+<tr><td>Occlusion/cave culling может ошибаться</td><td>Можно скрыть видимую геометрию или рисовать лишнее</td><td>Ввести debug overlay для причин отсечения секции.</td></tr>
+<tr><td>Локальный путь Android SDK в Gradle</td><td>Сборка плохо переносится на другой ПК</td><td>Перенести в <code>local.properties</code> или environment variable.</td></tr>
+<tr><td>Два <code>.gitignore</code></td><td>Файл с пробелом в имени выглядит как ошибка репозитория</td><td>Удалить <code> .gitignore</code>, оставить нормальный <code>.gitignore</code>.</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p28">
+<h2>28. План доработок “как у команды”</h2>
+<ol>
+<li><strong>Снять базовый perf-профиль.</strong> Включить <code>MINECRAFT_LEGACY_PERF_LOG</code>, пройти один и тот же маршрут по миру и сохранить CSV как baseline до оптимизаций.</li>
+<li><strong>Стабилизировать lighting pipeline.</strong> Отдельно протестировать <code>LightBuildSnapshot</code>, fallback при missing borders, final rebuild и edge fixups.</li>
+<li><strong>Разделить WorldStreamer.</strong> Сначала вынести job queue/state transitions, потом save queue и query API.</li>
+<li><strong>Сделать chunk streaming по стадиям.</strong> Сначала near chunks и collision data, потом fast mesh, потом final light/mesh, потом дальние декоративные секции.</li>
+<li><strong>Улучшить culling.</strong> Section frustum + cave mode + connected cave visibility + optional occlusion grid.</li>
+<li><strong>Оптимизировать GPU uploads.</strong> Пул буферов, лимит байт в кадр, приоритет по камере, профилирование upload_ms.</li>
+<li><strong>Добавить тестовые миры.</strong> Плоская крыша на границе чанков, туннель через границы, вода/листья на границе, высокая гора, пещера под поверхностью.</li>
+<li><strong>Документировать каждый публичный сценарий.</strong> Где изменить блок, где свет пересчитывается, где mesh обновляется, где renderer получает upload.</li>
+</ol>
+<div class="diagram-card"><h3>Roadmap стабилизации света</h3><div class="mermaid">
+flowchart LR
+    Repro["test scene chunk border roof"] --> Logs["debug light readiness borders"]
+    Logs --> FixSnapshot["verify LightBuildSnapshot neighbors"]
+    FixSnapshot --> FixRelight["queue relight self + neighbors"]
+    FixRelight --> FixFallback["soft fallback sample"]
+    FixFallback --> FinalMesh["force final mesh after borders"]
+    FinalMesh --> Test["compare screenshots before/after"]
+</div></div>
+</section>
+
+<section class="page" id="p29">
+<h2>29. Карта “куда лезть” для разработчика</h2>
+<table><thead><tr><th>Задача</th><th>Файл/модуль</th><th>Комментарий</th></tr></thead><tbody>
+<tr><td>Изменить главный цикл, меню, hotbar, debug flow</td><td><code>src/app/application.cpp/.hpp</code></td><td>Центр runtime flow.</td></tr>
+<tr><td>Исправить тёмные края чанков</td><td><code>src/game/light.cpp/.hpp</code>, <code>world_streamer.cpp</code>, <code>world_generator.cpp</code></td><td>Проверять snapshots, readiness, final rebuild.</td></tr>
+<tr><td>Добавить новый блок</td><td><code>src/game/block.hpp/.cpp</code></td><td>BlockId, BlockDef, текстуры, флаги, light dampening.</td></tr>
+<tr><td>Поменять генерацию пещер/воды/деревьев</td><td><code>src/game/world_generator.cpp</code></td><td>Terrain stage.</td></tr>
+<tr><td>Убрать лишнюю отрисовку</td><td><code>src/render/renderer.cpp/.hpp</code>, <code>ChunkVisibilityMetadata</code></td><td>Frustum/cave/occlusion/section culling.</td></tr>
+<tr><td>Уменьшить фризы загрузки чанков</td><td><code>src/game/world_streamer.cpp</code>, <code>renderer.cpp</code></td><td>Job priority, upload budget, buffer pooling.</td></tr>
+<tr><td>Записать perf CSV и сравнить оптимизацию</td><td><code>src/common/perf_recorder.cpp/.hpp</code>, <code>src/app/application.cpp</code></td><td>Переменная окружения <code>MINECRAFT_LEGACY_PERF_LOG</code>, поля p50/p95/p99, upload, queues, buffer pool.</td></tr>
+<tr><td>Поменять движение игрока</td><td><code>src/game/player_controller.cpp/.hpp</code></td><td>Velocity, gravity, jump, AABB.</td></tr>
+<tr><td>Добавить input</td><td><code>src/platform/input.hpp</code>, <code>platform_app.cpp</code></td><td>Не завязывать gameplay на SDL напрямую.</td></tr>
+<tr><td>Поменять Android-сборку</td><td><code>android/app/build.gradle</code>, <code>AndroidManifest.xml</code></td><td>SDK, NDK, CMake args, assets.</td></tr>
+<tr><td>Обновить архитектурные правила</td><td><code>AI.md</code>, <code>docs/**</code></td><td>Для будущих AI/разработчиков.</td></tr>
+</tbody></table>
+</section>
+
+<section class="page" id="p30">
+<h2>30. Sequence diagrams</h2>
+<div class="diagram-card"><h3>Запуск до первого кадра</h3><div class="mermaid">
+sequenceDiagram
+    participant OS as OS
+    participant Main as main.cpp
+    participant App as Application
+    participant Platform as PlatformApp
+    participant Renderer as Renderer
+    participant Assets as AssetPackResolver
+    OS->>Main: start process
+    Main->>App: construct
+    Main->>App: initialize
+    App->>Platform: initialize SDL window audio
+    Platform->>Assets: resolve sounds/music
+    App->>Renderer: initialize Vulkan with shader directory
+    App->>Perf: initialize_from_environment
+    Renderer->>Assets: load textures UI font menu
+    App->>Platform: start menu music
+    Main->>App: run loop
+</div></div>
+<div class="diagram-card"><h3>Один chunk job после обновления</h3><div class="mermaid">
+sequenceDiagram
+    participant Streamer as WorldStreamer
+    participant Worker as Worker thread
+    participant Gen as WorldGenerator
+    participant Light as Light subsystem
+    participant Mesh as build_chunk_mesh
+    participant Renderer as Renderer
+    Streamer->>Worker: GenerateTerrain job
+    Worker->>Gen: generate_chunk
+    Worker-->>Streamer: TerrainGenerated
+    Streamer->>Worker: Decorate job
+    Worker-->>Streamer: Decorated
+    Streamer->>Worker: CalculateLight job
+    Worker->>Light: calculate_chunk_light
+    Light-->>Worker: ChunkLightResult provisional/final
+    Worker-->>Streamer: light result
+    Streamer->>Worker: BuildFastMesh or BuildFinalMesh
+    Worker->>Mesh: ChunkData + neighbors + LightMeshSnapshot
+    Mesh-->>Worker: ChunkMesh
+    Worker-->>Streamer: PendingChunkUpload
+    Streamer->>Renderer: upload_chunk_mesh by budget
+</div></div>
+<div class="diagram-card"><h3>Исправление света на границе</h3><div class="mermaid">
+sequenceDiagram
+    participant Player as Player
+    participant App as Application
+    participant Streamer as WorldStreamer
+    participant Light as Light subsystem
+    participant Mesh as Mesh builder
+    participant Renderer as Renderer
+    Player->>App: break/place near chunk edge
+    App->>Streamer: set_block_at_world
+    Streamer->>Streamer: mark dirty light and mesh
+    Streamer->>Streamer: queue self and neighbor light jobs
+    Streamer->>Light: calculate with borders
+    Light-->>Streamer: readiness status
+    Streamer->>Mesh: fast mesh if provisional
+    Streamer->>Renderer: upload provisional
+    Streamer->>Mesh: final mesh when borders ready
+    Streamer->>Renderer: replace chunk buffers
+</div></div>
+</section>
+
+<section class="page" id="p31">
+<h2>31. Итог для защиты</h2>
+<div class="callout"><strong>Формулировка:</strong> проект сейчас — кроссплатформенный C++20/Vulkan/SDL3 voxel runtime с модульным монолитом. Главный поток идёт через <code>Application</code>, мир грузится через <code>WorldStreamer</code>, чанки проходят стадии генерации, декорации, отдельного расчёта освещения, fast/final mesh rebuild и GPU upload. Главные новые архитектурные точки — вынесенный <code>Light subsystem</code> и <code>PerfRecorder</code>. Light subsystem должен убрать резкие перепады света на границах чанков за счёт border snapshots, readiness states и финального rebuild, а PerfRecorder нужен, чтобы доказывать оптимизацию через CSV-метрики, а не только визуально.</div>
+<h3>Коротко, что сказать преподавателю</h3>
+<ul>
+<li>Документ обновлён под текущую ветку <code>release-version</code>, а не под старый вариант.</li>
+<li>Освещение вынесено в отдельный модуль <code>src/game/light</code>.</li>
+<li>Chunk pipeline теперь двухфазный по mesh: быстрый provisional и финальный corrected.</li>
+<li>WorldStreamer — самая нагруженная система; её надо разделять при следующем рефакторинге.</li>
+<li>PerfRecorder теперь надо использовать как обязательный baseline перед оптимизацией чанков, света и GPU upload.</li>
+<li>Для оптимизации отрисовки уже есть секции чанков и culling metadata, дальше нужен более строгий cave/occlusion visibility.</li>
+</ul>
+</section>
+
+</main>
+</body>
+</html>
