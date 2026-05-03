@@ -185,7 +185,7 @@ constexpr int kRenderSectionCount = kChunkHeight / kRenderSectionHeight;
 constexpr int kOcclusionGridWidth = 32;
 constexpr int kOcclusionGridHeight = 18;
 constexpr float kOcclusionNearPadding = 0.0025f;
-constexpr int kMaxOccluderGridArea = 48;
+constexpr int kMaxOccluderGridArea = kOcclusionGridWidth * kOcclusionGridHeight;
 constexpr int kMinOccluderGridArea = 4;
 constexpr std::uint32_t kMinOccluderOpaqueIndices = 768;
 constexpr float kOcclusionWarningRatio = 0.35f;
@@ -471,6 +471,71 @@ RenderSectionAddress neighbor_section_address(RenderSectionAddress address, std:
 
 bool valid_section_address(const RenderSectionAddress& address) {
     return address.section_index >= 0 && address.section_index < kChunkSectionCount;
+}
+
+struct PvsTraversalNode {
+    RenderSectionAddress address {};
+    int entry_face {-1};
+    int depth {0};
+};
+
+float dot_vec3(Vec3 lhs, Vec3 rhs) {
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+Vec3 section_face_normal(std::uint8_t face) {
+    switch (face) {
+    case kSectionFaceTop:
+        return {0.0f, 1.0f, 0.0f};
+    case kSectionFaceBottom:
+        return {0.0f, -1.0f, 0.0f};
+    case kSectionFaceEast:
+        return {1.0f, 0.0f, 0.0f};
+    case kSectionFaceWest:
+        return {-1.0f, 0.0f, 0.0f};
+    case kSectionFaceSouth:
+        return {0.0f, 0.0f, 1.0f};
+    case kSectionFaceNorth:
+        return {0.0f, 0.0f, -1.0f};
+    default:
+        return {0.0f, 0.0f, 0.0f};
+    }
+}
+
+std::uint8_t camera_directed_start_faces(std::uint8_t open_faces, Vec3 camera_forward) {
+    if (open_faces == 0) {
+        return 0;
+    }
+
+    std::uint8_t result = 0;
+    for (std::size_t face = 0; face < kSectionVisibilityFaceCount; ++face) {
+        const std::uint8_t bit = section_face_bit(face);
+        if ((open_faces & bit) == 0) {
+            continue;
+        }
+
+        const Vec3 normal = section_face_normal(static_cast<std::uint8_t>(face));
+        const float facing = dot_vec3(normal, camera_forward);
+
+        // Horizontal side exits must be at least roughly in the camera direction.
+        // Top/bottom are allowed only when the player is actually looking upward/downward.
+        if (face == kSectionFaceTop) {
+            if (camera_forward.y > 0.15f) {
+                result |= bit;
+            }
+        } else if (face == kSectionFaceBottom) {
+            if (camera_forward.y < -0.15f) {
+                result |= bit;
+            }
+        } else if (facing > -0.10f) {
+            result |= bit;
+        }
+    }
+
+    // Fallback: do not make the camera section fully invisible if the camera is
+    // inside a complex mixed section. Use the original connectivity rather than
+    // risking disappearing geometry next to the player.
+    return result != 0 ? result : open_faces;
 }
 
 
@@ -1303,25 +1368,39 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
         };
 
         if (chunk_buffers_.find(camera_section.coord) != chunk_buffers_.end()) {
-            std::deque<std::pair<RenderSectionAddress, int>> traversal_queue;
+            std::deque<PvsTraversalNode> traversal_queue;
             pvs_visible_sections.insert(camera_section);
-            traversal_queue.push_back({camera_section, -1});
+            traversal_queue.push_back({camera_section, -1, 0});
 
-            constexpr std::size_t kMaxPvsTraversalSections = 16384;
+            constexpr std::size_t kMaxPvsTraversalSections = 4096;
+            constexpr int kMaxSurfacePvsTraversalDepth = 18;
+            constexpr int kMaxCavePvsTraversalDepth = 12;
+            const int max_pvs_depth = cave_visibility_frame_.cave_mode
+                ? kMaxCavePvsTraversalDepth
+                : kMaxSurfacePvsTraversalDepth;
+
             while (!traversal_queue.empty() && pvs_visible_sections.size() < kMaxPvsTraversalSections) {
-                const auto [address, entry_face] = traversal_queue.front();
+                const PvsTraversalNode node = traversal_queue.front();
                 traversal_queue.pop_front();
 
-                auto chunk_it = chunk_buffers_.find(address.coord);
-                if (chunk_it == chunk_buffers_.end() || !valid_section_address(address)) {
+                if (node.depth >= max_pvs_depth) {
                     continue;
                 }
 
-                const RenderSection& section = chunk_it->second.sections[static_cast<std::size_t>(address.section_index)];
+                auto chunk_it = chunk_buffers_.find(node.address.coord);
+                if (chunk_it == chunk_buffers_.end() || !valid_section_address(node.address)) {
+                    continue;
+                }
+
+                const RenderSection& section = chunk_it->second.sections[static_cast<std::size_t>(node.address.section_index)];
                 const ChunkSectionVisibility& visibility = section.visibility;
-                const std::uint8_t exit_faces = entry_face < 0
-                    ? (visibility.open_faces != 0 ? visibility.open_faces : kSectionFaceMaskAll)
-                    : visibility.visibility_from_face[static_cast<std::size_t>(entry_face)];
+
+                std::uint8_t exit_faces = 0;
+                if (node.entry_face < 0) {
+                    exit_faces = camera_directed_start_faces(visibility.open_faces, current_camera_.camera_forward);
+                } else {
+                    exit_faces = visibility.visibility_from_face[static_cast<std::size_t>(node.entry_face)];
+                }
 
                 if (exit_faces == 0) {
                     continue;
@@ -1333,16 +1412,32 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
                     }
 
                     const RenderSectionAddress next_address =
-                        neighbor_section_address(address, static_cast<std::uint8_t>(face));
-                    if (!valid_section_address(next_address) ||
-                        chunk_buffers_.find(next_address.coord) == chunk_buffers_.end()) {
+                        neighbor_section_address(node.address, static_cast<std::uint8_t>(face));
+                    if (!valid_section_address(next_address)) {
+                        continue;
+                    }
+
+                    auto next_chunk_it = chunk_buffers_.find(next_address.coord);
+                    if (next_chunk_it == chunk_buffers_.end()) {
+                        continue;
+                    }
+
+                    const Aabb next_bounds = chunk_section_bounds(next_address.coord, next_address.section_index);
+                    const bool near_camera_next =
+                        section_inside_near_safety_zone(current_camera_.camera_position, next_bounds);
+
+                    // A portal outside the current camera frustum cannot reveal another
+                    // section this frame. This keeps large connected cave systems from
+                    // leaking around corners and then re-entering the visible list.
+                    if (!near_camera_next && !aabb_visible_in_current_frustum(next_bounds)) {
                         continue;
                     }
 
                     if (pvs_visible_sections.insert(next_address).second) {
                         traversal_queue.push_back({
                             next_address,
-                            static_cast<int>(opposite_section_face(static_cast<std::uint8_t>(face)))
+                            static_cast<int>(opposite_section_face(static_cast<std::uint8_t>(face))),
+                            node.depth + 1
                         });
                     }
                 }
