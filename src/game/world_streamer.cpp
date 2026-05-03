@@ -25,6 +25,13 @@ constexpr std::size_t kMaxResultsPerTick = 16;
 
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
+
+constexpr std::uint64_t kGrassUpdateIntervalFrames = 45;
+constexpr std::size_t kGrassUpdateChunksPerTick = 2;
+constexpr int kGrassUpdateColumnAttemptsPerChunk = 32;
+constexpr int kGrassBlockedCheckHeight = 1;
+
+
 bool nearly_equal(float lhs, float rhs) {
     return std::abs(lhs - rhs) <= kRaycastTieEpsilon;
 }
@@ -472,6 +479,9 @@ void WorldStreamer::tick_generation_jobs() {
         }
 
     }
+
+    tick_grass_updates_locked();
+
 }
 
 std::span<const ActiveChunk> WorldStreamer::visible_chunks() const {
@@ -936,6 +946,17 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
     }
 
     chunk.set(local_x, local_y, local_z, block);
+
+    bool grass_block_converted_to_dirt = false;
+    if (block != BlockId::Air && contains_world_y(y - 1)) {
+        const int below_local_y = world_y_to_local_y(y - 1);
+        if (below_local_y >= 0 && below_local_y < kChunkHeight &&
+            chunk.get(local_x, below_local_y, local_z) == BlockId::Grass) {
+            chunk.set(local_x, below_local_y, local_z, BlockId::Dirt);
+            grass_block_converted_to_dirt = true;
+        }
+    }
+
     const std::uint64_t new_version = next_chunk_version_++;
     chunk_it->second.generation_version = new_version;
     chunk_it->second.mesh_version = 0;
@@ -992,8 +1013,101 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
         });
     }
 
+    if (grass_block_converted_to_dirt && !light_affecting_change) {
+        queue_rebuild_job_if_loaded(chunk_coord);
+    }
+
     return SetBlockResult::Success;
 }
+
+void WorldStreamer::tick_grass_updates_locked() {
+    if (frame_counter_ < next_grass_update_frame_) {
+        return;
+    }
+    next_grass_update_frame_ = frame_counter_ + kGrassUpdateIntervalFrames;
+
+    if (chunks_.empty()) {
+        grass_update_chunk_cursor_ = 0;
+        return;
+    }
+
+    std::vector<ChunkCoord> loaded_coords;
+    loaded_coords.reserve(chunks_.size());
+    for (const auto& [coord, record] : chunks_) {
+        if (record.data.has_value() && desired_chunk(observer_chunk_, coord)) {
+            loaded_coords.push_back(coord);
+        }
+    }
+
+    if (loaded_coords.empty()) {
+        grass_update_chunk_cursor_ = 0;
+        return;
+    }
+
+    std::sort(loaded_coords.begin(), loaded_coords.end(), [](const ChunkCoord& lhs, const ChunkCoord& rhs) {
+        if (lhs.x != rhs.x) {
+            return lhs.x < rhs.x;
+        }
+        return lhs.z < rhs.z;
+    });
+
+    if (grass_update_chunk_cursor_ >= loaded_coords.size()) {
+        grass_update_chunk_cursor_ = 0;
+    }
+
+    const std::size_t chunks_to_check = std::min(kGrassUpdateChunksPerTick, loaded_coords.size());
+    for (std::size_t chunk_offset = 0; chunk_offset < chunks_to_check; ++chunk_offset) {
+        const ChunkCoord coord = loaded_coords[(grass_update_chunk_cursor_ + chunk_offset) % loaded_coords.size()];
+        auto chunk_it = chunks_.find(coord);
+        if (chunk_it == chunks_.end() || !chunk_it->second.data.has_value()) {
+            continue;
+        }
+
+        ChunkData& chunk = *chunk_it->second.data;
+        bool changed = false;
+
+        const int column_count = kChunkWidth * kChunkDepth;
+        const int base_column = static_cast<int>(
+            (frame_counter_ * 37u + static_cast<std::uint64_t>((coord.x * 31) ^ (coord.z * 17))) %
+            static_cast<std::uint64_t>(column_count)
+        );
+
+        for (int attempt = 0; attempt < kGrassUpdateColumnAttemptsPerChunk && !changed; ++attempt) {
+            const int column = (base_column + attempt * 73) % column_count;
+            const int local_x = column % kChunkWidth;
+            const int local_z = column / kChunkWidth;
+
+            for (int local_y = kChunkHeight - 2; local_y >= 0; --local_y) {
+                const BlockId current = chunk.get(local_x, local_y, local_z);
+                const BlockId above = chunk.get(local_x, local_y + kGrassBlockedCheckHeight, local_z);
+
+                if (current == BlockId::Dirt && above == BlockId::Air) {
+                    chunk.set(local_x, local_y, local_z, BlockId::Grass);
+                    changed = true;
+                    break;
+                }
+
+                if (block_registry_.is_opaque(above) && current != BlockId::Air) {
+                    break;
+                }
+            }
+        }
+
+        if (!changed) {
+            continue;
+        }
+
+        const std::uint64_t new_version = next_chunk_version_++;
+        chunk_it->second.generation_version = new_version;
+        chunk_it->second.mesh_version = 0;
+        chunk_it->second.dirty_mesh = true;
+        mark_chunk_dirty_for_save(coord);
+        queue_rebuild_self_and_neighbors_if_loaded_locked(coord, false);
+    }
+
+    grass_update_chunk_cursor_ = (grass_update_chunk_cursor_ + chunks_to_check) % loaded_coords.size();
+}
+
 
 void WorldStreamer::set_leaves_render_mode(LeavesRenderMode mode) {
     std::lock_guard lock(mutex_);

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Minecraft Legacy Remake — архитектурная карта v11 — обновлено по release</title>
+<title>Minecraft Legacy Remake — архитектурная карта v12 — обновлено по release</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
 mermaid.initialize({
@@ -57,11 +57,11 @@ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{bor
 </head>
 <body>
 <header>
-  <h1>Minecraft Legacy Remake — архитектурная карта v11</h1>
-  <p><strong>Обновлено по текущей ветке <code>release</code> на 3 мая 2026.</strong> Документ пересобран после повторной сверки с GitHub-веткой <code>release</code>: уточнён CMake target, список файлов <code>src</code>, фактический <code>WorldStreamer</code> pipeline, debug/perf-метрики, Light Borders на 8 направлений и статус <code>PerfRecorder</code>. Важное исправление v11: <code>src/common/perf_recorder.cpp/.hpp</code> в ветке есть, но они не подключены в <code>CMakeLists.txt</code> и не встроены в <code>Application</code>, поэтому это не рабочая runtime-подсистема, а неподключённый/экспериментальный код.</p>
+  <h1>Minecraft Legacy Remake — архитектурная карта v12</h1>
+  <p><strong>Обновлено по текущей ветке <code>release</code> после последнего апдейта GitHub и серии правок occlusion.</strong> Документ пересобран под актуальную архитектуру: подтверждены <code>CMakeLists.txt</code>, список shader outputs, <code>ChunkSectionVisibility</code> как advisory metadata, текущий <code>Renderer</code> с software occlusion grid, cave/surface hints, debug counters и безопасная логика без жёсткого portal-PVS. Важное исправление v12: предыдущие разделы про portal/PVS переведены в статус экспериментальной ветки; текущий рабочий путь оптимизации — <code>frustum + section rendering + software occlusion + cave-mode tuning</code>, без удаления слегка видимых блоков по краям экрана.</p>
   <div class="kpi">
     <div><b>40+</b><span>блок-схемы и sequence diagrams</span></div>
-    <div><b>31</b><span>страница/раздел с подписью</span></div>
+    <div><b>32</b><span>страница/раздел с подписью</span></div>
     <div><b>30</b><span>файлов в src: .cpp/.hpp, включая неподключённый PerfRecorder</span></div>
     <div><b>13</b><span>.cpp файлов в CMake target</span></div>
     <div><b>8</b><span>light border neighbors</span></div>
@@ -70,10 +70,10 @@ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{bor
 <main>
 
 <section class="page" id="p01">
-<h2>1. Проверка актуальности v11 по ветке release</h2>
-<div class="callout"><strong>Вывод после сверки:</strong> загруженный HTML был полезен как архитектурная карта, но в нём требовалось исправить статус perf-диагностики. Для ветки <code>release</code> подтверждено: <code>CMakeLists.txt</code> собирает 13 <code>.cpp</code> файлов в target; <code>src/common/perf_recorder.cpp/.hpp</code> физически существуют, но не входят в <code>MINECRAFT_LEGACY_SOURCES</code>; в <code>Application</code> нет поля <code>PerfRecorder</code> и вызова <code>record_frame()</code>; <code>WorldStreamer</code> имеет job type <code>BuildMesh</code>, а fast/final mesh различаются через <code>snapshot->provisional</code> и debug-счётчики.</div>
+<h2>1. Проверка актуальности v12 по ветке release</h2>
+<div class="callout"><strong>Вывод после сверки:</strong> загруженный HTML был полезен как архитектурная карта v11, но после обновления ветки <code>release</code> его нужно было перевести на фактическую v12-схему. Подтверждено: <code>CMakeLists.txt</code> по-прежнему собирает 13 <code>.cpp</code> в target и компилирует 8 shader outputs; <code>src/game/world_types.hpp</code> хранит advisory-поля видимости секций, но не содержит жёсткой portal/PVS-матрицы; <code>Renderer</code> использует section-level buffers, <code>DebugHudData</code>, cave visibility frame и software occlusion. Поэтому документ обновлён: portal/PVS описан как экспериментальный путь, а текущая рабочая оптимизация описана как безопасный occlusion tuning.</div>
 <table><thead><tr><th>Пункт проверки</th><th>Что реально есть в ветке release</th><th>Как обновлено в HTML</th></tr></thead><tbody>
-<tr><td>Сборка</td><td><code>CMakeLists.txt</code> собирает target из 13 <code>.cpp</code>: <code>main</code>, <code>application</code>, <code>asset_pack</code>, <code>platform_app</code>, <code>stb_vorbis_impl</code>, <code>renderer</code>, <code>block</code>, <code>light</code>, <code>world_generator</code>, <code>world_save</code>, <code>world_streamer</code>, <code>debug_camera</code>, <code>player_controller</code>.</td><td>KPI исправлен: теперь указаны около <code>30</code> файлов в <code>src</code> с учётом неподключённого <code>PerfRecorder</code> и <code>13</code> <code>.cpp</code> в CMake target.</td></tr>
+<tr><td>Сборка</td><td><code>CMakeLists.txt</code> собирает target из 13 <code>.cpp</code>: <code>main</code>, <code>application</code>, <code>asset_pack</code>, <code>platform_app</code>, <code>stb_vorbis_impl</code>, <code>renderer</code>, <code>block</code>, <code>light</code>, <code>world_generator</code>, <code>world_save</code>, <code>world_streamer</code>, <code>debug_camera</code>, <code>player_controller</code>.</td><td>KPI перепроверен: теперь указаны около <code>30</code> файлов в <code>src</code> с учётом неподключённого <code>PerfRecorder</code> и <code>13</code> <code>.cpp</code> в CMake target.</td></tr>
 <tr><td>Файловая архитектура</td><td>В <code>src</code> есть группы <code>app</code>, <code>common</code>, <code>game</code>, <code>platform</code>, <code>render</code> и <code>main.cpp</code>. В <code>common</code> учитываются <code>asset_pack</code>, <code>log.hpp</code>, <code>math.hpp</code> и неподключённый <code>perf_recorder</code>.</td><td>Оставлена модульная карта, но добавлена пометка: это modular monolith, не ECS и не полностью разделённый движок.</td></tr>
 <tr><td><code>PerfRecorder</code></td><td>В ветке <code>release</code> есть <code>src/common/perf_recorder.cpp/.hpp</code> и переменная окружения <code>MINECRAFT_LEGACY_PERF_LOG</code>, но <code>perf_recorder.cpp</code> не входит в <code>CMakeLists.txt</code>, а <code>Application</code> не создаёт и не вызывает <code>PerfRecorder</code>.</td><td>Статус изменён: не “отсутствует”, а “лежит в проекте, но не подключён”. В рабочем runtime пока опираться на <code>DebugHudData</code>, <code>StreamingStats</code>, last generate/light/mesh ms и upload/culling counters.</td></tr>
 <tr><td>Освещение</td><td>Есть <code>src/game/light.cpp/.hpp</code>, <code>LightBuildSnapshot</code>, 4 стороны + 4 угла, <code>LightMeshSnapshot</code>, <code>calculate_chunk_light</code> и <code>sample_sky_light</code>.</td><td>Разделы про border lighting сохранены, но уточнено: основной исправляемый слой сейчас <code>Sky Light</code>; <code>Block Light</code> хранится в <code>ChunkLight</code>, но полноценное распространение block-light лучше считать отдельной будущей задачей.</td></tr>
@@ -93,6 +93,36 @@ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{bor
 </ul>
 
 <div class="callout"><strong>Дополнительная проверка v11:</strong> <code>perf_recorder.cpp</code> сейчас нельзя просто включить в сборку без ревизии: в нём используются расширенные поля статистики вроде <code>last_apply_ms</code>, <code>pending_upload_sections</code>, <code>provisional_lifetime_frames</code>, <code>missing_light_borders</code> и <code>renderer_upload_failures</code>, которых нет в показанном <code>WorldStreamer::StreamingStats</code>. Поэтому задача по PerfRecorder — не только “добавить файл в CMake”, но и синхронизировать структуру метрик.</div>
+
+</section>
+
+<section class="page" id="p01b">
+<h2>1.1. Что изменилось после последнего GitHub-апдейта</h2>
+<div class="callout"><strong>Ключевое изменение v12:</strong> текущая рабочая оптимизация больше не должна опираться на жёсткий portal/PVS-culling, потому что он давал ложные дырки по краям экрана. Основной путь теперь: <code>front-to-back sorting</code>, <code>frustum culling</code>, <code>software occlusion grid</code>, защита near/edge/sliver-секций и отдельная настройка cave mode.</div>
+<table><thead><tr><th>Подсистема</th><th>Актуальный статус</th><th>Что важно для дальнейшей оптимизации</th></tr></thead><tbody>
+<tr><td><code>Renderer</code></td><td>Использует screen-space software occlusion grid <code>96x54</code>, candidate padding, occluder inset, edge guard и surface false-positive protection.</td><td>Нельзя усиливать occlusion одинаково для поверхности и пещер. Поверхность требует защиты от ложных дыр, пещеры можно резать агрессивнее.</td></tr>
+<tr><td><code>ChunkSectionVisibility</code></td><td>Хранит advisory fields: <code>visible_opaque_faces</code>, <code>likely_occluder</code>, <code>near_surface_band</code>, <code>render_priority_bias</code>.</td><td>Эти поля не должны жёстко удалять геометрию. Их назначение — порядок отрисовки, выбор occluder-ов и debug.</td></tr>
+<tr><td><code>CaveVisibilityFrame</code></td><td>Считается в <code>Application</code> через roof sampling и hysteresis, затем передаётся в renderer.</td><td>В cave mode surface-only sections должны резаться смелее, но входы в пещеры и слегка видимые края нельзя вырезать.</td></tr>
+<tr><td>Portal/PVS</td><td>Переведён в статус экспериментального направления.</td><td>Полный PVS без portal frustum/Hi-Z слишком легко ломает видимые края. Для текущей игры безопаснее доводить occlusion buffer.</td></tr>
+<tr><td>Следующий правильный уровень</td><td><code>Depth prepass + Hi-Z</code>.</td><td>CPU AABB occlusion полезен, но он грубый. Для настоящего “блок за блоком не рисовать” нужен depth-based подход.</td></tr>
+</tbody></table>
+<div class="diagram-card"><h3>Текущий безопасный pipeline видимости v12</h3><div class="mermaid">
+flowchart TD
+    Candidate["Render section candidate"] --> Empty{"has geometry?"}
+    Empty -->|no| Skip0["skip"]
+    Empty -->|yes| Frustum{"section AABB in frustum?"}
+    Frustum -->|no| Skip1["frustum_culled_sections++"]
+    Frustum -->|yes| Near{"near / edge / sliver protected?"}
+    Near -->|yes| Draw["draw section"]
+    Near -->|no| Surface{"surface false-positive risk?"}
+    Surface -->|yes| Draw
+    Surface -->|no| Occ{"occluded by closer opaque sections?"}
+    Occ -->|yes| Skip2["occlusion_culled_sections++"]
+    Occ -->|no| Draw
+    Draw --> Occluder{"good opaque occluder?"}
+    Occluder -->|yes| Add["write inset projected bounds to occlusion grid"]
+    Occluder -->|no| End["continue"]
+</div></div>
 </section>
 
 <section class="page" id="p02">
@@ -532,35 +562,51 @@ flowchart TD
 </section>
 
 <section class="page" id="p20">
-<h2>20. Culling и отрисовка лишних полигонов</h2>
-<p>Проект уже имеет несколько уровней отсечения: frustum culling, section culling, cave/surface culling и экспериментальный occlusion culling. Самая важная идея для оптимизации — скрывать не только целые чанки, но и вертикальные секции, а ещё лучше — связные области, если они гарантированно не видны.</p>
-<table><thead><tr><th>Уровень</th><th>Что отсекает</th><th>Что улучшить дальше</th></tr></thead><tbody>
-<tr><td>Hidden faces в meshing</td><td>Внутренние грани между блоками</td><td>Строго учитывать прозрачность/листья/воду</td></tr>
-<tr><td>Frustum culling</td><td>Секции вне камеры</td><td>Проверить AABB секций, а не только чанков</td></tr>
-<tr><td>Cave/surface culling</td><td>Пещеры, когда игрок на поверхности, и поверхность, когда игрок под крышей</td><td>Добавить portal/connected visibility</td></tr>
-<tr><td>Occlusion culling</td><td>Секции закрытые ближней геометрией</td><td>Сделать hierarchical Z или software occluder grid стабильнее</td></tr>
-<tr><td>Greedy mesh</td><td>Сокращает количество faces/draw data</td><td>Не ломать lighting/AO при объединении</td></tr>
+<h2>20. Culling и occlusion после v12</h2>
+<p>Текущий рабочий путь оптимизации — не “выкидывать всё, что не похоже на пещеру/поверхность”, а постепенно уменьшать количество секций, которые доходят до draw. Главная цель: если дальняя секция закрыта ближней opaque-геометрией, она не должна отправляться на GPU. При этом слегка видимые блоки по краям и под углом должны оставаться.</p>
+<table><thead><tr><th>Уровень</th><th>Что делает</th><th>Статус v12</th></tr></thead><tbody>
+<tr><td>Hidden faces в meshing</td><td>Не создаёт внутренние faces между соседними непрозрачными блоками.</td><td>База, которую нельзя заменять screen-space culling-ом.</td></tr>
+<tr><td>Frustum culling</td><td>Отсекает секции, полностью находящиеся вне камеры.</td><td>Безопасный первый фильтр.</td></tr>
+<tr><td>Software occlusion grid</td><td>Хранит ближайшую depth-оценку по экранным ячейкам и пробует отсеять дальние секции за ближними стенами.</td><td>Основной текущий слой оптимизации. Настроен через padding/inset/edge guard.</td></tr>
+<tr><td>Cave-mode tuning</td><td>В пещере агрессивнее режет surface-only sections, но не трогает near/edge/sliver геометрию.</td><td>Нужен, чтобы в пещерах не рисовалась вся поверхность сверху.</td></tr>
+<tr><td>Portal/PVS</td><td>Пытается обходить секции через связность проходов.</td><td>Эксперимент: может давать дырки по краям, поэтому не должен быть основным hard-culling слоем.</td></tr>
+<tr><td>Depth prepass / Hi-Z</td><td>GPU-depth проверка AABB/секции против depth pyramid.</td><td>Рекомендуемый следующий большой этап.</td></tr>
 </tbody></table>
+<div class="diagram-card"><h3>Почему CPU AABB occlusion иногда ошибается</h3><div class="mermaid">
+flowchart LR
+    Camera["камера"] --> Wall["ближняя opaque-секция"]
+    Wall --> Far["дальняя секция"]
+    Far --> Projection["AABB проекция на grid"]
+    Projection --> Risk{"есть маленький видимый край?"}
+    Risk -->|да| Protect["padding / edge guard / surface risk => draw"]
+    Risk -->|нет| Cull["occlusion cull"]
+</div></div>
+<div class="callout"><strong>Практическое правило:</strong> surface-секции защищаются сильнее, потому что дырки на склонах/горизонте заметны сразу. Cave/underground-секции можно резать агрессивнее, потому что они чаще закрыты стенами и не должны массово показывать поверхность.</div>
 </section>
 
 <section class="page" id="p21">
-<h2>21. Cave visibility — проверено в v11</h2>
-<p>Система определяет, находится ли игрок под “крышей”, через <code>Application::update_cave_visibility_frame()</code>: она сэмплирует несколько колонн над камерой, считает непрозрачные <code>roof_blocks</code>, применяет hysteresis и передаёт в renderer структуру <code>Renderer::CaveVisibilityFrame</code>. Это позволяет отсекать поверхностные секции в пещерах и наоборот.</p>
+<h2>21. Cave visibility и cave-mode occlusion</h2>
+<p>Система cave visibility сейчас нужна не для жёсткого удаления всей поверхности, а для выбора режима occlusion. <code>Application::update_cave_visibility_frame()</code> сэмплирует колонны над камерой, считает непрозрачные roof blocks, применяет hysteresis и передаёт <code>Renderer::CaveVisibilityFrame</code> в renderer. После последнего апдейта это используется как сигнал: в пещере surface-only sections можно отсекать агрессивнее, но near/edge/sliver protection остаётся.</p>
 <div class="grid">
-<div class="card"><h3>CaveVisibilityFrame</h3><p><strong>cave_mode:</strong> активен ли режим пещеры.<br><strong>roof_blocks:</strong> количество непрозрачных блоков над камерой.<br><strong>camera_chunk_x/z:</strong> текущий чанк для точной привязки отсечения.</p></div>
-<div class="card"><h3>Логика отсечения</h3><p>Секция считается Cave, если она ниже <code>kSeaLevel</code> и закрыта сверху. Секция считается Surface, если она выше или открыта небу. В cave_mode Surface-секции отбрасываются.</p></div>
+<div class="card"><h3>CaveVisibilityFrame</h3><p><strong>cave_mode:</strong> активен ли режим пещеры.<br><strong>roof_blocks:</strong> количество непрозрачных блоков над камерой.<br><strong>camera_chunk_x/z:</strong> текущий чанк для привязки к области игрока.<br><strong>camera_world_y:</strong> высота камеры для cave/surface эвристик.</p></div>
+<div class="card"><h3>Текущая роль</h3><p>Это не абсолютный фильтр. Режим влияет на приоритеты и aggressiveness occlusion: в пещере меньше защищать далёкие surface-only секции, но не вырезать входы, края и слегка видимые блоки.</p></div>
 </div>
-<div class="diagram-card"><h3>Cave visibility mode</h3><div class="mermaid">
+<div class="diagram-card"><h3>Cave mode в occlusion pipeline</h3><div class="mermaid">
 flowchart TD
     Camera["observer position"] --> Columns["sample roof columns above camera"]
-    Columns --> Roof["count roof blocks"]
-    Roof --> Candidate{"roof >= threshold (e.g. 4)"}
-    Candidate --> Pending["pending mode"]
-    Pending --> Hysteresis{"stable frames enough?"}
-    Hysteresis -->|yes| Mode["cave_visibility_cave_mode = true"]
-    Hysteresis -->|no| Keep["keep previous mode"]
-    Mode --> Renderer["Renderer set_cave_visibility_frame"]
-    Renderer --> Sections["Surface culling in cave / Cave culling on surface"]
+    Columns --> Roof["count opaque roof blocks"]
+    Roof --> Hysteresis["cave hysteresis"]
+    Hysteresis --> Frame["CaveVisibilityFrame"]
+    Frame --> Renderer["Renderer"]
+    Renderer --> Candidate["section candidate"]
+    Candidate --> Cave{"cave_mode?"}
+    Cave -->|yes| SurfaceOnly{"surface-only far section?"}
+    SurfaceOnly -->|yes| Aggressive["use stronger occlusion"]
+    SurfaceOnly -->|no| Normal["normal occlusion"]
+    Cave -->|no| SurfaceSafe["surface false-positive protection"]
+    Aggressive --> DrawOrCull["draw or cull by occlusion grid"]
+    Normal --> DrawOrCull
+    SurfaceSafe --> DrawOrCull
 </div></div>
 </section>
 
@@ -674,7 +720,7 @@ flowchart TD
 <tr><td><code>pending_upload_bytes</code>, <code>uploaded_bytes_this_frame</code></td><td>Размер данных, которые ждут/идут в renderer</td><td>Снизить бюджет загрузки, батчить uploads, переиспользовать буферы</td></tr>
 <tr><td><code>queued_fast_meshes</code>, <code>queued_final_meshes</code></td><td>Нагрузка mesh pipeline по provisional/final режимам</td><td>Приоритизировать ближние чанки и чанки в направлении камеры</td></tr>
 <tr><td><code>observer_light_border_status</code></td><td>Готовность light borders у чанка наблюдателя</td><td>Проверить очередь relight self + neighbors и готовность 8 соседей</td></tr>
-<tr><td><code>drawn_sections</code>, <code>cave_culled_sections</code>, <code>surface_culled_sections</code></td><td>Насколько эффективно renderer отсекает секции</td><td>Усилить section/cave/occlusion culling и добавить debug overlay причин отсечения</td></tr>
+<tr><td><code>drawn_sections</code>, <code>cave_culled_sections</code>, <code>surface_culled_sections</code></td><td>Насколько эффективно renderer отсекает секции</td><td>Настраивать software occlusion: padding/inset/edge guard, surface protection и cave-mode aggressiveness</td></tr>
 </tbody></table>
 </section>
 
@@ -690,6 +736,17 @@ flowchart TD
 <tr><td>Локальный путь Android SDK в Gradle</td><td>Сборка плохо переносится на другой ПК</td><td>Перенести в <code>local.properties</code> или environment variable.</td></tr>
 <tr><td>Два <code>.gitignore</code></td><td>Файл с пробелом в имени выглядит как ошибка репозитория</td><td>Удалить <code> .gitignore</code>, оставить нормальный <code>.gitignore</code>.</td></tr>
 </tbody></table>
+</section>
+
+<section class="page" id="p27b">
+<h2>27.1. План оптимизации после v12</h2>
+<table><thead><tr><th>Этап</th><th>Содержание</th><th>Цель</th></tr></thead><tbody>
+<tr><td>7.5 стабилизация</td><td>Оставить aggressive occlusion для underground/cave, расширить защиту для слегка видимых краёв.</td><td>Не терять видимые блоки под углом.</td></tr>
+<tr><td>7.6 cave tune</td><td>В cave mode surface-only sections резать сильнее, но сохранять входы и near sections.</td><td>В пещерах не рисовать всю поверхность.</td></tr>
+<tr><td>8.0 depth prepass</td><td>Сначала писать depth ближайшей opaque-геометрии, затем делать основной draw.</td><td>Снизить fragment overdraw.</td></tr>
+<tr><td>9.0 Hi-Z</td><td>Построить depth pyramid и проверять AABB секций против неё.</td><td>Нормально решать задачу “блок/секция закрыта ближними блоками”.</td></tr>
+</tbody></table>
+<div class="callout"><strong>Вывод:</strong> CPU software grid уже даёт эффект, но не может идеально заменить depth-based occlusion. Его нужно оставить как дешёвый ранний фильтр, а точное “закрыто ближним блоком” переносить в depth prepass/Hi-Z.</div>
 </section>
 
 <section class="page" id="p28">
@@ -811,6 +868,8 @@ sequenceDiagram
 </ul>
 </section>
 
+
+<!-- Updated by ChatGPT: architecture map v12, release occlusion update. -->
 </main>
 </body>
 </html>

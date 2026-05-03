@@ -199,6 +199,7 @@ private:
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
     void queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
+    void tick_grass_updates_locked();
     void record_stale_upload_drop(ChunkCoord coord);
     void mark_chunk_dirty_for_save(ChunkCoord coord);
     void enqueue_dirty_save(ChunkCoord coord);
@@ -235,6 +236,8 @@ private:
     std::uint64_t next_rebuild_serial_ {1};
     std::uint64_t next_upload_token_ {1};
     std::uint64_t frame_counter_ {0};
+    std::size_t grass_update_chunk_cursor_ {0};
+    std::uint64_t next_grass_update_frame_ {0};
     std::size_t stale_results_ {0};
     std::size_t stale_uploads_dropped_ {0};
     std::size_t light_stale_results_ {0};

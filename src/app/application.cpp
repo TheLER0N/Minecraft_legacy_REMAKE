@@ -186,7 +186,7 @@ void Application::start_world() {
     if (world_streamer_ == nullptr) {
         world_save_ = std::make_unique<WorldSave>(platform_.save_root_directory() / "default");
         const WorldMetadata metadata = world_save_->load_or_create_metadata();
-        world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, 6, world_save_.get());
+        world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, 10, world_save_.get());
         world_streamer_->set_leaves_render_mode(leaves_render_mode_);
         const WorldGenerator spawn_generator {block_registry_};
         const int spawn_x = 32;
