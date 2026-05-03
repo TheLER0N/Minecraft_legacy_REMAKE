@@ -357,7 +357,7 @@ private:
     bool wireframe_enabled_ {false};
     bool wireframe_textures_enabled_ {false};
     bool section_culling_enabled_ {true};
-    bool occlusion_culling_enabled_ {false};
+    bool occlusion_culling_enabled_ {true};
     bool logged_wireframe_support_ {false};
     std::size_t logged_occlusion_warning_count_ {0};
     std::size_t logged_cave_culling_warning_count_ {0};
