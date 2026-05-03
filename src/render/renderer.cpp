@@ -1309,7 +1309,13 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
                 }
             }
 
-            int priority = 0;
+            int priority = visibility.render_priority_bias;
+            if (visibility.likely_occluder) {
+                priority -= 6;
+            }
+            if (visibility.near_surface_band && !cave_visibility_frame_.cave_mode) {
+                priority -= 4;
+            }
             if (cave_visibility_frame_.cave_mode) {
                 if (visibility.has_surface_geometry && !visibility.has_cave_geometry) {
                     priority += 40;
@@ -1375,7 +1381,9 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             candidate.section->cutout_index_count == 0 &&
             candidate.section->transparent_index_count == 0;
         const bool dense_opaque_section =
-            opaque_only && candidate.section->opaque_index_count >= kMinOccluderOpaqueIndices;
+            opaque_only &&
+            candidate.section->visibility.likely_occluder &&
+            candidate.section->opaque_index_count >= kMinOccluderOpaqueIndices;
         const std::optional<ProjectedBounds> projected =
             occlusion_culling_enabled_ && !near_camera_section && opaque_only
                 ? project_aabb_to_occlusion_grid(current_camera_.view_proj, candidate.bounds)
