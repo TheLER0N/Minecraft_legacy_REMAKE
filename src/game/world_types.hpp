@@ -23,6 +23,21 @@ constexpr int kChunkSectionHeight = 16;
 constexpr int kChunkSectionCount = kChunkHeight / kChunkSectionHeight;
 constexpr int kSeaLevel = 62;
 
+constexpr std::size_t kSectionVisibilityFaceCount = 6;
+constexpr std::uint8_t kSectionFaceTop = 0;
+constexpr std::uint8_t kSectionFaceBottom = 1;
+constexpr std::uint8_t kSectionFaceEast = 2;
+constexpr std::uint8_t kSectionFaceWest = 3;
+constexpr std::uint8_t kSectionFaceSouth = 4;
+constexpr std::uint8_t kSectionFaceNorth = 5;
+constexpr std::uint8_t kSectionFaceMaskAll =
+    static_cast<std::uint8_t>((1u << kSectionVisibilityFaceCount) - 1u);
+
+constexpr std::uint8_t section_face_bit(std::size_t face) {
+    return static_cast<std::uint8_t>(1u << face);
+}
+
+
 constexpr bool contains_world_y(int world_y) {
     return world_y >= kWorldMinY && world_y <= kWorldMaxY;
 }
@@ -110,6 +125,12 @@ struct ChunkSectionVisibility {
     std::uint32_t visible_transparent_faces {0};
     bool likely_occluder {false};
     bool near_surface_band {false};
+
+    // Section PVS data. open_faces contains sides of this section touched by
+    // a transparent/air region. visibility_from_face[face] tells which other
+    // section sides can be reached by sight from that entry face.
+    std::uint8_t open_faces {0};
+    std::array<std::uint8_t, kSectionVisibilityFaceCount> visibility_from_face {};
 };
 
 struct ChunkVisibilityMetadata {

@@ -16,6 +16,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -23,6 +24,8 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <unordered_set>
+#include <utility>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -378,6 +381,98 @@ float distance_sq_to_aabb(const Vec3& point, const Aabb& bounds) {
 bool section_inside_near_safety_zone(const Vec3& camera_position, const Aabb& bounds) {
     return distance_sq_to_aabb(camera_position, bounds) <= kNearSectionSafetyRadiusSq;
 }
+
+struct RenderSectionAddress {
+    ChunkCoord coord {};
+    int section_index {0};
+
+    bool operator==(const RenderSectionAddress&) const = default;
+};
+
+struct RenderSectionAddressHasher {
+    std::size_t operator()(const RenderSectionAddress& address) const {
+        std::size_t seed = 0;
+        seed = hash_combine(seed, address.coord.x);
+        seed = hash_combine(seed, address.coord.z);
+        seed = hash_combine(seed, address.section_index);
+        return seed;
+    }
+};
+
+int floor_div_int(int value, int divisor) {
+    if (value >= 0) {
+        return value / divisor;
+    }
+    return -(((-value) + divisor - 1) / divisor);
+}
+
+ChunkCoord chunk_coord_from_world_position(const Vec3& position) {
+    const int world_x = static_cast<int>(std::floor(position.x));
+    const int world_z = static_cast<int>(std::floor(position.z));
+    return {
+        floor_div_int(world_x, kChunkWidth),
+        floor_div_int(world_z, kChunkDepth)
+    };
+}
+
+int section_index_from_world_y(float y) {
+    const int world_y = std::clamp(static_cast<int>(std::floor(y)), kWorldMinY, kWorldMaxY);
+    return std::clamp(
+        (world_y - kWorldMinY) / kChunkSectionHeight,
+        0,
+        kChunkSectionCount - 1
+    );
+}
+
+std::uint8_t opposite_section_face(std::uint8_t face) {
+    switch (face) {
+    case kSectionFaceTop:
+        return kSectionFaceBottom;
+    case kSectionFaceBottom:
+        return kSectionFaceTop;
+    case kSectionFaceEast:
+        return kSectionFaceWest;
+    case kSectionFaceWest:
+        return kSectionFaceEast;
+    case kSectionFaceSouth:
+        return kSectionFaceNorth;
+    case kSectionFaceNorth:
+        return kSectionFaceSouth;
+    default:
+        return face;
+    }
+}
+
+RenderSectionAddress neighbor_section_address(RenderSectionAddress address, std::uint8_t face) {
+    switch (face) {
+    case kSectionFaceTop:
+        ++address.section_index;
+        break;
+    case kSectionFaceBottom:
+        --address.section_index;
+        break;
+    case kSectionFaceEast:
+        ++address.coord.x;
+        break;
+    case kSectionFaceWest:
+        --address.coord.x;
+        break;
+    case kSectionFaceSouth:
+        ++address.coord.z;
+        break;
+    case kSectionFaceNorth:
+        --address.coord.z;
+        break;
+    default:
+        break;
+    }
+    return address;
+}
+
+bool valid_section_address(const RenderSectionAddress& address) {
+    return address.section_index >= 0 && address.section_index < kChunkSectionCount;
+}
+
 
 bool same_block_hit(const std::optional<BlockHit>& lhs, const std::optional<BlockHit>& rhs) {
     if (lhs.has_value() != rhs.has_value()) {
@@ -1200,6 +1295,63 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
         int priority {0};
     };
 
+    std::unordered_set<RenderSectionAddress, RenderSectionAddressHasher> pvs_visible_sections;
+    if (section_culling_enabled_) {
+        const RenderSectionAddress camera_section {
+            chunk_coord_from_world_position(current_camera_.camera_position),
+            section_index_from_world_y(current_camera_.camera_position.y)
+        };
+
+        if (chunk_buffers_.find(camera_section.coord) != chunk_buffers_.end()) {
+            std::deque<std::pair<RenderSectionAddress, int>> traversal_queue;
+            pvs_visible_sections.insert(camera_section);
+            traversal_queue.push_back({camera_section, -1});
+
+            constexpr std::size_t kMaxPvsTraversalSections = 16384;
+            while (!traversal_queue.empty() && pvs_visible_sections.size() < kMaxPvsTraversalSections) {
+                const auto [address, entry_face] = traversal_queue.front();
+                traversal_queue.pop_front();
+
+                auto chunk_it = chunk_buffers_.find(address.coord);
+                if (chunk_it == chunk_buffers_.end() || !valid_section_address(address)) {
+                    continue;
+                }
+
+                const RenderSection& section = chunk_it->second.sections[static_cast<std::size_t>(address.section_index)];
+                const ChunkSectionVisibility& visibility = section.visibility;
+                const std::uint8_t exit_faces = entry_face < 0
+                    ? (visibility.open_faces != 0 ? visibility.open_faces : kSectionFaceMaskAll)
+                    : visibility.visibility_from_face[static_cast<std::size_t>(entry_face)];
+
+                if (exit_faces == 0) {
+                    continue;
+                }
+
+                for (std::size_t face = 0; face < kSectionVisibilityFaceCount; ++face) {
+                    if ((exit_faces & section_face_bit(face)) == 0) {
+                        continue;
+                    }
+
+                    const RenderSectionAddress next_address =
+                        neighbor_section_address(address, static_cast<std::uint8_t>(face));
+                    if (!valid_section_address(next_address) ||
+                        chunk_buffers_.find(next_address.coord) == chunk_buffers_.end()) {
+                        continue;
+                    }
+
+                    if (pvs_visible_sections.insert(next_address).second) {
+                        traversal_queue.push_back({
+                            next_address,
+                            static_cast<int>(opposite_section_face(static_cast<std::uint8_t>(face)))
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    const bool use_section_pvs = section_culling_enabled_ && !pvs_visible_sections.empty();
+
     std::vector<RenderCandidate> candidates;
     candidates.reserve(visible_chunks.size() * kChunkSectionCount);
     std::vector<ActiveChunk> outline_chunks;
@@ -1207,6 +1359,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
     std::size_t visible_section_count = 0;
     std::size_t frustum_culled_section_count = 0;
+    std::size_t pvs_culled_section_count = 0;
     std::size_t cave_culled_section_count = 0;
     std::size_t surface_culled_section_count = 0;
     std::size_t mixed_section_count = 0;
@@ -1250,6 +1403,14 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
             const bool near_camera_section =
                 section_inside_near_safety_zone(current_camera_.camera_position, section_bounds);
+
+            if (use_section_pvs && !near_camera_section) {
+                const RenderSectionAddress address {chunk.coord, section_index};
+                if (pvs_visible_sections.find(address) == pvs_visible_sections.end()) {
+                    ++pvs_culled_section_count;
+                    continue;
+                }
+            }
 
             // Cave/surface metadata is only a priority hint by default.
             // Hard culling here caused visible cave floors and player-built
@@ -1416,7 +1577,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     debug_hud_data_.drawn_chunks = last_drawn_chunks_;
     debug_hud_data_.visible_sections = visible_section_count;
     debug_hud_data_.drawn_sections = render_sections.size();
-    debug_hud_data_.frustum_culled_sections = frustum_culled_section_count;
+    debug_hud_data_.frustum_culled_sections = frustum_culled_section_count + pvs_culled_section_count;
     debug_hud_data_.occlusion_culled_sections = occlusion_culled_section_count;
     debug_hud_data_.cave_culled_sections = cave_culled_section_count;
     debug_hud_data_.surface_culled_sections = surface_culled_section_count;
@@ -1427,6 +1588,15 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     debug_hud_data_.drawn_vertices = 0;
     debug_hud_data_.drawn_indices = 0;
     debug_hud_data_.gpu_buffer_bytes = gpu_buffer_bytes;
+
+    if (debug_log_draw_stats && pvs_culled_section_count > 0) {
+        log_message(
+            LogLevel::Info,
+            std::string("Renderer: section PVS culled sections=") +
+                std::to_string(pvs_culled_section_count) +
+                " visible=" + std::to_string(visible_section_count)
+        );
+    }
 
     if (occlusion_culling_enabled_ &&
         visible_section_count > 0 &&
@@ -1539,6 +1709,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     draw_crosshair(frame);
     draw_debug_hud(frame);
 }
+
 
 void Renderer::end_frame() {
     if (!frame_started_) {

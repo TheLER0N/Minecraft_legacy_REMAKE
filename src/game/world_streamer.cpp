@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <deque>
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ml {
 
@@ -89,6 +91,33 @@ bool metadata_should_emit_face(
     }
 }
 
+bool metadata_is_pvs_transparent(BlockId block, const BlockRegistry& block_registry) {
+    return block == BlockId::Air || !block_registry.is_opaque(block);
+}
+
+std::uint8_t metadata_section_boundary_faces(int x, int section_y, int z) {
+    std::uint8_t faces = 0;
+    if (section_y == kChunkSectionHeight - 1) {
+        faces |= section_face_bit(kSectionFaceTop);
+    }
+    if (section_y == 0) {
+        faces |= section_face_bit(kSectionFaceBottom);
+    }
+    if (x == kChunkWidth - 1) {
+        faces |= section_face_bit(kSectionFaceEast);
+    }
+    if (x == 0) {
+        faces |= section_face_bit(kSectionFaceWest);
+    }
+    if (z == kChunkDepth - 1) {
+        faces |= section_face_bit(kSectionFaceSouth);
+    }
+    if (z == 0) {
+        faces |= section_face_bit(kSectionFaceNorth);
+    }
+    return faces;
+}
+
 ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const BlockRegistry& block_registry) {
     ChunkVisibilityMetadata metadata {};
     std::array<int, static_cast<std::size_t>(kChunkWidth * kChunkDepth)> surface_y {};
@@ -125,6 +154,10 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
         {0, 0, 1},
         {0, 0, -1}
     }};
+
+    const auto section_local_index = [](int x, int section_y, int z) {
+        return static_cast<std::size_t>(x + kChunkWidth * (z + section_y * kChunkDepth));
+    };
 
     for (int section_index = 0; section_index < kChunkSectionCount; ++section_index) {
         ChunkSectionVisibility& section = metadata.sections[static_cast<std::size_t>(section_index)];
@@ -196,6 +229,76 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
             }
         }
 
+        std::array<std::uint8_t, static_cast<std::size_t>(kChunkWidth * kChunkSectionHeight * kChunkDepth)> visited {};
+        std::vector<Int3> queue;
+        queue.reserve(static_cast<std::size_t>(kChunkWidth * kChunkSectionHeight * kChunkDepth));
+
+        for (int section_y = 0; section_y < kChunkSectionHeight; ++section_y) {
+            const int local_y = section_index * kChunkSectionHeight + section_y;
+            if (local_y < 0 || local_y >= kChunkHeight) {
+                continue;
+            }
+
+            for (int z = 0; z < kChunkDepth; ++z) {
+                for (int x = 0; x < kChunkWidth; ++x) {
+                    const std::size_t start_index = section_local_index(x, section_y, z);
+                    if (visited[start_index] != 0) {
+                        continue;
+                    }
+
+                    const BlockId start_block = chunk.get(x, local_y, z);
+                    if (!metadata_is_pvs_transparent(start_block, block_registry)) {
+                        visited[start_index] = 1;
+                        continue;
+                    }
+
+                    std::uint8_t region_faces = 0;
+                    queue.clear();
+                    queue.push_back({x, section_y, z});
+                    visited[start_index] = 1;
+
+                    for (std::size_t read_index = 0; read_index < queue.size(); ++read_index) {
+                        const Int3 cell = queue[read_index];
+                        region_faces |= metadata_section_boundary_faces(cell.x, cell.y, cell.z);
+
+                        for (const Int3& offset : face_offsets) {
+                            const int nx = cell.x + offset.x;
+                            const int ny = cell.y + offset.y;
+                            const int nz = cell.z + offset.z;
+
+                            if (nx < 0 || nx >= kChunkWidth ||
+                                ny < 0 || ny >= kChunkSectionHeight ||
+                                nz < 0 || nz >= kChunkDepth) {
+                                continue;
+                            }
+
+                            const std::size_t next_index = section_local_index(nx, ny, nz);
+                            if (visited[next_index] != 0) {
+                                continue;
+                            }
+
+                            const int next_local_y = section_index * kChunkSectionHeight + ny;
+                            const BlockId next_block = chunk.get(nx, next_local_y, nz);
+                            if (!metadata_is_pvs_transparent(next_block, block_registry)) {
+                                visited[next_index] = 1;
+                                continue;
+                            }
+
+                            visited[next_index] = 1;
+                            queue.push_back({nx, ny, nz});
+                        }
+                    }
+
+                    section.open_faces |= region_faces;
+                    for (std::size_t face = 0; face < kSectionVisibilityFaceCount; ++face) {
+                        if ((region_faces & section_face_bit(face)) != 0) {
+                            section.visibility_from_face[face] |= region_faces;
+                        }
+                    }
+                }
+            }
+        }
+
         const int mixed_threshold = 12;
         section.has_surface_geometry = surface_blocks > 0;
         section.has_cave_geometry = cave_blocks > 0;
@@ -231,10 +334,14 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
         if (section.has_geometry && visible_opaque_faces + visible_cutout_faces + visible_transparent_faces == 0) {
             section.render_priority_bias += 30;
         }
+        if (section.open_faces == 0 && section.has_geometry) {
+            section.render_priority_bias += 20;
+        }
     }
 
     return metadata;
 }
+
 
 }
 
