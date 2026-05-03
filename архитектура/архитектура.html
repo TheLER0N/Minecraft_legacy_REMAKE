@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Minecraft Legacy Remake — архитектурная карта v10 — обновлено по release</title>
+<title>Minecraft Legacy Remake — архитектурная карта v11 — обновлено по release</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
 mermaid.initialize({
@@ -57,12 +57,12 @@ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{bor
 </head>
 <body>
 <header>
-  <h1>Minecraft Legacy Remake — архитектурная карта v10</h1>
-  <p><strong>Обновлено по текущей ветке <code>release</code> на 3 мая 2026.</strong> Документ пересобран после сверки с GitHub-веткой <code>release</code>: исправлено отличие от прежней версии под <code>release</code>/<code>release-version</code>, убран неподтверждённый <code>PerfRecorder</code>, уточнены CMake target, список файлов <code>src</code>, фактический <code>WorldStreamer</code> pipeline, debug/perf-метрики, Light Borders на 8 направлений и места, которые являются архитектурной картой, а не отдельными физическими подсистемами.</p>
+  <h1>Minecraft Legacy Remake — архитектурная карта v11</h1>
+  <p><strong>Обновлено по текущей ветке <code>release</code> на 3 мая 2026.</strong> Документ пересобран после повторной сверки с GitHub-веткой <code>release</code>: уточнён CMake target, список файлов <code>src</code>, фактический <code>WorldStreamer</code> pipeline, debug/perf-метрики, Light Borders на 8 направлений и статус <code>PerfRecorder</code>. Важное исправление v11: <code>src/common/perf_recorder.cpp/.hpp</code> в ветке есть, но они не подключены в <code>CMakeLists.txt</code> и не встроены в <code>Application</code>, поэтому это не рабочая runtime-подсистема, а неподключённый/экспериментальный код.</p>
   <div class="kpi">
     <div><b>40+</b><span>блок-схемы и sequence diagrams</span></div>
     <div><b>31</b><span>страница/раздел с подписью</span></div>
-    <div><b>28</b><span>файлов в src: .cpp/.hpp</span></div>
+    <div><b>30</b><span>файлов в src: .cpp/.hpp, включая неподключённый PerfRecorder</span></div>
     <div><b>13</b><span>.cpp файлов в CMake target</span></div>
     <div><b>8</b><span>light border neighbors</span></div>
   </div>
@@ -70,12 +70,12 @@ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{bor
 <main>
 
 <section class="page" id="p01">
-<h2>1. Проверка актуальности v10 по ветке release</h2>
-<div class="callout"><strong>Вывод после сверки:</strong> загруженный HTML был в основном полезен как архитектурная карта, но в нём были факты от другой версии/ветки. Для ветки <code>release</code> исправлены ключевые пункты: <code>CMakeLists.txt</code> собирает 13 <code>.cpp</code> файлов, а не 14; в <code>src/common</code> нет <code>perf_recorder.cpp/.hpp</code>; в <code>Application</code> нет поля/подсистемы <code>PerfRecorder</code>; <code>WorldStreamer</code> имеет job type <code>BuildMesh</code>, а fast/final mesh различаются через <code>snapshot->provisional</code> и debug-счётчики.</div>
+<h2>1. Проверка актуальности v11 по ветке release</h2>
+<div class="callout"><strong>Вывод после сверки:</strong> загруженный HTML был полезен как архитектурная карта, но в нём требовалось исправить статус perf-диагностики. Для ветки <code>release</code> подтверждено: <code>CMakeLists.txt</code> собирает 13 <code>.cpp</code> файлов в target; <code>src/common/perf_recorder.cpp/.hpp</code> физически существуют, но не входят в <code>MINECRAFT_LEGACY_SOURCES</code>; в <code>Application</code> нет поля <code>PerfRecorder</code> и вызова <code>record_frame()</code>; <code>WorldStreamer</code> имеет job type <code>BuildMesh</code>, а fast/final mesh различаются через <code>snapshot->provisional</code> и debug-счётчики.</div>
 <table><thead><tr><th>Пункт проверки</th><th>Что реально есть в ветке release</th><th>Как обновлено в HTML</th></tr></thead><tbody>
-<tr><td>Сборка</td><td><code>CMakeLists.txt</code> собирает target из 13 <code>.cpp</code>: <code>main</code>, <code>application</code>, <code>asset_pack</code>, <code>platform_app</code>, <code>stb_vorbis_impl</code>, <code>renderer</code>, <code>block</code>, <code>light</code>, <code>world_generator</code>, <code>world_save</code>, <code>world_streamer</code>, <code>debug_camera</code>, <code>player_controller</code>.</td><td>KPI исправлен: теперь указаны <code>28</code> файлов в <code>src</code> и <code>13</code> <code>.cpp</code> в CMake target.</td></tr>
-<tr><td>Файловая архитектура</td><td>В <code>src</code> есть группы <code>app</code>, <code>common</code>, <code>game</code>, <code>platform</code>, <code>render</code> и <code>main.cpp</code>. В <code>common</code> учитываются <code>asset_pack</code>, <code>log.hpp</code>, <code>math.hpp</code>.</td><td>Оставлена модульная карта, но добавлена пометка: это modular monolith, не ECS и не полностью разделённый движок.</td></tr>
-<tr><td><code>PerfRecorder</code></td><td>В ветке <code>release</code> не найдено <code>src/common/perf_recorder.cpp/.hpp</code>, а <code>Application</code> не содержит поля <code>PerfRecorder</code> или переменной <code>MINECRAFT_LEGACY_PERF_LOG</code>.</td><td>Все утверждения о встроенном CSV <code>PerfRecorder</code> убраны. Оставлены реальные источники диагностики: <code>DebugHudData</code>, <code>StreamingStats</code>, last generate/light/mesh ms и upload/culling counters.</td></tr>
+<tr><td>Сборка</td><td><code>CMakeLists.txt</code> собирает target из 13 <code>.cpp</code>: <code>main</code>, <code>application</code>, <code>asset_pack</code>, <code>platform_app</code>, <code>stb_vorbis_impl</code>, <code>renderer</code>, <code>block</code>, <code>light</code>, <code>world_generator</code>, <code>world_save</code>, <code>world_streamer</code>, <code>debug_camera</code>, <code>player_controller</code>.</td><td>KPI исправлен: теперь указаны около <code>30</code> файлов в <code>src</code> с учётом неподключённого <code>PerfRecorder</code> и <code>13</code> <code>.cpp</code> в CMake target.</td></tr>
+<tr><td>Файловая архитектура</td><td>В <code>src</code> есть группы <code>app</code>, <code>common</code>, <code>game</code>, <code>platform</code>, <code>render</code> и <code>main.cpp</code>. В <code>common</code> учитываются <code>asset_pack</code>, <code>log.hpp</code>, <code>math.hpp</code> и неподключённый <code>perf_recorder</code>.</td><td>Оставлена модульная карта, но добавлена пометка: это modular monolith, не ECS и не полностью разделённый движок.</td></tr>
+<tr><td><code>PerfRecorder</code></td><td>В ветке <code>release</code> есть <code>src/common/perf_recorder.cpp/.hpp</code> и переменная окружения <code>MINECRAFT_LEGACY_PERF_LOG</code>, но <code>perf_recorder.cpp</code> не входит в <code>CMakeLists.txt</code>, а <code>Application</code> не создаёт и не вызывает <code>PerfRecorder</code>.</td><td>Статус изменён: не “отсутствует”, а “лежит в проекте, но не подключён”. В рабочем runtime пока опираться на <code>DebugHudData</code>, <code>StreamingStats</code>, last generate/light/mesh ms и upload/culling counters.</td></tr>
 <tr><td>Освещение</td><td>Есть <code>src/game/light.cpp/.hpp</code>, <code>LightBuildSnapshot</code>, 4 стороны + 4 угла, <code>LightMeshSnapshot</code>, <code>calculate_chunk_light</code> и <code>sample_sky_light</code>.</td><td>Разделы про border lighting сохранены, но уточнено: основной исправляемый слой сейчас <code>Sky Light</code>; <code>Block Light</code> хранится в <code>ChunkLight</code>, но полноценное распространение block-light лучше считать отдельной будущей задачей.</td></tr>
 <tr><td>Модель мира</td><td><code>kChunkWidth=16</code>, <code>kChunkDepth=16</code>, <code>kLightBorder=4</code>, высота мира <code>-64..319</code>, <code>kChunkHeight=384</code>, секции по 16 блоков.</td><td>Раздел World data model уточнён: 384 блока высоты = 24 секции.</td></tr>
 <tr><td>Стриминг чанков</td><td><code>WorldStreamer</code> содержит job-типы <code>GenerateTerrain</code>, <code>Decorate</code>, <code>CalculateLight</code>, <code>BuildMesh</code>, очереди, stale/drop счётчики, dirty save и upload budget.</td><td>Pipeline исправлен: <code>BuildMesh(provisional)</code>/<code>BuildMesh(final)</code> описываются как логические режимы <code>BuildMesh</code> по флагу <code>provisional</code>, а не как отдельные enum job-типы.</td></tr>
@@ -86,11 +86,13 @@ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}th,td{bor
 <h3>Главные изменения относительно загруженного HTML</h3>
 <ul>
 <li>Исправлена ветка проверки: документ теперь подписан под <code>release</code>, а не под <code>release-version</code>.</li>
-<li>Исправлены точные числа в шапке: <code>28</code> файлов <code>src</code> и <code>13</code> <code>.cpp</code> в CMake target.</li>
-<li>Убраны неподтверждённые элементы <code>PerfRecorder</code>, <code>perf_recorder.cpp</code> и <code>MINECRAFT_LEGACY_PERF_LOG</code>.</li>
+<li>Исправлены точные числа в шапке: около <code>30</code> файлов <code>src</code> с учётом неподключённого <code>PerfRecorder</code> и <code>13</code> <code>.cpp</code> в CMake target.</li>
+<li>Исправлен статус <code>PerfRecorder</code>: файлы и <code>MINECRAFT_LEGACY_PERF_LOG</code> есть, но подсистема не подключена к сборке и runtime.</li>
 <li>Уточнено, что <code>WorldStreamer::ChunkJobType</code> имеет один mesh job <code>BuildMesh</code>, а fast/final считаются режимами по <code>provisional</code>.</li>
 <li>Оставлены все важные схемы: они полезны для преподавателя как архитектурная карта “куда смотреть в коде”.</li>
 </ul>
+
+<div class="callout"><strong>Дополнительная проверка v11:</strong> <code>perf_recorder.cpp</code> сейчас нельзя просто включить в сборку без ревизии: в нём используются расширенные поля статистики вроде <code>last_apply_ms</code>, <code>pending_upload_sections</code>, <code>provisional_lifetime_frames</code>, <code>missing_light_borders</code> и <code>renderer_upload_failures</code>, которых нет в показанном <code>WorldStreamer::StreamingStats</code>. Поэтому задача по PerfRecorder — не только “добавить файл в CMake”, но и синхронизировать структуру метрик.</div>
 </section>
 
 <section class="page" id="p02">
@@ -133,7 +135,7 @@ flowchart TD
 <section class="page" id="p04">
 <h2>4. Фактическая структура файлов после обновления</h2>
 <p>Ниже — список файлов и групп, которые надо учитывать при защите. Важно: <code>minecraft_legacy_release</code> и <code>Minecraft_Legacy_Release.zip</code> относятся к опубликованной сборке/пакету, а не к исходному runtime-коду.</p>
-<div class="callout"><strong>Уточнение v10:</strong> по текущей ветке <code>release</code> CMake target содержит 13 <code>.cpp</code> файлов, а каталог <code>src</code> содержит около 28 основных C++ файлов с учётом заголовков. Поэтому в защите лучше говорить не “32+ source/header”, а “13 translation units и 28 файлов в src”.</div>
+<div class="callout"><strong>Уточнение v11:</strong> по текущей ветке <code>release</code> CMake target содержит 13 <code>.cpp</code> файлов, а каталог <code>src</code> содержит около 30 C++ файлов с учётом заголовков и неподключённого <code>perf_recorder.cpp/.hpp</code>. Поэтому в защите лучше говорить не “32+ source/header”, а “13 translation units в сборке и около 30 файлов в src”.</div>
 <table><thead><tr><th>Путь</th><th>Роль</th><th>Статус в v6</th></tr></thead><tbody>
 <tr><td><code>README.md</code></td><td>Краткое описание проекта, фичи, управление, сборка</td><td>Учтён</td></tr>
 <tr><td><code>AI.md</code></td><td>Архитектурные правила для будущих изменений: кроссплатформенность, P2P, модули, куда лезть</td><td>Добавлен в v6</td></tr>
@@ -145,7 +147,8 @@ flowchart TD
 <tr><td><code>build.gradle</code>, <code>settings.gradle</code>, <code>gradle.properties</code>, <code>gradlew*</code></td><td>Gradle/Android wrapper</td><td>Учтены</td></tr>
 <tr><td><code>android/app/**</code></td><td>Android application wrapper, Manifest, Java Activity, externalNativeBuild</td><td>Учтён</td></tr>
 <tr><td><code>src/app/**</code></td><td>Application, состояния меню/мира, игровой цикл</td><td>Учтён</td></tr>
-<tr><td><code>src/common/**</code></td><td>math, log, asset_pack</td><td>Учтён</td></tr>
+<tr><td><code>src/common/**</code></td><td>math, log, asset_pack, неподключённый perf_recorder</td><td>Учтён</td></tr>
+<tr><td><code>src/common/perf_recorder.cpp/.hpp</code></td><td>CSV perf logger с <code>MINECRAFT_LEGACY_PERF_LOG</code>, p50/p95/p99, upload, queues и culling-полями</td><td>Есть в ветке, но не входит в <code>MINECRAFT_LEGACY_SOURCES</code> и не используется <code>Application</code></td></tr>
 <tr><td><code>src/game/light.hpp</code>, <code>src/game/light.cpp</code></td><td>Расчёт sky light, block light storage, light borders, readiness</td><td><strong>Новый ключевой модуль v6</strong></td></tr>
 <tr><td><code>src/game/world_streamer.*</code></td><td>Асинхронные jobs, состояния чанков, uploads, raycast, set block, saves</td><td>Обновлён pipeline</td></tr>
 <tr><td><code>src/game/world_generator.*</code></td><td>Генерация terrain/caves/aquifers/trees и build_chunk_mesh</td><td>Lighting вынесен наружу, mesh принимает LightMeshSnapshot</td></tr>
@@ -165,7 +168,7 @@ flowchart TD
 <div class="card"><h3>Shaders</h3><p>GLSL лежит в <code>assets/textures/texture_pack/classic/shaders</code>. CMake вызывает <code>glslc</code> и генерирует <code>*.spv</code>. Поэтому <code>*.spv</code> — generated output, а не главный исходник.</p></div>
 <div class="card"><h3>Windows</h3><p><code>build.bat</code> и <code>build_release.bat</code> запускают CMake presets. После сборки CMake копирует <code>assets</code> и <code>shaders</code> рядом с exe.</p></div>
 <div class="card"><h3>Android</h3><p><code>android/app/build.gradle</code> использует externalNativeBuild CMake, <code>compileSdk 36</code>, <code>minSdk 29</code>, <code>ndkVersion 30.0.14904198</code>, <code>arm64-v8a</code>.</p></div>
-<div class="card"><h3>Diagnostics</h3><p>В ветке <code>release</code> нет встроенного CSV <code>PerfRecorder</code>. Для проверки оптимизаций уже доступны <code>DebugHudData</code> и <code>StreamingStats</code>: очереди чанков, <code>last_generate_ms</code>, <code>last_light_ms</code>, <code>last_mesh_ms</code>, upload/culling counters.</p></div>
+<div class="card"><h3>Diagnostics</h3><p>В ветке <code>release</code> есть файлы CSV-логгера <code>PerfRecorder</code>, но они не подключены в CMake target и не используются <code>Application</code>. Для проверки оптимизаций в рабочем runtime доступны <code>DebugHudData</code> и <code>StreamingStats</code>: очереди чанков, <code>last_generate_ms</code>, <code>last_light_ms</code>, <code>last_mesh_ms</code>, upload/culling counters.</p></div>
 </div>
 <div class="diagram-card"><h3>Build pipeline</h3><div class="mermaid">
 flowchart TD
@@ -358,7 +361,7 @@ flowchart LR
 </section>
 
 <section class="page" id="p13">
-<h2>13. Light subsystem — проверено в v10</h2>
+<h2>13. Light subsystem — проверено в v11</h2>
 <div class="callout"><strong>Смысл:</strong> <code>calculate_chunk_light()</code> строит sky light не только по центру чанка, а в padded-области с границей <code>kLightBorder = 4</code>. Для устранения "тёмных углов" теперь используются не только 4 стороны (W/E/N/S), но и 4 диагональных угла (NW/NE/SW/SE).</div>
 <div class="callout"><strong>Ограничение текущей реализации:</strong> по коду основной расчёт сейчас направлен на <code>Sky Light</code>. <code>ChunkLight.block_light</code> и <code>light_emission</code> уже есть в модели, но полноценное распространение света от факелов/лавы как отдельный BFS-слой лучше вынести в следующий этап, чтобы не обещать больше, чем реально делает текущая ветка.</div>
 <table><thead><tr><th>Тип</th><th>Назначение</th></tr></thead><tbody>
@@ -509,7 +512,7 @@ flowchart TD
 </section>
 
 <section class="page" id="p19">
-<h2>19. GPU upload budget — проверено в v10</h2>
+<h2>19. GPU upload budget — проверено в v11</h2>
 <p>Чтобы генерация чанков не создавала резкие просадки FPS, <code>Application</code> забирает задачи на загрузку через <code>drain_pending_uploads_by_budget</code>. <code>WorldStreamer</code> сортирует их по приоритету (дистанция + конус взгляда) и отдает только тот объем, который вписывается в лимиты байт и количества секций на кадр.</p>
 <div class="diagram-card"><h3>Upload pipeline с троттлингом</h3><div class="mermaid">
 flowchart TD
@@ -541,7 +544,7 @@ flowchart TD
 </section>
 
 <section class="page" id="p21">
-<h2>21. Cave visibility — проверено в v10</h2>
+<h2>21. Cave visibility — проверено в v11</h2>
 <p>Система определяет, находится ли игрок под “крышей”, через <code>Application::update_cave_visibility_frame()</code>: она сэмплирует несколько колонн над камерой, считает непрозрачные <code>roof_blocks</code>, применяет hysteresis и передаёт в renderer структуру <code>Renderer::CaveVisibilityFrame</code>. Это позволяет отсекать поверхностные секции в пещерах и наоборот.</p>
 <div class="grid">
 <div class="card"><h3>CaveVisibilityFrame</h3><p><strong>cave_mode:</strong> активен ли режим пещеры.<br><strong>roof_blocks:</strong> количество непрозрачных блоков над камерой.<br><strong>camera_chunk_x/z:</strong> текущий чанк для точной привязки отсечения.</p></div>
@@ -627,8 +630,8 @@ flowchart TD
 </section>
 
 <section class="page" id="p26">
-<h2>26. Диагностика, Debug HUD и StreamingStats — проверено в v10</h2>
-<p>В ветке <code>release</code> диагностика строится вокруг <strong>Debug HUD</strong>, <strong><code>WorldStreamer::StreamingStats</code></strong> и <strong><code>Renderer::DebugHudData</code></strong>. Встроенного <code>PerfRecorder</code> с CSV-логом в этой ветке нет, поэтому для защиты нужно говорить честно: базовые метрики уже есть в runtime/HUD, а отдельный CSV-рекордер можно добавить следующим этапом.</p>
+<h2>26. Диагностика, Debug HUD, StreamingStats и PerfRecorder — проверено в v11</h2>
+<p>В ветке <code>release</code> рабочая диагностика строится вокруг <strong>Debug HUD</strong>, <strong><code>WorldStreamer::StreamingStats</code></strong> и <strong><code>Renderer::DebugHudData</code></strong>. Дополнительно в <code>src/common</code> есть файлы <code>PerfRecorder</code> с CSV-логом и переменной <code>MINECRAFT_LEGACY_PERF_LOG</code>, но они не подключены в <code>CMakeLists.txt</code> и не интегрированы в <code>Application</code>. Поэтому для защиты формулировка такая: CSV-рекордер присутствует как неподключённый/экспериментальный код, а реально работающие метрики сейчас идут через HUD и runtime stats.</p>
 <div class="grid3">
 <div class="card"><h4>Стриминг</h4><ul>
 <li><code>queued_generates</code>, <code>queued_decorates</code></li>
@@ -652,6 +655,7 @@ flowchart TD
 <li><code>gpu_buffer_bytes</code></li>
 </ul></div>
 </div>
+<div class="callout"><strong>Статус <code>PerfRecorder</code> в v11:</strong> файл <code>perf_recorder.cpp</code> пишет CSV-поля <code>frame_ms</code>, <code>frame_p50_ms</code>, <code>frame_p95_ms</code>, <code>frame_p99_ms</code>, <code>upload_ms</code>, очереди чанков, culling и GPU buffer counters. Но пока этот файл не включён в сборку и не вызывается из <code>Application</code>, его нельзя считать активной функцией игры.</div>
 <div class="diagram-card"><h3>Как читать диагностику оптимизации</h3><div class="mermaid">
 flowchart TD
     FPS["FPS скачет / кадр проседает"] --> Upload{"uploaded_bytes_this_frame высокий?"}
@@ -681,7 +685,7 @@ flowchart TD
 <tr><td><code>WorldStreamer</code> перегружен</td><td>В одном классе jobs, states, queries, saves, raycast, mutation</td><td>Разделить на <code>ChunkJobSystem</code>, <code>ChunkStore</code>, <code>RebuildScheduler</code>, <code>WorldQuery</code>, <code>ChunkSaveQueue</code>.</td></tr>
 <tr><td>Lighting provisional/final может давать скачки</td><td>Игрок видит временные тёмные края</td><td>Стабилизировать readiness, чаще relight соседей, мягче fallback, логировать missing borders.</td></tr>
 <tr><td>GPU upload создаёт stutter</td><td>Большие буферы создаются в кадре</td><td>Буферный пул, staging batching, upload budget, приоритет по направлению камеры.</td></tr>
-<tr><td>Недостаточно регулярных perf-замеров</td><td>В ветке <code>release</code> есть runtime/HUD-метрики, но нет отдельного CSV-рекордера</td><td>Сначала использовать <code>DebugHudData</code>/<code>StreamingStats</code>, затем добавить отдельный CSV-профилировщик как новую задачу.</td></tr>
+<tr><td>CSV PerfRecorder не подключён</td><td>Файлы <code>src/common/perf_recorder.cpp/.hpp</code> есть, но не входят в CMake target и не вызываются из <code>Application</code></td><td>Либо подключить <code>perf_recorder.cpp</code> в <code>CMakeLists.txt</code> и добавить поле в <code>Application</code>, либо удалить/переписать как отдельную будущую задачу.</td></tr>
 <tr><td>Occlusion/cave culling может ошибаться</td><td>Можно скрыть видимую геометрию или рисовать лишнее</td><td>Ввести debug overlay для причин отсечения секции.</td></tr>
 <tr><td>Локальный путь Android SDK в Gradle</td><td>Сборка плохо переносится на другой ПК</td><td>Перенести в <code>local.properties</code> или environment variable.</td></tr>
 <tr><td>Два <code>.gitignore</code></td><td>Файл с пробелом в имени выглядит как ошибка репозитория</td><td>Удалить <code> .gitignore</code>, оставить нормальный <code>.gitignore</code>.</td></tr>
@@ -691,7 +695,7 @@ flowchart TD
 <section class="page" id="p28">
 <h2>28. План доработок “как у команды”</h2>
 <ol>
-<li><strong>Снять базовый perf-профиль.</strong> Пройти один и тот же маршрут по миру с включённым Debug HUD, записать FPS/очереди/upload/light/mesh значения вручную или добавить отдельный CSV-профилировщик перед крупными оптимизациями.</li>
+<li><strong>Снять базовый perf-профиль.</strong> Пройти один и тот же маршрут по миру с включённым Debug HUD, записать FPS/очереди/upload/light/mesh значения вручную. Затем решить судьбу <code>PerfRecorder</code>: подключить его к CMake/Application и привести поля к текущему <code>StreamingStats</code>, либо оставить как будущую задачу.</li>
 <li><strong>Стабилизировать lighting pipeline.</strong> Отдельно протестировать <code>LightBuildSnapshot</code>, fallback при missing borders, final rebuild и edge fixups.</li>
 <li><strong>Разделить WorldStreamer.</strong> Сначала вынести job queue/state transitions, потом save queue и query API.</li>
 <li><strong>Сделать chunk streaming по стадиям.</strong> Сначала near chunks и collision data, потом fast mesh, потом final light/mesh, потом дальние декоративные секции.</li>
@@ -720,7 +724,7 @@ flowchart LR
 <tr><td>Поменять генерацию пещер/воды/деревьев</td><td><code>src/game/world_generator.cpp</code></td><td>Terrain stage.</td></tr>
 <tr><td>Убрать лишнюю отрисовку</td><td><code>src/render/renderer.cpp/.hpp</code>, <code>ChunkVisibilityMetadata</code></td><td>Frustum/cave/occlusion/section culling.</td></tr>
 <tr><td>Уменьшить фризы загрузки чанков</td><td><code>src/game/world_streamer.cpp</code>, <code>renderer.cpp</code></td><td>Job priority, upload budget, buffer pooling.</td></tr>
-<tr><td>Добавить perf CSV и сравнить оптимизацию</td><td>будущий <code>src/common/perf_recorder.cpp/.hpp</code>, <code>src/app/application.cpp</code></td><td>Сейчас в <code>release</code> этого нет; можно добавить переменную окружения <code>MINECRAFT_LEGACY_PERF_LOG</code>, поля p50/p95/p99, upload, queues, culling.</td></tr>
+<tr><td>Подключить perf CSV и сравнить оптимизацию</td><td><code>src/common/perf_recorder.cpp/.hpp</code>, <code>CMakeLists.txt</code>, <code>src/app/application.cpp/.hpp</code></td><td>Файлы уже есть и используют <code>MINECRAFT_LEGACY_PERF_LOG</code>, но их надо подключить в сборку, добавить поле <code>PerfRecorder</code> в <code>Application</code>, вызвать <code>initialize_from_environment()</code>/<code>record_frame()</code> и синхронизировать CSV-поля с текущим <code>StreamingStats</code>.</td></tr>
 <tr><td>Поменять движение игрока</td><td><code>src/game/player_controller.cpp/.hpp</code></td><td>Velocity, gravity, jump, AABB.</td></tr>
 <tr><td>Добавить input</td><td><code>src/platform/input.hpp</code>, <code>platform_app.cpp</code></td><td>Не завязывать gameplay на SDL напрямую.</td></tr>
 <tr><td>Поменять Android-сборку</td><td><code>android/app/build.gradle</code>, <code>AndroidManifest.xml</code></td><td>SDK, NDK, CMake args, assets.</td></tr>
@@ -744,7 +748,7 @@ sequenceDiagram
     App->>Platform: initialize SDL window audio
     Platform->>Assets: resolve sounds/music
     App->>Renderer: initialize Vulkan with shader directory
-    App->>Perf: initialize_from_environment
+    Note over App: PerfRecorder files exist but are not initialized in current Application
     Renderer->>Assets: load textures UI font menu
     App->>Platform: start menu music
     Main->>App: run loop

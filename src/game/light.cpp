@@ -228,47 +228,57 @@ std::uint8_t sample_sky_light(const LightMeshSnapshot& snapshot, int x, int y, i
     if (x >= 0 && x < kChunkWidth && z >= 0 && z < kChunkDepth) {
         return snapshot.center->sky(x, y, z);
     }
+
+    const auto fallback_center_edge_light = [&]() -> std::uint8_t {
+        return snapshot.center->sky(
+            std::clamp(x, 0, kChunkWidth - 1),
+            y,
+            std::clamp(z, 0, kChunkDepth - 1)
+        );
+    };
+
     if (x < 0 && z < 0) {
         return snapshot.northwest != nullptr && x >= -kLightBorder && z >= -kLightBorder
             ? snapshot.northwest->get(x + kLightBorder, y, z + kLightBorder)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (x >= kChunkWidth && z < 0) {
         return snapshot.northeast != nullptr && x < kChunkWidth + kLightBorder && z >= -kLightBorder
             ? snapshot.northeast->get(x - kChunkWidth, y, z + kLightBorder)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (x < 0 && z >= kChunkDepth) {
         return snapshot.southwest != nullptr && x >= -kLightBorder && z < kChunkDepth + kLightBorder
             ? snapshot.southwest->get(x + kLightBorder, y, z - kChunkDepth)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (x >= kChunkWidth && z >= kChunkDepth) {
         return snapshot.southeast != nullptr && x < kChunkWidth + kLightBorder && z < kChunkDepth + kLightBorder
             ? snapshot.southeast->get(x - kChunkWidth, y, z - kChunkDepth)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (x < 0) {
         return snapshot.west != nullptr && x >= -kLightBorder && z >= 0 && z < kChunkDepth
             ? snapshot.west->get(x + kLightBorder, y, z)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (x >= kChunkWidth) {
         return snapshot.east != nullptr && x < kChunkWidth + kLightBorder && z >= 0 && z < kChunkDepth
             ? snapshot.east->get(x - kChunkWidth, y, z)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (z < 0) {
         return snapshot.north != nullptr && x >= 0 && x < kChunkWidth && z >= -kLightBorder
             ? snapshot.north->get(x, y, z + kLightBorder)
-            : 0;
+            : fallback_center_edge_light();
     }
     if (z >= kChunkDepth) {
         return snapshot.south != nullptr && x >= 0 && x < kChunkWidth && z < kChunkDepth + kLightBorder
             ? snapshot.south->get(x, y, z - kChunkDepth)
-            : 0;
+            : fallback_center_edge_light();
     }
-    return 0;
+    return fallback_center_edge_light();
 }
+
 
 }

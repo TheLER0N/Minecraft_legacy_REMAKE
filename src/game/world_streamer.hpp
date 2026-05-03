@@ -51,11 +51,14 @@ public:
     WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius, WorldSave* world_save);
     ~WorldStreamer();
 
+    //
     void update_observer(Vec3 position);
     void update_observer(Vec3 position, Vec3 forward);
     void tick_generation_jobs();
     std::span<const ActiveChunk> visible_chunks() const;
+    void refresh_visible_chunks();
     std::vector<PendingChunkUpload> drain_pending_uploads();
+    //
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position);
     std::vector<PendingChunkUpload> drain_pending_uploads(std::size_t max_count, Vec3 observer_position, Vec3 observer_forward);
     std::vector<PendingChunkUpload> drain_pending_uploads_by_budget(

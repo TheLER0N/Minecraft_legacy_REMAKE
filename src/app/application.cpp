@@ -241,8 +241,14 @@ Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame(Vec3 obs
         best_roof_blocks = std::min(best_roof_blocks, blocked ? roof_blocks : 0);
     }
 
-    if (!sampled_loaded_column) {
-        best_roof_blocks = 0;
+        if (!sampled_loaded_column) {
+        return Renderer::CaveVisibilityFrame {
+            cave_visibility_cave_mode_,
+            floor_div_chunk_coord(camera_x, kChunkWidth),
+            floor_div_chunk_coord(camera_z, kChunkDepth),
+            camera_y,
+            cave_visibility_roof_blocks_
+        };
     }
     const bool candidate_cave_mode = best_roof_blocks >= kCaveVisibilityRoofThreshold;
     if (candidate_cave_mode != cave_visibility_pending_mode_) {
@@ -502,11 +508,14 @@ int Application::run() {
 
         std::size_t uploaded_bytes_this_frame = 0;
         const auto upload_start = std::chrono::steady_clock::now();
+        //
         for (PendingChunkUpload& upload : pending_uploads) {
             uploaded_bytes_this_frame += mesh_byte_count(upload.mesh);
             renderer_.upload_chunk_mesh(upload.coord, upload.mesh, upload.visibility);
         }
+        world_streamer_->refresh_visible_chunks();
         const auto upload_end = std::chrono::steady_clock::now();
+        //
         const float upload_ms = std::chrono::duration<float, std::milli>(upload_end - upload_start).count();
 
         const Vec3 ray_origin = debug_fly_enabled_ ? camera_.position() : player_.eye_position();
