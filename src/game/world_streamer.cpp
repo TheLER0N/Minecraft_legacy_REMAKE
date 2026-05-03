@@ -41,6 +41,54 @@ std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
 }
 
+constexpr BlockId kMetadataMissingNeighborOcclusionBlock = BlockId::Stone;
+
+BlockId metadata_sample_block(const ChunkData& chunk, int x, int y, int z) {
+    if (y < 0 || y >= kChunkHeight) {
+        return BlockId::Air;
+    }
+    if (x < 0 || x >= kChunkWidth || z < 0 || z >= kChunkDepth) {
+        return kMetadataMissingNeighborOcclusionBlock;
+    }
+    return chunk.get(x, y, z);
+}
+
+bool metadata_should_emit_face(
+    BlockId block,
+    BlockId neighbor,
+    const BlockRegistry& block_registry,
+    int face_index
+) {
+    switch (block_registry.render_type(block)) {
+    case BlockRenderType::Opaque:
+        if (!block_registry.is_renderable(neighbor)) {
+            return true;
+        }
+        if (neighbor == block) {
+            return false;
+        }
+        return block_registry.render_type(neighbor) != BlockRenderType::Opaque;
+    case BlockRenderType::Cutout:
+        if (!block_registry.is_renderable(neighbor)) {
+            return true;
+        }
+        if (neighbor == block) {
+            return false;
+        }
+        return !block_registry.is_opaque(neighbor);
+    case BlockRenderType::Transparent:
+        if (face_index == 1) {
+            return false;
+        }
+        if (!block_registry.is_renderable(neighbor)) {
+            return true;
+        }
+        return neighbor != block && block_registry.render_type(neighbor) != BlockRenderType::Transparent;
+    default:
+        return false;
+    }
+}
+
 ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const BlockRegistry& block_registry) {
     ChunkVisibilityMetadata metadata {};
     std::array<int, static_cast<std::size_t>(kChunkWidth * kChunkDepth)> surface_y {};
@@ -69,38 +117,85 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
         }
     }
 
+    constexpr std::array<Int3, 6> face_offsets {{
+        {0, 1, 0},
+        {0, -1, 0},
+        {1, 0, 0},
+        {-1, 0, 0},
+        {0, 0, 1},
+        {0, 0, -1}
+    }};
+
     for (int section_index = 0; section_index < kChunkSectionCount; ++section_index) {
         ChunkSectionVisibility& section = metadata.sections[static_cast<std::size_t>(section_index)];
         section.min_world_y = kWorldMinY + section_index * kChunkSectionHeight;
         section.max_world_y = std::min(kWorldMaxY, section.min_world_y + kChunkSectionHeight - 1);
         section.nearest_surface_y = kWorldMinY;
+
         int surface_blocks = 0;
         int cave_blocks = 0;
+        int near_surface_blocks = 0;
+        std::uint32_t visible_opaque_faces = 0;
+        std::uint32_t visible_cutout_faces = 0;
+        std::uint32_t visible_transparent_faces = 0;
 
         for (int z = 0; z < kChunkDepth; ++z) {
             for (int x = 0; x < kChunkWidth; ++x) {
                 const int column_surface = surface_y[column_index(x, z)];
                 section.nearest_surface_y = std::max(section.nearest_surface_y, column_surface);
                 const int column_roof = roof_y[column_index(x, z)];
+
                 for (int world_y = section.min_world_y; world_y <= section.max_world_y; ++world_y) {
                     const int local_y = world_y_to_local_y(world_y);
                     const BlockId block = chunk.get(x, local_y, z);
                     if (!block_registry.is_renderable(block)) {
                         continue;
                     }
+
                     section.has_geometry = true;
                     const bool sky_access = column_roof == kWorldMaxY + 1 || world_y >= column_roof;
                     section.has_sky_access = section.has_sky_access || sky_access;
                     const bool near_surface = world_y >= column_surface - 8;
+                    if (near_surface) {
+                        ++near_surface_blocks;
+                    }
                     if (sky_access || near_surface || block == BlockId::OakLog || block == BlockId::OakLeaves) {
                         ++surface_blocks;
                     }
                     if (!sky_access && world_y < column_surface - 8) {
                         ++cave_blocks;
                     }
+
+                    for (std::size_t face_index = 0; face_index < face_offsets.size(); ++face_index) {
+                        const Int3 offset = face_offsets[face_index];
+                        const BlockId neighbor = metadata_sample_block(
+                            chunk,
+                            x + offset.x,
+                            local_y + offset.y,
+                            z + offset.z
+                        );
+                        if (!metadata_should_emit_face(block, neighbor, block_registry, static_cast<int>(face_index))) {
+                            continue;
+                        }
+
+                        switch (block_registry.render_type(block)) {
+                        case BlockRenderType::Opaque:
+                            ++visible_opaque_faces;
+                            break;
+                        case BlockRenderType::Cutout:
+                            ++visible_cutout_faces;
+                            break;
+                        case BlockRenderType::Transparent:
+                            ++visible_transparent_faces;
+                            break;
+                        default:
+                            break;
+                        }
+                    }
                 }
             }
         }
+
         const int mixed_threshold = 12;
         section.has_surface_geometry = surface_blocks > 0;
         section.has_cave_geometry = cave_blocks > 0;
@@ -115,6 +210,26 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
         if (section.has_geometry && !section.has_surface_geometry && !section.has_cave_geometry) {
             section.has_cave_geometry = !section.has_sky_access;
             section.has_surface_geometry = section.has_sky_access;
+        }
+
+        section.visible_opaque_faces = visible_opaque_faces;
+        section.visible_cutout_faces = visible_cutout_faces;
+        section.visible_transparent_faces = visible_transparent_faces;
+        section.near_surface_band = near_surface_blocks > 0;
+        section.likely_occluder = visible_opaque_faces >= 32 && visible_opaque_faces >= visible_cutout_faces + visible_transparent_faces;
+
+        section.render_priority_bias = 0;
+        if (section.likely_occluder) {
+            section.render_priority_bias -= 25;
+        }
+        if (section.near_surface_band) {
+            section.render_priority_bias -= 10;
+        }
+        if (section.has_cave_geometry && !section.has_surface_geometry) {
+            section.render_priority_bias += 10;
+        }
+        if (section.has_geometry && visible_opaque_faces + visible_cutout_faces + visible_transparent_faces == 0) {
+            section.render_priority_bias += 30;
         }
     }
 

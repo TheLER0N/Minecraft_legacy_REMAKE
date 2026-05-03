@@ -30,6 +30,11 @@ constexpr int kAquiferMinY = kWorldMinY + 8;
 constexpr int kAquiferMaxY = kSeaLevel - 4;
 constexpr int kMeshVerticalPadding = 2;
 
+// If a neighboring chunk is not available yet, do not treat that side as air.
+// Returning an opaque placeholder prevents provisional meshes from exposing
+// internal chunk-border faces, which creates an X-Ray-like view through terrain.
+constexpr BlockId kMissingNeighborOcclusionBlock = BlockId::Stone;
+
 struct ColumnProfile {
     int surface_y {kSeaLevel};
     int cave_min_y {kCaveMinY};
@@ -1141,42 +1146,42 @@ BlockId sample_block_for_mesh(const ChunkData& chunk_data, const ChunkMeshNeighb
     if (x < 0 && z < 0) {
         return neighbors.northwest != nullptr && x >= -kLightBorder && z >= -kLightBorder
             ? neighbors.northwest->get(x + kLightBorder, y, z + kLightBorder)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (x >= kChunkWidth && z < 0) {
         return neighbors.northeast != nullptr && x < kChunkWidth + kLightBorder && z >= -kLightBorder
             ? neighbors.northeast->get(x - kChunkWidth, y, z + kLightBorder)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (x < 0 && z >= kChunkDepth) {
         return neighbors.southwest != nullptr && x >= -kLightBorder && z < kChunkDepth + kLightBorder
             ? neighbors.southwest->get(x + kLightBorder, y, z - kChunkDepth)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (x >= kChunkWidth && z >= kChunkDepth) {
         return neighbors.southeast != nullptr && x < kChunkWidth + kLightBorder && z < kChunkDepth + kLightBorder
             ? neighbors.southeast->get(x - kChunkWidth, y, z - kChunkDepth)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (x < 0) {
         return neighbors.west != nullptr && x >= -kLightBorder && z >= 0 && z < kChunkDepth
             ? neighbors.west->get(x + kLightBorder, y, z)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (x >= kChunkWidth) {
         return neighbors.east != nullptr && x < kChunkWidth + kLightBorder && z >= 0 && z < kChunkDepth
             ? neighbors.east->get(x - kChunkWidth, y, z)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (z < 0) {
         return neighbors.north != nullptr && x >= 0 && x < kChunkWidth && z >= -kLightBorder
             ? neighbors.north->get(x, y, z + kLightBorder)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     if (z >= kChunkDepth) {
         return neighbors.south != nullptr && x >= 0 && x < kChunkWidth && z < kChunkDepth + kLightBorder
             ? neighbors.south->get(x, y, z - kChunkDepth)
-            : BlockId::Air;
+            : kMissingNeighborOcclusionBlock;
     }
     return chunk_data.get(x, y, z);
 }
