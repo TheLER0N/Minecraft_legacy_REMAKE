@@ -187,6 +187,19 @@ constexpr int kMinOccluderGridArea = 4;
 constexpr std::uint32_t kMinOccluderOpaqueIndices = 768;
 constexpr float kOcclusionWarningRatio = 0.35f;
 constexpr std::size_t kOcclusionWarningLogLimit = 8;
+
+// Cave/surface metadata must not be used as a hard visibility filter.
+// It is allowed only as a render priority hint.
+// Hard cave culling was causing visible cave sections and underground builds
+// to disappear while still allowing invisible cave sections behind blocks to render.
+constexpr bool kEnableCaveSurfaceHardCulling = false;
+
+// Sections close to the camera must never be removed by heuristic culling.
+// Frustum culling and real occlusion culling may still work.
+constexpr float kNearSectionSafetyRadiusBlocks = 32.0f;
+constexpr float kNearSectionSafetyRadiusSq =
+    kNearSectionSafetyRadiusBlocks * kNearSectionSafetyRadiusBlocks;
+
 constexpr int kCaveSurfaceVisibleDepth = 32;
 constexpr int kCaveUndergroundChunkRadius = 3;
 constexpr float kCaveCullingWarningRatio = 0.45f;
@@ -341,6 +354,29 @@ bool point_inside_aabb(const Vec3& point, const Aabb& bounds) {
     return point.x >= bounds.min.x && point.x <= bounds.max.x &&
         point.y >= bounds.min.y && point.y <= bounds.max.y &&
         point.z >= bounds.min.z && point.z <= bounds.max.z;
+}
+
+float distance_sq_to_aabb(const Vec3& point, const Aabb& bounds) {
+    const float dx =
+        point.x < bounds.min.x ? bounds.min.x - point.x :
+        point.x > bounds.max.x ? point.x - bounds.max.x :
+        0.0f;
+
+    const float dy =
+        point.y < bounds.min.y ? bounds.min.y - point.y :
+        point.y > bounds.max.y ? point.y - bounds.max.y :
+        0.0f;
+
+    const float dz =
+        point.z < bounds.min.z ? bounds.min.z - point.z :
+        point.z > bounds.max.z ? point.z - bounds.max.z :
+        0.0f;
+
+    return dx * dx + dy * dy + dz * dz;
+}
+
+bool section_inside_near_safety_zone(const Vec3& camera_position, const Aabb& bounds) {
+    return distance_sq_to_aabb(camera_position, bounds) <= kNearSectionSafetyRadiusSq;
 }
 
 bool same_block_hit(const std::optional<BlockHit>& lhs, const std::optional<BlockHit>& rhs) {
@@ -1161,6 +1197,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
         int section_index {0};
         Aabb bounds {};
         float distance_sq {0.0f};
+        int priority {0};
     };
 
     std::vector<RenderCandidate> candidates;
@@ -1210,43 +1247,116 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             if (mixed_section) {
                 ++mixed_section_count;
             }
-            const bool far_chunk = chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > 4;
-            if (!cave_visibility_frame_.cave_mode && far_chunk && visibility.has_cave_geometry && !visibility.has_surface_geometry &&
-                section_bounds.max.y < kSurfaceFarSectionMinY) {
-                ++cave_culled_section_count;
-                continue;
-            }
-            if (!mixed_section) {
-                if (!cave_visibility_frame_.cave_mode && visibility.has_cave_geometry && !visibility.has_surface_geometry) {
-                    const int depth_below_camera = cave_visibility_frame_.camera_world_y - visibility.max_world_y;
-                    const int depth_below_surface = visibility.nearest_surface_y - visibility.max_world_y;
-                    if (depth_below_camera > kCaveSurfaceVisibleDepth && depth_below_surface > kCaveSurfaceVisibleDepth) {
+
+            const bool near_camera_section =
+                section_inside_near_safety_zone(current_camera_.camera_position, section_bounds);
+
+            // Cave/surface metadata is only a priority hint by default.
+            // Hard culling here caused visible cave floors and player-built
+            // underground structures to disappear while hidden cave sections
+            // could still consume draw budget behind solid geometry.
+            if constexpr (kEnableCaveSurfaceHardCulling) {
+                if (!near_camera_section) {
+                    const bool far_chunk =
+                        chunk_distance_chebyshev(
+                            chunk.coord,
+                            cave_visibility_frame_.camera_chunk_x,
+                            cave_visibility_frame_.camera_chunk_z
+                        ) > 4;
+
+                    if (!cave_visibility_frame_.cave_mode &&
+                        far_chunk &&
+                        visibility.has_cave_geometry &&
+                        !visibility.has_surface_geometry &&
+                        section_bounds.max.y < kSurfaceFarSectionMinY) {
                         ++cave_culled_section_count;
                         continue;
                     }
-                } else if (cave_visibility_frame_.cave_mode && visibility.has_surface_geometry && !visibility.has_cave_geometry) {
-                    const bool far_from_camera_chunk =
-                        chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > kCaveUndergroundChunkRadius;
-                    const bool above_camera = visibility.min_world_y > cave_visibility_frame_.camera_world_y;
-                    if ((far_from_camera_chunk || above_camera) && cave_visibility_frame_.roof_blocks >= 8) {
-                        ++surface_culled_section_count;
-                        continue;
+
+                    if (!mixed_section) {
+                        if (!cave_visibility_frame_.cave_mode &&
+                            visibility.has_cave_geometry &&
+                            !visibility.has_surface_geometry) {
+                            const int depth_below_camera =
+                                cave_visibility_frame_.camera_world_y - visibility.max_world_y;
+                            const int depth_below_surface =
+                                visibility.nearest_surface_y - visibility.max_world_y;
+
+                            if (depth_below_camera > kCaveSurfaceVisibleDepth &&
+                                depth_below_surface > kCaveSurfaceVisibleDepth) {
+                                ++cave_culled_section_count;
+                                continue;
+                            }
+                        } else if (cave_visibility_frame_.cave_mode &&
+                            visibility.has_surface_geometry &&
+                            !visibility.has_cave_geometry) {
+                            const bool far_from_camera_chunk =
+                                chunk_distance_chebyshev(
+                                    chunk.coord,
+                                    cave_visibility_frame_.camera_chunk_x,
+                                    cave_visibility_frame_.camera_chunk_z
+                                ) > kCaveUndergroundChunkRadius;
+                            const bool above_camera =
+                                visibility.min_world_y > cave_visibility_frame_.camera_world_y;
+
+                            if ((far_from_camera_chunk || above_camera) &&
+                                cave_visibility_frame_.roof_blocks >= 8) {
+                                ++surface_culled_section_count;
+                                continue;
+                            }
+                        }
                     }
                 }
             }
 
-            const Vec3 center {
-                (section_bounds.min.x + section_bounds.max.x) * 0.5f,
-                (section_bounds.min.y + section_bounds.max.y) * 0.5f,
-                (section_bounds.min.z + section_bounds.max.z) * 0.5f
-            };
-            const Vec3 to_center = center - current_camera_.camera_position;
-            candidates.push_back({chunk.coord, &section, section_index, section_bounds, dot(to_center, to_center)});
+            int priority = 0;
+            if (cave_visibility_frame_.cave_mode) {
+                if (visibility.has_surface_geometry && !visibility.has_cave_geometry) {
+                    priority += 40;
+                }
+                if (visibility.has_cave_geometry) {
+                    priority -= 10;
+                }
+            } else {
+                if (visibility.has_cave_geometry && !visibility.has_surface_geometry) {
+                    priority += 40;
+                }
+                if (visibility.has_surface_geometry) {
+                    priority -= 10;
+                }
+            }
+
+            if (near_camera_section) {
+                priority -= 100;
+            }
+
+            const float section_distance_sq =
+                distance_sq_to_aabb(current_camera_.camera_position, section_bounds);
+            candidates.push_back({
+                chunk.coord,
+                &section,
+                section_index,
+                section_bounds,
+                section_distance_sq,
+                priority
+            });
         }
     }
 
     std::sort(candidates.begin(), candidates.end(), [](const RenderCandidate& lhs, const RenderCandidate& rhs) {
-        return lhs.distance_sq < rhs.distance_sq;
+        if (lhs.priority != rhs.priority) {
+            return lhs.priority < rhs.priority;
+        }
+        if (lhs.distance_sq != rhs.distance_sq) {
+            return lhs.distance_sq < rhs.distance_sq;
+        }
+        if (lhs.coord.x != rhs.coord.x) {
+            return lhs.coord.x < rhs.coord.x;
+        }
+        if (lhs.coord.z != rhs.coord.z) {
+            return lhs.coord.z < rhs.coord.z;
+        }
+        return lhs.section_index < rhs.section_index;
     });
 
     std::vector<RenderCandidate> render_sections;
@@ -1259,13 +1369,17 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
         if (!near_section && render_sections.size() >= kMaxRenderSectionBudget) {
             continue;
         }
+        const bool near_camera_section =
+            section_inside_near_safety_zone(current_camera_.camera_position, candidate.bounds);
         const bool opaque_only = candidate.section->opaque_index_count > 0 &&
             candidate.section->cutout_index_count == 0 &&
             candidate.section->transparent_index_count == 0;
-        const bool dense_opaque_section = opaque_only && candidate.section->opaque_index_count >= kMinOccluderOpaqueIndices;
-        const std::optional<ProjectedBounds> projected = occlusion_culling_enabled_ && opaque_only
-            ? project_aabb_to_occlusion_grid(current_camera_.view_proj, candidate.bounds)
-            : std::nullopt;
+        const bool dense_opaque_section =
+            opaque_only && candidate.section->opaque_index_count >= kMinOccluderOpaqueIndices;
+        const std::optional<ProjectedBounds> projected =
+            occlusion_culling_enabled_ && !near_camera_section && opaque_only
+                ? project_aabb_to_occlusion_grid(current_camera_.view_proj, candidate.bounds)
+                : std::nullopt;
         const int projected_grid_area = projected.has_value() ? projected_area(*projected) : 0;
         const bool safe_occlusion_candidate = projected.has_value() &&
             dense_opaque_section &&

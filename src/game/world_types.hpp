@@ -99,6 +99,17 @@ struct ChunkSectionVisibility {
     bool has_cave_geometry {false};
     bool has_sky_access {false};
     bool solid_roof_above {false};
+
+    // Renderer-side visibility hints. These fields are intentionally advisory:
+    // they must not be used to hard-delete visible geometry. The renderer may
+    // use them for ordering, diagnostics, draw budgeting, and future occluder
+    // selection. Real visibility still belongs to frustum/occlusion checks.
+    int render_priority_bias {0};
+    std::uint32_t visible_opaque_faces {0};
+    std::uint32_t visible_cutout_faces {0};
+    std::uint32_t visible_transparent_faces {0};
+    bool likely_occluder {false};
+    bool near_surface_band {false};
 };
 
 struct ChunkVisibilityMetadata {
