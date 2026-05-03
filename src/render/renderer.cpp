@@ -184,14 +184,24 @@ constexpr int kRenderSectionCount = kChunkHeight / kRenderSectionHeight;
 // sections when a closer opaque section already covers the same screen cells.
 constexpr int kOcclusionGridWidth = 96;
 constexpr int kOcclusionGridHeight = 54;
-constexpr float kOcclusionNearPadding = 0.0005f;
+constexpr float kOcclusionNearPadding = 0.0020f;
 constexpr int kMaxOccluderGridArea = kOcclusionGridWidth * kOcclusionGridHeight;
 constexpr int kMinOccluderGridArea = 2;
 constexpr std::uint32_t kMinOccluderOpaqueIndices = 128;
 constexpr float kOcclusionWarningRatio = 0.55f;
 constexpr std::size_t kOcclusionWarningLogLimit = 8;
-constexpr int kOcclusionEdgeGuardCells = 1;
+constexpr int kOcclusionEdgeGuardCells = 3;
+constexpr int kOcclusionCandidatePaddingCells = 3;
+constexpr int kOcclusionOccluderInsetCells = 1;
 constexpr float kOcclusionMinDistanceSq = 36.0f * 36.0f;
+// Surface sections are visually fragile: a coarse section AABB can be
+// considered hidden while a sliver of terrain is still visible at grazing
+// angles. Keep underground/cave occlusion aggressive, but protect risky
+// surface/horizon sections from false positives.
+constexpr int kMaxSurfaceOcclusionCullGridArea = 260;
+constexpr int kMaxGrazingSurfaceOcclusionCullGridArea = 96;
+constexpr float kSurfaceOcclusionMinDistanceSq = 72.0f * 72.0f;
+constexpr float kGrazingSurfaceViewAbsY = 0.28f;
 
 // Cave/surface metadata must not be used as a hard visibility filter.
 // It is allowed only as a render priority hint.
@@ -262,6 +272,55 @@ bool projected_touches_occlusion_edge(const ProjectedBounds& bounds) {
         bounds.min_y <= kOcclusionEdgeGuardCells ||
         bounds.max_x >= kOcclusionGridWidth - 1 - kOcclusionEdgeGuardCells ||
         bounds.max_y >= kOcclusionGridHeight - 1 - kOcclusionEdgeGuardCells;
+}
+
+ProjectedBounds expand_projected_for_occlusion_test(ProjectedBounds bounds) {
+    bounds.min_x = std::max(0, bounds.min_x - kOcclusionCandidatePaddingCells);
+    bounds.min_y = std::max(0, bounds.min_y - kOcclusionCandidatePaddingCells);
+    bounds.max_x = std::min(kOcclusionGridWidth - 1, bounds.max_x + kOcclusionCandidatePaddingCells);
+    bounds.max_y = std::min(kOcclusionGridHeight - 1, bounds.max_y + kOcclusionCandidatePaddingCells);
+    bounds.valid = bounds.min_x <= bounds.max_x && bounds.min_y <= bounds.max_y;
+    return bounds;
+}
+
+std::optional<ProjectedBounds> inset_projected_for_occluder(ProjectedBounds bounds) {
+    bounds.min_x += kOcclusionOccluderInsetCells;
+    bounds.min_y += kOcclusionOccluderInsetCells;
+    bounds.max_x -= kOcclusionOccluderInsetCells;
+    bounds.max_y -= kOcclusionOccluderInsetCells;
+    bounds.valid = bounds.min_x <= bounds.max_x && bounds.min_y <= bounds.max_y;
+    if (!bounds.valid) {
+        return std::nullopt;
+    }
+    return bounds;
+}
+
+
+bool surface_occlusion_false_positive_risk(
+    const ChunkSectionVisibility& visibility,
+    const CameraFrameData& camera,
+    float distance_sq,
+    int projected_grid_area
+) {
+    const bool surface_like = visibility.has_surface_geometry || visibility.near_surface_band || visibility.has_sky_access;
+    if (!surface_like) {
+        return false;
+    }
+
+    if (distance_sq < kSurfaceOcclusionMinDistanceSq) {
+        return true;
+    }
+
+    if (projected_grid_area > kMaxSurfaceOcclusionCullGridArea) {
+        return true;
+    }
+
+    const bool grazing_view = std::abs(camera.camera_forward.y) < kGrazingSurfaceViewAbsY;
+    if (grazing_view && projected_grid_area > kMaxGrazingSurfaceOcclusionCullGridArea) {
+        return true;
+    }
+
+    return false;
 }
 
 std::optional<ProjectedBounds> project_aabb_to_occlusion_grid(const Mat4& view_proj, const Aabb& bounds) {
@@ -1345,33 +1404,47 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
         const bool far_enough_for_occlusion = candidate.distance_sq >= kOcclusionMinDistanceSq;
 
         std::optional<ProjectedBounds> projected = std::nullopt;
+        std::optional<ProjectedBounds> padded_projected = std::nullopt;
+        std::optional<ProjectedBounds> occluder_projected = std::nullopt;
         bool projected_edge_protected = false;
         int projected_grid_area = 0;
+        int padded_projected_grid_area = 0;
         if (occlusion_culling_enabled_ && !near_camera_section && far_enough_for_occlusion) {
             projected = project_aabb_to_occlusion_grid(current_camera_.view_proj, candidate.bounds);
             if (projected.has_value()) {
-                projected_edge_protected = projected_touches_occlusion_edge(*projected);
+                padded_projected = expand_projected_for_occlusion_test(*projected);
+                occluder_projected = inset_projected_for_occluder(*projected);
+                projected_edge_protected = projected_touches_occlusion_edge(*padded_projected);
                 projected_grid_area = projected_area(*projected);
+                padded_projected_grid_area = projected_area(*padded_projected);
             }
         }
 
-        // Cull any far section when its screen-space AABB is fully covered by
-        // already accepted closer opaque occluders. Edge cells are protected to
-        // avoid the missing-chunk artifacts that appeared with hard portal PVS.
-        const bool can_be_occlusion_culled = projected.has_value() &&
-            !projected_edge_protected &&
-            projected_grid_area >= kMinOccluderGridArea;
+        // Cull only if an expanded candidate area is fully hidden. This makes
+        // the test conservative: if even a thin sliver of the section may be
+        // visible near the AABB edge, the section stays in the draw list.
+        const bool surface_false_positive_risk = padded_projected.has_value() &&
+            surface_occlusion_false_positive_risk(
+                candidate.section->visibility,
+                current_camera_,
+                candidate.distance_sq,
+                padded_projected_grid_area
+            );
 
-        if (can_be_occlusion_culled && occlusion_grid.occluded(*projected)) {
+        const bool can_be_occlusion_culled = padded_projected.has_value() &&
+            !projected_edge_protected &&
+            !surface_false_positive_risk &&
+            padded_projected_grid_area >= kMinOccluderGridArea;
+
+        if (can_be_occlusion_culled && occlusion_grid.occluded(*padded_projected)) {
             ++occlusion_culled_section_count;
             continue;
         }
 
-        // Any section with substantial opaque geometry may act as an occluder,
-        // even if it also has cutout/transparent geometry. This is the key
-        // change: the old path only used fully opaque-only sections, which was
-        // too weak and allowed many hidden cave/slope sections to continue.
-        const bool can_contribute_occluder = projected.has_value() &&
+        // Occluders are written slightly smaller than their projected AABB.
+        // This prevents a near wall/slope from over-covering cells where a
+        // far section is only barely visible at an angle.
+        const bool can_contribute_occluder = occluder_projected.has_value() &&
             !projected_edge_protected &&
             candidate.section->has_opaque_geometry &&
             candidate.section->opaque_index_count >= kMinOccluderOpaqueIndices &&
@@ -1379,7 +1452,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             projected_grid_area <= kMaxOccluderGridArea;
 
         if (can_contribute_occluder) {
-            occlusion_grid.add_occluder(*projected);
+            occlusion_grid.add_occluder(*occluder_projected);
         }
 
         if (std::none_of(outline_chunks.begin(), outline_chunks.end(), [&](const ActiveChunk& active) {
