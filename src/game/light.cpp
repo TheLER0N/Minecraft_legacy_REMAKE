@@ -18,11 +18,15 @@ constexpr int kPaddedMinZ = -kLightBorder;
 constexpr int kPaddedWidth = kChunkWidth + kLightBorder * 2;
 constexpr int kPaddedDepth = kChunkDepth + kLightBorder * 2;
 
+
+
 struct PaddedSkyLight {
     std::vector<std::uint8_t> sky;
+    std::vector<std::uint8_t> block;
 
     PaddedSkyLight()
-        : sky(static_cast<std::size_t>(kPaddedWidth * kPaddedDepth * kChunkHeight), 0) {
+        : sky(static_cast<std::size_t>(kPaddedWidth * kPaddedDepth * kChunkHeight), 0)
+        , block(static_cast<std::size_t>(kPaddedWidth * kPaddedDepth * kChunkHeight), 0) {
     }
 
     static std::size_t index(int x, int y, int z) {
@@ -38,7 +42,16 @@ struct PaddedSkyLight {
     void set(int x, int y, int z, std::uint8_t value) {
         sky[index(x, y, z)] = value;
     }
+
+    std::uint8_t get_block(int x, int y, int z) const {
+        return block[index(x, y, z)];
+    }
+
+    void set_block(int x, int y, int z, std::uint8_t value) {
+        block[index(x, y, z)] = value;
+    }
 };
+
 
 bool in_padded_xz(int x, int z) {
     return x >= kPaddedMinX && x < kChunkWidth + kLightBorder &&
@@ -142,12 +155,15 @@ std::uint64_t compute_border_signature(const ChunkLight& light) {
 
 }
 
+
 ChunkLightResult calculate_chunk_light(const LightBuildSnapshot& snapshot, const BlockRegistry& block_registry) {
     ChunkLightResult result {};
     ChunkLight& light = result.light;
     PaddedSkyLight padded {};
     std::vector<LightNode> sky_queue;
+    std::vector<LightNode> block_queue;
     sky_queue.reserve(static_cast<std::size_t>(kPaddedWidth * kPaddedDepth * 8));
+    block_queue.reserve(static_cast<std::size_t>(kPaddedWidth * kPaddedDepth * 8));
 
     const auto push_sky_if_brighter = [&](int x, int y, int z, std::uint8_t value, bool vertical_sky) {
         if (!in_padded_xz(x, z) || y < 0 || y >= kChunkHeight || value == 0) {
@@ -160,6 +176,19 @@ ChunkLightResult calculate_chunk_light(const LightBuildSnapshot& snapshot, const
         }
         padded.set(x, y, z, next);
         sky_queue.push_back({x, y, z});
+    };
+
+    const auto push_block_if_brighter = [&](int x, int y, int z, std::uint8_t value) {
+        if (!in_padded_xz(x, z) || y < 0 || y >= kChunkHeight || value == 0) {
+            return;
+        }
+        const BlockId target = sample_block_for_light(snapshot, x, y, z);
+        const std::uint8_t next = propagated_light(value, target, block_registry, false);
+        if (next == 0 || padded.get_block(x, y, z) >= next) {
+            return;
+        }
+        padded.set_block(x, y, z, next);
+        block_queue.push_back({x, y, z});
     };
 
     for (int z = kPaddedMinZ; z < kChunkDepth + kLightBorder; ++z) {
@@ -198,13 +227,36 @@ ChunkLightResult calculate_chunk_light(const LightBuildSnapshot& snapshot, const
     }
 
     for (int y = 0; y < kChunkHeight; ++y) {
+        for (int z = kPaddedMinZ; z < kChunkDepth + kLightBorder; ++z) {
+            for (int x = kPaddedMinX; x < kChunkWidth + kLightBorder; ++x) {
+                const std::uint8_t emission = block_registry.light_emission(sample_block_for_light(snapshot, x, y, z));
+                if (emission > padded.get_block(x, y, z)) {
+                    padded.set_block(x, y, z, emission);
+                    block_queue.push_back({x, y, z});
+                }
+            }
+        }
+    }
+
+    for (std::size_t read = 0; read < block_queue.size(); ++read) {
+        const LightNode node = block_queue[read];
+        const std::uint8_t current = padded.get_block(node.x, node.y, node.z);
+        if (current <= 1) {
+            continue;
+        }
+        push_block_if_brighter(node.x + 1, node.y, node.z, current);
+        push_block_if_brighter(node.x - 1, node.y, node.z, current);
+        push_block_if_brighter(node.x, node.y, node.z + 1, current);
+        push_block_if_brighter(node.x, node.y, node.z - 1, current);
+        push_block_if_brighter(node.x, node.y + 1, node.z, current);
+        push_block_if_brighter(node.x, node.y - 1, node.z, current);
+    }
+
+    for (int y = 0; y < kChunkHeight; ++y) {
         for (int z = 0; z < kChunkDepth; ++z) {
             for (int x = 0; x < kChunkWidth; ++x) {
                 light.set_sky(x, y, z, padded.get(x, y, z));
-                const std::uint8_t emission = block_registry.light_emission(snapshot.chunk.get(x, y, z));
-                if (emission > 0) {
-                    light.set_block(x, y, z, emission);
-                }
+                light.set_block(x, y, z, padded.get_block(x, y, z));
             }
         }
     }
@@ -217,6 +269,7 @@ ChunkLightResult calculate_chunk_light(const LightBuildSnapshot& snapshot, const
     result.border_signature = light.border_signature;
     return result;
 }
+
 
 std::uint8_t sample_sky_light(const LightMeshSnapshot& snapshot, int x, int y, int z) {
     if (y >= kChunkHeight) {
