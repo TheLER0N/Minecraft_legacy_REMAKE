@@ -181,16 +181,9 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 
     observer_chunk_ = origin;
 
-        std::vector<ChunkCoord> guarantee;
-    std::vector<ChunkCoord> focus;
-    std::vector<ChunkCoord> background;
-
-    const std::size_t wanted_capacity = static_cast<std::size_t>(
-        (chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)
+    std::vector<std::vector<ChunkCoord>> missing_by_ring(
+        static_cast<std::size_t>(chunk_radius_ + 1)
     );
-    guarantee.reserve(9);
-    focus.reserve(wanted_capacity);
-    background.reserve(wanted_capacity);
 
     for (int dz = -chunk_radius_; dz <= chunk_radius_; ++dz) {
         for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
@@ -201,37 +194,8 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
                 continue;
             }
 
-            if (std::abs(dx) <= 1 && std::abs(dz) <= 1) {
-                guarantee.push_back(coord);
-                continue;
-            }
-
-            const float chunk_center_x =
-                static_cast<float>(coord.x * kChunkWidth) + static_cast<float>(kChunkWidth) * 0.5f;
-            const float chunk_center_z =
-                static_cast<float>(coord.z * kChunkDepth) + static_cast<float>(kChunkDepth) * 0.5f;
-
-            Vec3 to_chunk {
-                chunk_center_x - observer_position_.x,
-                0.0f,
-                chunk_center_z - observer_position_.z
-            };
-
-            if (length(to_chunk) > 0.00001f) {
-                to_chunk = normalize(to_chunk);
-            } else {
-                to_chunk = observer_forward_;
-            }
-
-            const float forward_dot =
-                to_chunk.x * observer_forward_.x +
-                to_chunk.z * observer_forward_.z;
-
-            if (forward_dot >= 0.20f) {
-                focus.push_back(coord);
-            } else {
-                background.push_back(coord);
-            }
+            const int ring = std::max(std::abs(dx), std::abs(dz));
+            missing_by_ring[static_cast<std::size_t>(ring)].push_back(coord);
         }
     }
 
@@ -240,14 +204,14 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
             chunk_priority_score(rhs, observer_position_, observer_forward_);
     };
 
-    std::sort(guarantee.begin(), guarantee.end(), by_priority);
-    std::sort(focus.begin(), focus.end(), by_priority);
-    std::sort(background.begin(), background.end(), by_priority);
+    for (std::vector<ChunkCoord>& ring_chunks : missing_by_ring) {
+        std::sort(ring_chunks.begin(), ring_chunks.end(), by_priority);
+    }
 
     std::size_t requested_this_frame = 0;
 
-    const auto request_missing_chunks = [&](const std::vector<ChunkCoord>& list) {
-        for (const ChunkCoord& coord : list) {
+    for (const std::vector<ChunkCoord>& ring_chunks : missing_by_ring) {
+        for (const ChunkCoord& coord : ring_chunks) {
             if (requested_this_frame >= kMaxNewChunkRequestsPerFrame) {
                 break;
             }
@@ -262,11 +226,22 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
             queue_generate_job(coord, version);
             ++requested_this_frame;
         }
-    };
 
-    request_missing_chunks(guarantee);
-    request_missing_chunks(focus);
-    request_missing_chunks(background);
+        if (requested_this_frame >= kMaxNewChunkRequestsPerFrame) {
+            break;
+        }
+    }
+
+    {
+        std::lock_guard lock(mutex_);
+        std::stable_sort(
+            job_queue_.begin(),
+            job_queue_.end(),
+            [&](const ChunkJob& lhs, const ChunkJob& rhs) {
+                return job_priority_score_locked(lhs) < job_priority_score_locked(rhs);
+            }
+        );
+    }
 
     for (auto it = chunks_.begin(); it != chunks_.end();) {
         if (!desired_chunk(origin, it->first)) {
@@ -300,44 +275,9 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
         }
     }
 
-    visible_chunks_.clear();
 
-for (const auto& [coord, record] : chunks_) {
-    if (record.uploaded_to_gpu) {
-        visible_chunks_.push_back({coord});
-    }
-}
+    refresh_visible_chunks();
 
-std::sort(
-    visible_chunks_.begin(),
-    visible_chunks_.end(),
-    [&](const ActiveChunk& lhs, const ActiveChunk& rhs) {
-        const int lhs_dx = lhs.coord.x - observer_chunk_.x;
-        const int lhs_dz = lhs.coord.z - observer_chunk_.z;
-        const int rhs_dx = rhs.coord.x - observer_chunk_.x;
-        const int rhs_dz = rhs.coord.z - observer_chunk_.z;
-
-        const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
-        const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
-
-        if (lhs_ring != rhs_ring) {
-            return lhs_ring < rhs_ring;
-        }
-
-        const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
-        const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
-
-        if (lhs_dist != rhs_dist) {
-            return lhs_dist < rhs_dist;
-        }
-
-        if (lhs.coord.x != rhs.coord.x) {
-            return lhs.coord.x < rhs.coord.x;
-        }
-
-        return lhs.coord.z < rhs.coord.z;
-    }
-);
 
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
@@ -538,6 +478,7 @@ std::span<const ActiveChunk> WorldStreamer::visible_chunks() const {
     return visible_chunks_;
 }
 
+
 void WorldStreamer::refresh_visible_chunks() {
     visible_chunks_.clear();
     for (const auto& [coord, record] : chunks_) {
@@ -545,7 +486,39 @@ void WorldStreamer::refresh_visible_chunks() {
             visible_chunks_.push_back({coord});
         }
     }
+
+    std::sort(
+        visible_chunks_.begin(),
+        visible_chunks_.end(),
+        [&](const ActiveChunk& lhs, const ActiveChunk& rhs) {
+            const int lhs_dx = lhs.coord.x - observer_chunk_.x;
+            const int lhs_dz = lhs.coord.z - observer_chunk_.z;
+            const int rhs_dx = rhs.coord.x - observer_chunk_.x;
+            const int rhs_dz = rhs.coord.z - observer_chunk_.z;
+
+            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+
+            if (lhs_ring != rhs_ring) {
+                return lhs_ring < rhs_ring;
+            }
+
+            const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+            const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+
+            if (lhs_dist != rhs_dist) {
+                return lhs_dist < rhs_dist;
+            }
+
+            if (lhs.coord.x != rhs.coord.x) {
+                return lhs.coord.x < rhs.coord.x;
+            }
+
+            return lhs.coord.z < rhs.coord.z;
+        }
+    );
 }
+
 
 
 std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads() {

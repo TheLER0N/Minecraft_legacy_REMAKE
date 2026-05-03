@@ -25,8 +25,8 @@ constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 
 constexpr std::size_t kChunkUploadByteBudgetPerFrame = 8ull * 1024ull * 1024ull;
-constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 4ull * 1024ull * 1024ull;
-constexpr std::size_t kChunkUploadMaxCountPerFrame = 6;
+constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 8ull * 1024ull * 1024ull;
+constexpr std::size_t kChunkUploadMaxCountPerFrame = 10;
 
 constexpr int kPlayGameButtonIndex = 0;
 constexpr int kExitGameButtonIndex = 5;
