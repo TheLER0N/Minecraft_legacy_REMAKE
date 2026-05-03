@@ -487,6 +487,8 @@ void WorldStreamer::refresh_visible_chunks() {
         }
     }
 
+
+    //
     std::sort(
         visible_chunks_.begin(),
         visible_chunks_.end(),
@@ -598,25 +600,17 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
         return {};
     }
 
+    const Vec3 planar_forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
+
     std::sort(
         pending_uploads_.begin(),
         pending_uploads_.end(),
         [&](const PendingChunkUpload& lhs, const PendingChunkUpload& rhs) {
-            const float lhs_x = static_cast<float>(lhs.coord.x * kChunkWidth + kChunkWidth / 2);
-            const float lhs_z = static_cast<float>(lhs.coord.z * kChunkDepth + kChunkDepth / 2);
-            const float rhs_x = static_cast<float>(rhs.coord.x * kChunkWidth + kChunkWidth / 2);
-            const float rhs_z = static_cast<float>(rhs.coord.z * kChunkDepth + kChunkDepth / 2);
+            const float lhs_priority = chunk_priority_score(lhs.coord, observer_position, planar_forward);
+            const float rhs_priority = chunk_priority_score(rhs.coord, observer_position, planar_forward);
 
-            const float lhs_dx = lhs_x - observer_position.x;
-            const float lhs_dz = lhs_z - observer_position.z;
-            const float rhs_dx = rhs_x - observer_position.x;
-            const float rhs_dz = rhs_z - observer_position.z;
-
-            const float lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
-            const float rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
-
-            if (lhs_dist != rhs_dist) {
-                return lhs_dist < rhs_dist;
+            if (lhs_priority != rhs_priority) {
+                return lhs_priority < rhs_priority;
             }
 
             if (lhs.coord.x != rhs.coord.x) {
@@ -626,6 +620,7 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
             return lhs.coord.z < rhs.coord.z;
         }
     );
+
 
     std::vector<PendingChunkUpload> uploads;
     uploads.reserve(max_count);

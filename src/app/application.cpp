@@ -490,7 +490,6 @@ int Application::run() {
             renderer_.unload_chunk_mesh(coord);
         }
         world_streamer_->tick_generation_jobs();
-        world_streamer_->flush_dirty_chunks(1);
 
         const WorldStreamer::StreamingStats pre_upload_stats = world_streamer_->stats();
         const std::size_t upload_budget = pre_upload_stats.pending_uploads > 4
