@@ -5,12 +5,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <deque>
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace ml {
 
@@ -42,6 +40,7 @@ std::size_t mesh_index_count(const ChunkMesh& mesh) {
 std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
 }
+
 
 constexpr BlockId kMetadataMissingNeighborOcclusionBlock = BlockId::Stone;
 
@@ -116,6 +115,45 @@ std::uint8_t metadata_section_boundary_faces(int x, int section_y, int z) {
         faces |= section_face_bit(kSectionFaceNorth);
     }
     return faces;
+}
+
+void metadata_include_portal_cell(SectionPortalBounds& bounds, std::uint8_t face, int x, int section_y, int z) {
+    std::uint8_t u = 0;
+    std::uint8_t v = 0;
+
+    switch (face) {
+    case kSectionFaceTop:
+    case kSectionFaceBottom:
+        u = static_cast<std::uint8_t>(std::clamp(x, 0, kChunkWidth - 1));
+        v = static_cast<std::uint8_t>(std::clamp(z, 0, kChunkDepth - 1));
+        break;
+    case kSectionFaceEast:
+    case kSectionFaceWest:
+        u = static_cast<std::uint8_t>(std::clamp(z, 0, kChunkDepth - 1));
+        v = static_cast<std::uint8_t>(std::clamp(section_y, 0, kChunkSectionHeight - 1));
+        break;
+    case kSectionFaceSouth:
+    case kSectionFaceNorth:
+        u = static_cast<std::uint8_t>(std::clamp(x, 0, kChunkWidth - 1));
+        v = static_cast<std::uint8_t>(std::clamp(section_y, 0, kChunkSectionHeight - 1));
+        break;
+    default:
+        return;
+    }
+
+    if (!bounds.valid) {
+        bounds.min_u = u;
+        bounds.max_u = u;
+        bounds.min_v = v;
+        bounds.max_v = v;
+        bounds.valid = true;
+        return;
+    }
+
+    bounds.min_u = std::min(bounds.min_u, u);
+    bounds.max_u = std::max(bounds.max_u, u);
+    bounds.min_v = std::min(bounds.min_v, v);
+    bounds.max_v = std::max(bounds.max_v, v);
 }
 
 ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const BlockRegistry& block_registry) {
@@ -253,13 +291,27 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
                     }
 
                     std::uint8_t region_faces = 0;
+                    std::array<SectionPortalBounds, kSectionVisibilityFaceCount> region_portals {};
                     queue.clear();
                     queue.push_back({x, section_y, z});
                     visited[start_index] = 1;
 
                     for (std::size_t read_index = 0; read_index < queue.size(); ++read_index) {
                         const Int3 cell = queue[read_index];
-                        region_faces |= metadata_section_boundary_faces(cell.x, cell.y, cell.z);
+                        const std::uint8_t cell_faces = metadata_section_boundary_faces(cell.x, cell.y, cell.z);
+                        region_faces |= cell_faces;
+
+                        for (std::size_t face = 0; face < kSectionVisibilityFaceCount; ++face) {
+                            if ((cell_faces & section_face_bit(face)) != 0) {
+                                metadata_include_portal_cell(
+                                    region_portals[face],
+                                    static_cast<std::uint8_t>(face),
+                                    cell.x,
+                                    cell.y,
+                                    cell.z
+                                );
+                            }
+                        }
 
                         for (const Int3& offset : face_offsets) {
                             const int nx = cell.x + offset.x;
@@ -293,6 +345,20 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
                     for (std::size_t face = 0; face < kSectionVisibilityFaceCount; ++face) {
                         if ((region_faces & section_face_bit(face)) != 0) {
                             section.visibility_from_face[face] |= region_faces;
+
+                            SectionPortalBounds& dst = section.portal_bounds[face];
+                            const SectionPortalBounds& src = region_portals[face];
+                            if (src.valid) {
+                                if (!dst.valid) {
+                                    dst = src;
+                                } else {
+                                    dst.min_u = std::min(dst.min_u, src.min_u);
+                                    dst.max_u = std::max(dst.max_u, src.max_u);
+                                    dst.min_v = std::min(dst.min_v, src.min_v);
+                                    dst.max_v = std::max(dst.max_v, src.max_v);
+                                    dst.valid = true;
+                                }
+                            }
                         }
                     }
                 }

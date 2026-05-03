@@ -69,6 +69,8 @@ public:
         std::size_t drawn_indices {0};
         std::size_t gpu_buffer_bytes {0};
         bool fancy_leaves {true};
+        std::size_t pvs_culled_sections {0};
+        std::size_t portal_culled_sections {0};
     };
 
     ~Renderer();
