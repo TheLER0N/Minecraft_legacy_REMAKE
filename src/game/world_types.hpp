@@ -117,8 +117,8 @@ struct SectionPortalBounds {
             return 0;
         }
         return static_cast<std::uint16_t>(
-            (static_cast<unsigned>(max_u) - static_cast<unsigned>(min_u) + 1u) *
-            (static_cast<unsigned>(max_v) - static_cast<unsigned>(min_v) + 1u)
+            (static_cast<std::uint16_t>(max_u) - static_cast<std::uint16_t>(min_u) + 1u) *
+            (static_cast<std::uint16_t>(max_v) - static_cast<std::uint16_t>(min_v) + 1u)
         );
     }
 };
@@ -149,10 +149,6 @@ struct ChunkSectionVisibility {
     // section sides can be reached by sight from that entry face.
     std::uint8_t open_faces {0};
     std::array<std::uint8_t, kSectionVisibilityFaceCount> visibility_from_face {};
-
-    // Approximate portal rectangles on each section side. These are used by
-    // renderer-side portal/PVS traversal to avoid opening an entire cave system
-    // through a small tunnel or side opening.
     std::array<SectionPortalBounds, kSectionVisibilityFaceCount> portal_bounds {};
 };
 
