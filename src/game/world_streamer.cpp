@@ -19,9 +19,9 @@ constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
 constexpr int kMaxChunkRadius = 100;
 
-constexpr std::size_t kMaxNewChunkRequestsPerFrame = 16;
+constexpr std::size_t kMaxNewChunkRequestsPerFrame = 4;
 
-constexpr std::size_t kMaxResultsPerTick = 96;
+constexpr std::size_t kMaxResultsPerTick = 16;
 
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
