@@ -17,19 +17,32 @@ namespace {
 constexpr float kRaycastEpsilon = 0.0001f;
 constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
+#ifdef __ANDROID__
+constexpr int kMaxChunkRadius = 6;
+constexpr std::size_t kMaxNewChunkRequestsPerFrame = 1;
+constexpr std::size_t kMaxResultsPerTick = 6;
+#else
 constexpr int kMaxChunkRadius = 100;
-
 constexpr std::size_t kMaxNewChunkRequestsPerFrame = 4;
-
 constexpr std::size_t kMaxResultsPerTick = 16;
+#endif
 
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 
-constexpr std::uint64_t kGrassUpdateIntervalFrames = 45;
+#ifdef __ANDROID__
+constexpr std::uint64_t kGrassUpdateIntervalFrames = 30;
 constexpr std::size_t kGrassUpdateChunksPerTick = 2;
-constexpr int kGrassUpdateColumnAttemptsPerChunk = 32;
+constexpr int kGrassUpdateColumnAttemptsPerChunk = 18;
+#else
+constexpr std::uint64_t kGrassUpdateIntervalFrames = 20;
+constexpr std::size_t kGrassUpdateChunksPerTick = 4;
+constexpr int kGrassUpdateColumnAttemptsPerChunk = 64;
+#endif
 constexpr int kGrassBlockedCheckHeight = 1;
+constexpr std::uint64_t kGrassCoveredDecayDelayFrames = 35;
+constexpr std::size_t kMaxPendingGrassUpdatesPerTick = 16;
+
 
 
 bool nearly_equal(float lhs, float rhs) {
@@ -149,7 +162,11 @@ WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry
     const std::size_t available_workers =
         hardware_threads > reserved_threads ? hardware_threads - reserved_threads : 2;
 
-    const std::size_t worker_count = std::clamp<std::size_t>(available_workers, 2, 8);
+#ifdef __ANDROID__
+    const std::size_t worker_count = std::clamp<std::size_t>(available_workers, std::size_t {1}, std::size_t {2});
+#else
+    const std::size_t worker_count = std::clamp<std::size_t>(available_workers, std::size_t {2}, std::size_t {8});
+#endif
 
     workers_.reserve(worker_count);
     for (std::size_t i = 0; i < worker_count; ++i) {
@@ -947,13 +964,11 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
 
     chunk.set(local_x, local_y, local_z, block);
 
-    bool grass_block_converted_to_dirt = false;
     if (block != BlockId::Air && contains_world_y(y - 1)) {
         const int below_local_y = world_y_to_local_y(y - 1);
         if (below_local_y >= 0 && below_local_y < kChunkHeight &&
             chunk.get(local_x, below_local_y, local_z) == BlockId::Grass) {
-            chunk.set(local_x, below_local_y, local_z, BlockId::Dirt);
-            grass_block_converted_to_dirt = true;
+            queue_delayed_grass_update_locked({x, y - 1, z}, kGrassCoveredDecayDelayFrames);
         }
     }
 
@@ -1012,19 +1027,114 @@ SetBlockResult WorldStreamer::set_block_at_world(int x, int y, int z, BlockId bl
             queue_rebuild_job_if_loaded(affected);
         });
     }
-
-    if (grass_block_converted_to_dirt && !light_affecting_change) {
-        queue_rebuild_job_if_loaded(chunk_coord);
-    }
-
     return SetBlockResult::Success;
 }
 
+void WorldStreamer::queue_delayed_grass_update_locked(Int3 block, std::uint64_t delay_frames) {
+    PendingGrassBlockUpdate update {};
+    update.block = block;
+    update.due_frame = frame_counter_ + delay_frames;
+    pending_grass_updates_.push_back(update);
+}
+
+bool WorldStreamer::apply_grass_lifecycle_at_locked(int x, int y, int z) {
+    if (!contains_world_y(y) || !contains_world_y(y + 1)) {
+        return false;
+    }
+
+    const auto positive_mod = [](int value, int divisor) -> int {
+        const int result = value % divisor;
+        return result < 0 ? result + divisor : result;
+    };
+
+    const ChunkCoord coord = world_to_chunk(x, z);
+    auto chunk_it = chunks_.find(coord);
+    if (chunk_it == chunks_.end() || !chunk_it->second.data.has_value()) {
+        return false;
+    }
+
+    ChunkRecord& record = chunk_it->second;
+    if (!record.uploaded_to_gpu || record.dirty_mesh || rebuild_states_.find(coord) != rebuild_states_.end()) {
+        return false;
+    }
+
+    const bool chunk_waiting_for_upload = std::any_of(
+        pending_uploads_.begin(),
+        pending_uploads_.end(),
+        [&](const PendingChunkUpload& upload) {
+            return upload.coord == coord;
+        }
+    );
+    if (chunk_waiting_for_upload) {
+        return false;
+    }
+
+    ChunkData& chunk = *record.data;
+    const int local_x = positive_mod(x, kChunkWidth);
+    const int local_y = world_y_to_local_y(y);
+    const int local_z = positive_mod(z, kChunkDepth);
+
+    if (local_y < 0 || local_y >= kChunkHeight - 1) {
+        return false;
+    }
+
+    const BlockId current = chunk.get(local_x, local_y, local_z);
+    const BlockId above = chunk.get(local_x, local_y + kGrassBlockedCheckHeight, local_z);
+    const bool above_is_air = above == BlockId::Air;
+
+    BlockId next = current;
+    if (current == BlockId::Grass && !above_is_air) {
+        next = BlockId::Dirt;
+    } else if (current == BlockId::Dirt && above_is_air) {
+        next = BlockId::Grass;
+    } else {
+        return false;
+    }
+
+    chunk.set(local_x, local_y, local_z, next);
+
+    const std::uint64_t new_version = next_chunk_version_++;
+    record.generation_version = new_version;
+    record.mesh_version = 0;
+    record.dirty_mesh = true;
+    mark_chunk_dirty_for_save(coord);
+    queue_rebuild_self_and_neighbors_if_loaded_locked(coord, false);
+    return true;
+}
+
 void WorldStreamer::tick_grass_updates_locked() {
+    std::size_t processed_pending = 0;
+    while (!pending_grass_updates_.empty() && processed_pending < kMaxPendingGrassUpdatesPerTick) {
+        PendingGrassBlockUpdate update = pending_grass_updates_.front();
+        pending_grass_updates_.pop_front();
+        ++processed_pending;
+
+        if (frame_counter_ < update.due_frame) {
+            pending_grass_updates_.push_back(update);
+            break;
+        }
+
+        const bool changed = apply_grass_lifecycle_at_locked(update.block.x, update.block.y, update.block.z);
+        if (!changed) {
+            // If the chunk is still streaming, retry shortly instead of dropping the update.
+            if (frame_counter_ < update.due_frame + kGrassUpdateIntervalFrames * 8) {
+                update.due_frame = frame_counter_ + kGrassUpdateIntervalFrames;
+                pending_grass_updates_.push_back(update);
+            }
+        }
+    }
+
     if (frame_counter_ < next_grass_update_frame_) {
         return;
     }
     next_grass_update_frame_ = frame_counter_ + kGrassUpdateIntervalFrames;
+
+    // Do not run random grass ticks before the first terrain is visible.
+    // Unlike the previous fix, this no longer waits for the whole streaming queue
+    // to become empty, because on Android that made grass updates almost never run.
+    if (visible_chunks_.size() < 4) {
+        return;
+    }
 
     if (chunks_.empty()) {
         grass_update_chunk_cursor_ = 0;
@@ -1034,7 +1144,7 @@ void WorldStreamer::tick_grass_updates_locked() {
     std::vector<ChunkCoord> loaded_coords;
     loaded_coords.reserve(chunks_.size());
     for (const auto& [coord, record] : chunks_) {
-        if (record.data.has_value() && desired_chunk(observer_chunk_, coord)) {
+        if (record.data.has_value() && record.uploaded_to_gpu && desired_chunk(observer_chunk_, coord)) {
             loaded_coords.push_back(coord);
         }
     }
@@ -1063,7 +1173,23 @@ void WorldStreamer::tick_grass_updates_locked() {
             continue;
         }
 
-        ChunkData& chunk = *chunk_it->second.data;
+        ChunkRecord& record = chunk_it->second;
+        if (!record.uploaded_to_gpu || record.dirty_mesh || rebuild_states_.find(coord) != rebuild_states_.end()) {
+            continue;
+        }
+
+        const bool chunk_waiting_for_upload = std::any_of(
+            pending_uploads_.begin(),
+            pending_uploads_.end(),
+            [&](const PendingChunkUpload& upload) {
+                return upload.coord == coord;
+            }
+        );
+        if (chunk_waiting_for_upload) {
+            continue;
+        }
+
+        ChunkData& chunk = *record.data;
         bool changed = false;
 
         const int column_count = kChunkWidth * kChunkDepth;
@@ -1080,14 +1206,21 @@ void WorldStreamer::tick_grass_updates_locked() {
             for (int local_y = kChunkHeight - 2; local_y >= 0; --local_y) {
                 const BlockId current = chunk.get(local_x, local_y, local_z);
                 const BlockId above = chunk.get(local_x, local_y + kGrassBlockedCheckHeight, local_z);
+                const bool above_is_air = above == BlockId::Air;
 
-                if (current == BlockId::Dirt && above == BlockId::Air) {
+                if (current == BlockId::Grass && !above_is_air) {
+                    chunk.set(local_x, local_y, local_z, BlockId::Dirt);
+                    changed = true;
+                    break;
+                }
+
+                if (current == BlockId::Dirt && above_is_air) {
                     chunk.set(local_x, local_y, local_z, BlockId::Grass);
                     changed = true;
                     break;
                 }
 
-                if (block_registry_.is_opaque(above) && current != BlockId::Air) {
+                if (block_registry_.is_opaque(current) && current != BlockId::Grass && current != BlockId::Dirt) {
                     break;
                 }
             }
@@ -1098,9 +1231,9 @@ void WorldStreamer::tick_grass_updates_locked() {
         }
 
         const std::uint64_t new_version = next_chunk_version_++;
-        chunk_it->second.generation_version = new_version;
-        chunk_it->second.mesh_version = 0;
-        chunk_it->second.dirty_mesh = true;
+        record.generation_version = new_version;
+        record.mesh_version = 0;
+        record.dirty_mesh = true;
         mark_chunk_dirty_for_save(coord);
         queue_rebuild_self_and_neighbors_if_loaded_locked(coord, false);
     }

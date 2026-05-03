@@ -123,6 +123,11 @@ private:
         std::shared_ptr<LightBuildSnapshot> light_snapshot {};
     };
 
+    struct PendingGrassBlockUpdate {
+        Int3 block {};
+        std::uint64_t due_frame {0};
+    };
+
     struct JobResult {
         ChunkCoord coord {};
         std::uint64_t version {0};
@@ -200,6 +205,8 @@ private:
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
     void queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
     void tick_grass_updates_locked();
+    void queue_delayed_grass_update_locked(Int3 block, std::uint64_t delay_frames);
+    bool apply_grass_lifecycle_at_locked(int x, int y, int z);
     void record_stale_upload_drop(ChunkCoord coord);
     void mark_chunk_dirty_for_save(ChunkCoord coord);
     void enqueue_dirty_save(ChunkCoord coord);
@@ -238,6 +245,7 @@ private:
     std::uint64_t frame_counter_ {0};
     std::size_t grass_update_chunk_cursor_ {0};
     std::uint64_t next_grass_update_frame_ {0};
+    std::deque<PendingGrassBlockUpdate> pending_grass_updates_;
     std::size_t stale_results_ {0};
     std::size_t stale_uploads_dropped_ {0};
     std::size_t light_stale_results_ {0};
