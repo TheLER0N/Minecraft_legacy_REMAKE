@@ -66,7 +66,9 @@ public:
         std::size_t max_count,
         Vec3 observer_position,
         Vec3 observer_forward
-    );    std::vector<ChunkCoord> drain_pending_unloads();
+    );
+    bool confirm_chunk_uploaded(ChunkCoord coord, std::uint64_t version, std::uint64_t rebuild_serial, std::uint64_t upload_token);
+    std::vector<ChunkCoord> drain_pending_unloads();
     StreamingStats stats() const;
     BlockQueryResult query_block_at_world(int x, int y, int z) const;
     BlockId block_at_world(int x, int y, int z) const;

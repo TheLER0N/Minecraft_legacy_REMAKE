@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1186,6 +1188,31 @@ BlockId sample_block_for_mesh(const ChunkData& chunk_data, const ChunkMeshNeighb
     return chunk_data.get(x, y, z);
 }
 
+
+void log_mesh_builder_self_check_failure(std::string_view check) {
+    log_message(
+        LogLevel::Warning,
+        std::string("WorldGenerator: mesh builder self-check failed: ") + std::string(check)
+    );
+}
+
+void log_mesh_builder_self_check_failure_value(std::string_view name, std::size_t actual, std::size_t expected) {
+    log_message(
+        LogLevel::Warning,
+        std::string("WorldGenerator: mesh builder self-check failed: ") +
+            std::string(name) + "=" + std::to_string(actual) +
+            ", expected=" + std::to_string(expected)
+    );
+}
+
+#define ML_MESH_SELF_CHECK(condition) \
+    do { \
+        if (!(condition)) { \
+            log_mesh_builder_self_check_failure(#condition); \
+            return; \
+        } \
+    } while (false)
+
 void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     static bool checked = false;
     if (checked) {
@@ -1203,9 +1230,9 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     };
     std::size_t single_faces = 0;
     const ChunkMesh single_mesh = build_mesh_from_sampler(single_sample, block_registry, LeavesRenderMode::Fancy, &single_faces);
-    assert(single_faces == 6);
-    assert(single_mesh.opaque_mesh.vertices.size() == 24);
-    assert(single_mesh.opaque_mesh.indices.size() == 36);
+    ML_MESH_SELF_CHECK(single_faces == 6);
+    ML_MESH_SELF_CHECK(single_mesh.opaque_mesh.vertices.size() == 24);
+    ML_MESH_SELF_CHECK(single_mesh.opaque_mesh.indices.size() == 36);
 
     ChunkData two_blocks {};
     two_blocks.set(0, 0, 0, BlockId::Stone);
@@ -1218,9 +1245,9 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     };
     std::size_t double_faces = 0;
     const ChunkMesh double_mesh = build_mesh_from_sampler(double_sample, block_registry, LeavesRenderMode::Fancy, &double_faces);
-    assert(double_faces == 6);
-    assert(double_mesh.opaque_mesh.vertices.size() == 24);
-    assert(double_mesh.opaque_mesh.indices.size() == 36);
+    ML_MESH_SELF_CHECK(double_faces == 6);
+    ML_MESH_SELF_CHECK(double_mesh.opaque_mesh.vertices.size() == 24);
+    ML_MESH_SELF_CHECK(double_mesh.opaque_mesh.indices.size() == 36);
 
     ChunkData ao_split_blocks {};
     ao_split_blocks.set(0, 0, 0, BlockId::Stone);
@@ -1239,8 +1266,8 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     };
     std::size_t ao_split_faces = 0;
     const ChunkMesh ao_split_mesh = build_mesh_from_sampler(ao_split_sample, block_registry, LeavesRenderMode::Fancy, &ao_split_faces);
-    assert(ao_split_faces > double_faces);
-    assert(ao_split_mesh.opaque_mesh.vertices.size() > double_mesh.opaque_mesh.vertices.size());
+    ML_MESH_SELF_CHECK(ao_split_faces > double_faces);
+    ML_MESH_SELF_CHECK(ao_split_mesh.opaque_mesh.vertices.size() > double_mesh.opaque_mesh.vertices.size());
 
     ChunkData slab {};
     for (int z = 0; z < 2; ++z) {
@@ -1256,9 +1283,9 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     };
     std::size_t slab_faces = 0;
     const ChunkMesh slab_mesh = build_mesh_from_sampler(slab_sample, block_registry, LeavesRenderMode::Fancy, &slab_faces);
-    assert(slab_faces == 6);
-    assert(slab_mesh.opaque_mesh.vertices.size() == 24);
-    assert(slab_mesh.opaque_mesh.indices.size() == 36);
+    ML_MESH_SELF_CHECK(slab_faces == 6);
+    ML_MESH_SELF_CHECK(slab_mesh.opaque_mesh.vertices.size() == 24);
+    ML_MESH_SELF_CHECK(slab_mesh.opaque_mesh.indices.size() == 36);
     bool found_tiled_bottom = false;
     for (std::size_t i = 0; i + 3 < slab_mesh.opaque_mesh.vertices.size(); i += 4) {
         const Vertex& a = slab_mesh.opaque_mesh.vertices[i + 0];
@@ -1274,7 +1301,7 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
             found_tiled_bottom = uv_width == 3.0f && uv_height == 2.0f;
         }
     }
-    assert(found_tiled_bottom);
+    ML_MESH_SELF_CHECK(found_tiled_bottom);
 
     ChunkData seam_left {};
     seam_left.set(kChunkWidth - 1, 0, 0, BlockId::Stone);
@@ -1313,10 +1340,10 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
 
     const auto left_extent = x_extent(seam_left_mesh);
     const auto right_extent = x_extent(seam_right_mesh);
-    assert(left_extent[0] == static_cast<float>(kChunkWidth - 1));
-    assert(left_extent[1] == static_cast<float>(kChunkWidth));
-    assert(right_extent[0] == 0.0f);
-    assert(right_extent[1] == 1.0f);
+    ML_MESH_SELF_CHECK(left_extent[0] == static_cast<float>(kChunkWidth - 1));
+    ML_MESH_SELF_CHECK(left_extent[1] == static_cast<float>(kChunkWidth));
+    ML_MESH_SELF_CHECK(right_extent[0] == 0.0f);
+    ML_MESH_SELF_CHECK(right_extent[1] == 1.0f);
 
     const auto seam_left_neighbor_sample = [&](int x, int y, int z) -> BlockId {
         if (y < 0 || y >= kChunkHeight || z < 0 || z >= kChunkDepth) {
@@ -1332,9 +1359,9 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     };
     std::size_t seam_neighbor_faces = 0;
     const ChunkMesh seam_neighbor_mesh = build_mesh_from_sampler(seam_left_neighbor_sample, block_registry, LeavesRenderMode::Fancy, &seam_neighbor_faces);
-    assert(seam_neighbor_faces == 5);
-    assert(seam_neighbor_mesh.opaque_mesh.vertices.size() == 20);
-    assert(seam_neighbor_mesh.opaque_mesh.indices.size() == 30);
+    ML_MESH_SELF_CHECK(seam_neighbor_faces == 5);
+    ML_MESH_SELF_CHECK(seam_neighbor_mesh.opaque_mesh.vertices.size() == 20);
+    ML_MESH_SELF_CHECK(seam_neighbor_mesh.opaque_mesh.indices.size() == 30);
 
     ChunkSideBorderX seam_east_border {};
     for (int strip_x = 0; strip_x < kLightBorder; ++strip_x) {
@@ -1364,9 +1391,12 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         LeavesRenderMode::Fancy,
         &seam_neighbor_mesh_faces
     );
-    assert(seam_neighbor_mesh_faces == 5);
-    assert(seam_neighbor_mesh_from_snapshot.opaque_mesh.vertices.size() == 20);
-    assert(seam_neighbor_mesh_from_snapshot.opaque_mesh.indices.size() == 30);
+    if (seam_neighbor_mesh_faces != 5) {
+        log_mesh_builder_self_check_failure_value("seam_neighbor_mesh_faces", seam_neighbor_mesh_faces, 5);
+        return;
+    }
+    ML_MESH_SELF_CHECK(seam_neighbor_mesh_from_snapshot.opaque_mesh.vertices.size() == 20);
+    ML_MESH_SELF_CHECK(seam_neighbor_mesh_from_snapshot.opaque_mesh.indices.size() == 30);
 
     ChunkData diagonal_ao_chunk {};
     diagonal_ao_chunk.set(0, 0, 0, BlockId::Stone);
@@ -1391,8 +1421,8 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
         }
         return sum;
     };
-    assert(diagonal_with_neighbor.opaque_mesh.indices.size() == diagonal_without_neighbor.opaque_mesh.indices.size());
-    assert(color_sum(diagonal_with_neighbor) < color_sum(diagonal_without_neighbor));
+    ML_MESH_SELF_CHECK(diagonal_with_neighbor.opaque_mesh.indices.size() == diagonal_without_neighbor.opaque_mesh.indices.size());
+    ML_MESH_SELF_CHECK(color_sum(diagonal_with_neighbor) < color_sum(diagonal_without_neighbor));
 
     ChunkData leaves_pair {};
     leaves_pair.set(0, 0, 0, BlockId::OakLeaves);
@@ -1407,13 +1437,15 @@ void run_mesh_builder_self_check(const BlockRegistry& block_registry) {
     const ChunkMesh leaves_fast_mesh = build_mesh_from_sampler(leaves_pair_sample, block_registry, LeavesRenderMode::Fast, &leaves_fast_faces);
     std::size_t leaves_fancy_faces = 0;
     const ChunkMesh leaves_fancy_mesh = build_mesh_from_sampler(leaves_pair_sample, block_registry, LeavesRenderMode::Fancy, &leaves_fancy_faces);
-    assert(leaves_fast_faces == 6);
-    assert(leaves_fast_mesh.cutout_mesh.indices.size() == 36);
-    assert(leaves_fancy_faces == 12);
-    assert(leaves_fancy_mesh.cutout_mesh.indices.size() == 72);
+    ML_MESH_SELF_CHECK(leaves_fast_faces == 6);
+    ML_MESH_SELF_CHECK(leaves_fast_mesh.cutout_mesh.indices.size() == 36);
+    ML_MESH_SELF_CHECK(leaves_fancy_faces == 12);
+    ML_MESH_SELF_CHECK(leaves_fancy_mesh.cutout_mesh.indices.size() == 72);
 
     log_message(LogLevel::Info, "WorldGenerator: seam self-check passed, chunk boundary blocks remain 1x1x1");
 }
+
+#undef ML_MESH_SELF_CHECK
 
 }
 

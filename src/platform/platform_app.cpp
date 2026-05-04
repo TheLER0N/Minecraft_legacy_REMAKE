@@ -9,19 +9,101 @@
 
 #include <SDL3/SDL_vulkan.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <array>
+#include <csignal>
+#include <cstdio>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <mutex>
 #include <limits>
 #include <sstream>
+#include <system_error>
 
 namespace ml {
 
 namespace {
+
+namespace log_detail {
+
+std::mutex g_log_mutex;
+std::ofstream g_log_file;
+
+#ifdef __ANDROID__
+int g_crash_log_fd = -1;
+#endif
+
+const char* level_prefix(LogLevel level) {
+    switch (level) {
+    case LogLevel::Info:
+        return "[info]";
+    case LogLevel::Warning:
+        return "[warn]";
+    case LogLevel::Error:
+        return "[error]";
+    default:
+        return "[unknown]";
+    }
+}
+
+#ifdef __ANDROID__
+const char* signal_name(int signal) noexcept {
+    switch (signal) {
+    case SIGABRT:
+        return "SIGABRT";
+    case SIGSEGV:
+        return "SIGSEGV";
+    case SIGBUS:
+        return "SIGBUS";
+    case SIGFPE:
+        return "SIGFPE";
+    case SIGILL:
+        return "SIGILL";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+void append_text(char*& cursor, const char* end, const char* text) noexcept {
+    while (*text != '\0' && cursor < end) {
+        *cursor++ = *text++;
+    }
+}
+
+void append_hex(char*& cursor, const char* end, std::uintptr_t value) noexcept {
+    constexpr char digits[] = "0123456789abcdef";
+    append_text(cursor, end, "0x");
+
+    bool started = false;
+    for (int shift = static_cast<int>(sizeof(std::uintptr_t) * 8) - 4; shift >= 0; shift -= 4) {
+        const unsigned nibble = static_cast<unsigned>((value >> shift) & 0xFu);
+        if (nibble != 0 || started || shift == 0) {
+            started = true;
+            if (cursor < end) {
+                *cursor++ = digits[nibble];
+            }
+        }
+    }
+}
+
+std::string filesystem_path_to_utf8(const std::filesystem::path& path) {
+    const auto value = path.u8string();
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
+#endif
+
+}
 
 constexpr const char* kMusicDirectory = "sound/music/game/unused";
 constexpr float kMinWorldMusicDelaySeconds = 30.0f;
@@ -97,18 +179,111 @@ void normalize_landscape_size(std::uint32_t& width, std::uint32_t& height) {
 
 }
 
-void log_message(LogLevel level, std::string_view message) {
-    const char* prefix = "[info]";
-    if (level == LogLevel::Warning) {
-        prefix = "[warn]";
-    } else if (level == LogLevel::Error) {
-        prefix = "[error]";
+void initialize_file_logging(const std::filesystem::path& log_directory) {
+    std::error_code error;
+    std::filesystem::create_directories(log_directory, error);
+    if (error) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_WARN, "MinecraftLegacy", "Failed to create log directory: %s", error.message().c_str());
+#else
+        std::cerr << "[warn] Failed to create log directory: " << error.message() << std::endl;
+#endif
+        return;
+    }
+
+    const std::filesystem::path latest_log_path = log_directory / "latest.log";
+    {
+        std::lock_guard lock(log_detail::g_log_mutex);
+        if (log_detail::g_log_file.is_open()) {
+            log_detail::g_log_file.close();
+        }
+        log_detail::g_log_file.open(latest_log_path, std::ios::out | std::ios::trunc);
+        if (log_detail::g_log_file.is_open()) {
+            log_detail::g_log_file << "[info] File logging initialized" << std::endl;
+            log_detail::g_log_file << "[info] latest.log path: " << latest_log_path.string() << std::endl;
+        }
     }
 
 #ifdef __ANDROID__
+    const std::filesystem::path crash_log_path = log_directory / "native_crash.log";
+    if (log_detail::g_crash_log_fd != -1) {
+        close(log_detail::g_crash_log_fd);
+        log_detail::g_crash_log_fd = -1;
+    }
+
+    const std::string crash_path_utf8 = log_detail::filesystem_path_to_utf8(crash_log_path);
+    log_detail::g_crash_log_fd = open(crash_path_utf8.c_str(), O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0600);
+    if (log_detail::g_crash_log_fd != -1) {
+        constexpr const char header[] = "[info] Native crash log initialized\n";
+        write(log_detail::g_crash_log_fd, header, sizeof(header) - 1);
+    } else {
+        __android_log_print(ANDROID_LOG_WARN, "MinecraftLegacy", "Failed to open native crash log: %s", crash_path_utf8.c_str());
+    }
+#endif
+}
+
+void shutdown_file_logging() {
+#ifdef __ANDROID__
+    if (log_detail::g_crash_log_fd != -1) {
+        close(log_detail::g_crash_log_fd);
+        log_detail::g_crash_log_fd = -1;
+    }
+#endif
+
+    std::lock_guard lock(log_detail::g_log_mutex);
+    if (log_detail::g_log_file.is_open()) {
+        log_detail::g_log_file << "[info] File logging shutdown" << std::endl;
+        log_detail::g_log_file.close();
+    }
+}
+
+void log_message(LogLevel level, std::string_view message) {
+    const char* prefix = log_detail::level_prefix(level);
+
+#ifdef __ANDROID__
+    const android_LogPriority priority = level == LogLevel::Error
+        ? ANDROID_LOG_ERROR
+        : (level == LogLevel::Warning ? ANDROID_LOG_WARN : ANDROID_LOG_INFO);
+    __android_log_print(priority, "MinecraftLegacy", "%s %.*s", prefix, static_cast<int>(message.size()), message.data());
     SDL_Log("%s %.*s", prefix, static_cast<int>(message.size()), message.data());
 #else
     std::cout << prefix << ' ' << message << std::endl;
+#endif
+
+    std::lock_guard lock(log_detail::g_log_mutex);
+    if (log_detail::g_log_file.is_open()) {
+        log_detail::g_log_file << prefix << ' ' << message << std::endl;
+    }
+}
+
+void log_native_crash_signal(int signal, const void* address) noexcept {
+#ifdef __ANDROID__
+    char buffer[256];
+    char* cursor = buffer;
+    const char* end = buffer + sizeof(buffer) - 1;
+
+    log_detail::append_text(cursor, end, "[fatal] Android native crash caught: signal=");
+    log_detail::append_text(cursor, end, log_detail::signal_name(signal));
+    log_detail::append_text(cursor, end, " address=");
+    log_detail::append_hex(cursor, end, reinterpret_cast<std::uintptr_t>(address));
+    log_detail::append_text(cursor, end, "\n");
+
+    *cursor = '\0';
+    const std::size_t count = static_cast<std::size_t>(cursor - buffer);
+
+    if (count > 0) {
+        write(STDERR_FILENO, buffer, count);
+
+        if (log_detail::g_crash_log_fd != -1) {
+            write(log_detail::g_crash_log_fd, buffer, count);
+            fsync(log_detail::g_crash_log_fd);
+        }
+
+        __android_log_write(ANDROID_LOG_FATAL, "MinecraftLegacy", buffer);
+    }
+#else
+    (void)signal;
+    (void)address;
 #endif
 }
 
@@ -138,6 +313,20 @@ bool PlatformApp::initialize() {
         return false;
     }
     log_message(LogLevel::Info, "PlatformApp: SDL_Init ok");
+
+#ifdef __ANDROID__
+    char* log_pref_path = SDL_GetPrefPath("MinecraftLegacy", "MinecraftLegacy");
+    if (log_pref_path != nullptr) {
+        const std::string log_root(log_pref_path);
+        SDL_free(log_pref_path);
+        initialize_file_logging(std::filesystem::path(log_root) / "logs");
+    } else {
+        initialize_file_logging(std::filesystem::path("logs"));
+        log_message(LogLevel::Warning, std::string("PlatformApp: SDL_GetPrefPath for logs failed: ") + SDL_GetError());
+    }
+#else
+    initialize_file_logging(std::filesystem::path("logs"));
+#endif
 
 #ifdef __ANDROID__
     window_.width = 2340;
@@ -410,10 +599,12 @@ std::filesystem::path PlatformApp::save_root_directory() const {
 #ifdef __ANDROID__
     char* pref_path = SDL_GetPrefPath("MinecraftLegacy", "MinecraftLegacy");
     if (pref_path != nullptr) {
-        std::filesystem::path path(reinterpret_cast<const char8_t*>(pref_path));
+        const std::string path_utf8(pref_path);
         SDL_free(pref_path);
-        return path / "saves";
+        return std::filesystem::path(path_utf8) / "saves";
     }
+
+    log_message(LogLevel::Warning, std::string("PlatformApp: SDL_GetPrefPath failed: ") + SDL_GetError());
 #endif
     return std::filesystem::path("saves");
 }
@@ -492,6 +683,7 @@ void PlatformApp::shutdown() {
     }
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
+    shutdown_file_logging();
 }
 
 bool PlatformApp::initialize_audio() {

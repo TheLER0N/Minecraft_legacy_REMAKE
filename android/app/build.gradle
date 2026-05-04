@@ -42,6 +42,21 @@ android {
         }
     }
 
+
+
+    buildTypes {
+        debug {
+            ndk {
+                debugSymbolLevel "FULL"
+            }
+        }
+        release {
+            ndk {
+                debugSymbolLevel "FULL"
+            }
+        }
+    }
+
     sourceSets {
         main {
             assets.srcDirs = [file("../../assets"), generatedAssetsDir]

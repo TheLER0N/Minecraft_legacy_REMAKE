@@ -6,9 +6,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <filesystem>
 #include <limits>
 #include <random>
+#include <string>
 
 namespace ml {
 
@@ -25,10 +27,10 @@ constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 
 #ifdef __ANDROID__
-constexpr std::size_t kChunkUploadByteBudgetPerFrame = 1024ull * 1024ull;
-constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 1024ull * 1024ull;
+constexpr std::size_t kChunkUploadByteBudgetPerFrame = 512ull * 1024ull;
+constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 512ull * 1024ull;
 constexpr std::size_t kChunkUploadMaxCountPerFrame = 1;
-constexpr int kInitialChunkRadius = 4;
+constexpr int kInitialChunkRadius = 3;
 #else
 constexpr std::size_t kChunkUploadByteBudgetPerFrame = 2ull * 1024ull * 1024ull;
 constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 2ull * 1024ull * 1024ull;
@@ -50,6 +52,11 @@ constexpr float kMenuButtonWidth = 224.0f;
 constexpr float kMenuButtonHeight = 20.0f;
 constexpr float kMenuButtonGap = 5.0f;
 constexpr float kMenuFirstButtonTop = 126.0f;
+
+std::string path_to_utf8(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+}
 
 float menu_layout_scale(float width, float height) {
     const float fit_scale = std::min(width / kMenuVirtualWidth, height / kMenuVirtualHeight);
@@ -186,28 +193,53 @@ bool Application::initialize() {
     }
     player_.set_body_position({32.0f, 100.0f, 80.0f});
     player_.set_view_from_forward(camera_.forward());
+#ifndef __ANDROID__
     platform_.start_menu_music();
+#endif
     return true;
 }
 
 void Application::start_world() {
     if (world_streamer_ == nullptr) {
-        world_save_ = std::make_unique<WorldSave>(platform_.save_root_directory() / "default");
-        const WorldMetadata metadata = world_save_->load_or_create_metadata();
-        world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, kInitialChunkRadius, world_save_.get());
-        world_streamer_->set_leaves_render_mode(leaves_render_mode_);
-        const WorldGenerator spawn_generator {block_registry_};
-        const int spawn_x = 32;
-        const int spawn_z = 80;
-        const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, metadata.world_seed);
-        const float spawn_y = static_cast<float>(std::max(surface_y, kSeaLevel) + 2);
-        player_.set_body_position({static_cast<float>(spawn_x), spawn_y, static_cast<float>(spawn_z)});
-        camera_.set_pose({static_cast<float>(spawn_x), spawn_y + kPlayerEyeHeight, static_cast<float>(spawn_z)}, -90.0f, -22.0f);
-        player_.set_view_from_forward(camera_.forward());
-        log_message(LogLevel::Info, "Application: world streamer created seed=" + std::to_string(metadata.world_seed));
+        try {
+            const std::filesystem::path save_root = platform_.save_root_directory() / "default";
+            log_message(LogLevel::Info, "Application: start_world save_root='" + path_to_utf8(save_root) + "'");
+
+            world_save_ = std::make_unique<WorldSave>(save_root);
+            const WorldMetadata metadata = world_save_->load_or_create_metadata();
+            log_message(LogLevel::Info, "Application: world metadata loaded seed=" + std::to_string(metadata.world_seed));
+
+            world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, kInitialChunkRadius, world_save_.get());
+            world_streamer_->set_leaves_render_mode(leaves_render_mode_);
+            const WorldGenerator spawn_generator {block_registry_};
+            const int spawn_x = 32;
+            const int spawn_z = 80;
+            const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, metadata.world_seed);
+            const float spawn_y = static_cast<float>(std::max(surface_y, kSeaLevel) + 2);
+            player_.set_body_position({static_cast<float>(spawn_x), spawn_y, static_cast<float>(spawn_z)});
+            camera_.set_pose({static_cast<float>(spawn_x), spawn_y + kPlayerEyeHeight, static_cast<float>(spawn_z)}, -90.0f, -22.0f);
+            player_.set_view_from_forward(camera_.forward());
+            log_message(LogLevel::Info, "Application: world streamer created seed=" + std::to_string(metadata.world_seed));
+        } catch (const std::exception& exception) {
+            log_message(LogLevel::Error, std::string("Application: failed to start world: ") + exception.what());
+            world_streamer_.reset();
+            world_save_.reset();
+            platform_.set_mouse_capture(false);
+            app_state_ = AppState::MainMenu;
+            return;
+        } catch (...) {
+            log_message(LogLevel::Error, "Application: failed to start world: unknown exception");
+            world_streamer_.reset();
+            world_save_.reset();
+            platform_.set_mouse_capture(false);
+            app_state_ = AppState::MainMenu;
+            return;
+        }
     }
     platform_.set_mouse_capture(true);
+#ifndef __ANDROID__
     platform_.enter_world_music();
+#endif
     app_state_ = AppState::InWorld;
 }
 
@@ -322,7 +354,9 @@ int Application::run() {
         platform_.pump_events();
         const InputState& input = platform_.current_input();
         const float dt = platform_.frame_delta_seconds();
+#ifndef __ANDROID__
         platform_.update_music(dt);
+#endif
 
         if (app_state_ == AppState::StartupSplash) {
             platform_.set_mouse_capture(false);
@@ -417,7 +451,9 @@ int Application::run() {
         if (input.escape_pressed || input.gamepad_start_pressed) {
             world_streamer_->flush_dirty_chunks(8);
             platform_.set_mouse_capture(false);
+#ifndef __ANDROID__
             platform_.start_menu_music();
+#endif
             app_state_ = AppState::MainMenu;
             hovered_block_.reset();
             block_break_.target.reset();
@@ -508,7 +544,8 @@ int Application::run() {
             kChunkUploadMaxCountPerFrame,
             observer_position,
             observer_forward
-        );        if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
+        );
+        if (!pending_uploads.empty() && pending_upload_log_count < kPendingUploadLogLimit) {
             log_message(LogLevel::Info, std::string("Application: pending chunk uploads=") + std::to_string(pending_uploads.size()));
             ++pending_upload_log_count;
         }
@@ -517,8 +554,33 @@ int Application::run() {
         const auto upload_start = std::chrono::steady_clock::now();
         //
         for (PendingChunkUpload& upload : pending_uploads) {
-            uploaded_bytes_this_frame += mesh_byte_count(upload.mesh);
-            renderer_.upload_chunk_mesh(upload.coord, upload.mesh, upload.visibility);
+            const std::size_t upload_bytes = mesh_byte_count(upload.mesh);
+            uploaded_bytes_this_frame += upload_bytes;
+
+#ifdef __ANDROID__
+            log_message(
+                LogLevel::Info,
+                std::string("Application: uploading chunk coord=(") +
+                    std::to_string(upload.coord.x) + "," + std::to_string(upload.coord.z) +
+                    ") bytes=" + std::to_string(upload_bytes)
+            );
+#endif
+
+            const bool upload_ok = renderer_.upload_chunk_mesh(upload.coord, upload.mesh, upload.visibility);
+            if (upload_ok) {
+                world_streamer_->confirm_chunk_uploaded(
+                    upload.coord,
+                    upload.version,
+                    upload.rebuild_serial,
+                    upload.upload_token
+                );
+            } else {
+                log_message(
+                    LogLevel::Error,
+                    std::string("Application: renderer rejected chunk upload coord=(") +
+                        std::to_string(upload.coord.x) + "," + std::to_string(upload.coord.z) + ")"
+                );
+            }
         }
         world_streamer_->refresh_visible_chunks();
         const auto upload_end = std::chrono::steady_clock::now();

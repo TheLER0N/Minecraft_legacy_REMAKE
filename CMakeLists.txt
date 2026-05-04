@@ -150,7 +150,8 @@ target_compile_definitions(${MINECRAFT_LEGACY_TARGET}
 if(ANDROID)
     target_compile_options(${MINECRAFT_LEGACY_TARGET}
         PRIVATE
-            -g0
+            -g
+            -fno-omit-frame-pointer
     )
     target_link_libraries(${MINECRAFT_LEGACY_TARGET}
         PRIVATE

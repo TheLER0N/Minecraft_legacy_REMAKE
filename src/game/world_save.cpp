@@ -10,7 +10,11 @@
 #include <fstream>
 #include <limits>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 namespace ml {
 
@@ -18,6 +22,30 @@ namespace {
 
 constexpr std::uint32_t kChunkSnapshotMagic = 0x31484C4D; // MLH1
 constexpr std::uint32_t kChunkSnapshotVersion = 1;
+
+std::string path_to_utf8(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+}
+
+void ensure_directory(const std::filesystem::path& directory, std::string_view label) {
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (error) {
+        throw std::runtime_error(
+            "WorldSave: failed to create " + std::string(label) + " '" +
+            path_to_utf8(directory) + "': " + error.message()
+        );
+    }
+
+    const bool directory_exists = std::filesystem::is_directory(directory, error);
+    if (error || !directory_exists) {
+        throw std::runtime_error(
+            "WorldSave: " + std::string(label) + " is not a writable directory '" +
+            path_to_utf8(directory) + "'" + (error ? ": " + error.message() : std::string {})
+        );
+    }
+}
 
 std::optional<WorldSeed> parse_world_seed(const std::string& text) {
     const std::string key = "\"worldSeed\"";
@@ -71,6 +99,9 @@ bool read_i32(std::ifstream& file, std::int32_t& value) {
 WorldSave::WorldSave(std::filesystem::path root)
     : root_(std::move(root))
     , chunks_directory_(root_ / "chunks") {
+    ensure_directory(root_, "save root");
+    ensure_directory(chunks_directory_, "chunk directory");
+    log_message(LogLevel::Info, "WorldSave: save root ready '" + path_to_utf8(root_) + "'");
 }
 
 const std::filesystem::path& WorldSave::root() const {
@@ -82,15 +113,8 @@ const std::filesystem::path& WorldSave::chunks_directory() const {
 }
 
 WorldMetadata WorldSave::load_or_create_metadata() {
-    std::error_code error;
-    std::filesystem::create_directories(root_, error);
-    if (error) {
-        log_message(LogLevel::Warning, "WorldSave: failed to create save root: " + error.message());
-    }
-    std::filesystem::create_directories(chunks_directory_, error);
-    if (error) {
-        log_message(LogLevel::Warning, "WorldSave: failed to create chunk directory: " + error.message());
-    }
+    ensure_directory(root_, "save root");
+    ensure_directory(chunks_directory_, "chunk directory");
 
     const std::filesystem::path metadata_path = root_ / "world.json";
     {
@@ -106,17 +130,21 @@ WorldMetadata WorldSave::load_or_create_metadata() {
     }
 
     const WorldSeed seed = random_world_seed();
+    std::error_code error;
     std::filesystem::remove_all(chunks_directory_, error);
     if (error) {
-        log_message(LogLevel::Warning, "WorldSave: failed to clear old chunk snapshots: " + error.message());
+        throw std::runtime_error("WorldSave: failed to clear old chunk snapshots: " + error.message());
     }
-    std::filesystem::create_directories(chunks_directory_, error);
-    if (error) {
-        log_message(LogLevel::Warning, "WorldSave: failed to recreate chunk directory: " + error.message());
-    }
+    ensure_directory(chunks_directory_, "chunk directory");
 
     std::ofstream output(metadata_path, std::ios::trunc);
+    if (!output) {
+        throw std::runtime_error("WorldSave: failed to open metadata for writing '" + path_to_utf8(metadata_path) + "'");
+    }
     output << "{\n  \"version\": 1,\n  \"worldSeed\": " << seed << "\n}\n";
+    if (!output) {
+        throw std::runtime_error("WorldSave: failed to write metadata '" + path_to_utf8(metadata_path) + "'");
+    }
     log_message(LogLevel::Info, "WorldSave: created worldSeed=" + std::to_string(seed));
     return {1, seed};
 }
@@ -169,8 +197,10 @@ bool WorldSave::save_chunk(ChunkCoord coord, const ChunkData& chunk) const {
         return false;
     }
 
-    std::ofstream output(chunk_path(coord), std::ios::binary | std::ios::trunc);
+    const std::filesystem::path path = chunk_path(coord);
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output) {
+        log_message(LogLevel::Warning, "WorldSave: failed to open chunk snapshot for writing '" + path_to_utf8(path) + "'");
         return false;
     }
 
@@ -196,7 +226,11 @@ bool WorldSave::save_chunk(ChunkCoord coord, const ChunkData& chunk) const {
         write_u32(output, value);
         write_u32(output, count);
     }
-    return static_cast<bool>(output);
+    const bool saved = static_cast<bool>(output);
+    if (!saved) {
+        log_message(LogLevel::Warning, "WorldSave: failed to finish chunk snapshot write '" + path_to_utf8(path) + "'");
+    }
+    return saved;
 }
 
 std::filesystem::path WorldSave::chunk_path(ChunkCoord coord) const {

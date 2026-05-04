@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <exception>
 #include <limits>
 #include <optional>
 #include <string>
@@ -562,8 +563,6 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads() {
             record_stale_upload_drop(upload.coord);
             continue;
         }
-        it->second.state = ChunkState::UploadedToGPU;
-        it->second.uploaded_to_gpu = true;
         uploads.push_back(std::move(upload));
     }
     pending_uploads_.clear();
@@ -607,8 +606,6 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
             ++consumed_count;
             continue;
         }
-        it->second.state = ChunkState::UploadedToGPU;
-        it->second.uploaded_to_gpu = true;
         uploads.push_back(std::move(pending));
         ++consumed_count;
     }
@@ -674,9 +671,6 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
         }
 
         selected_bytes += upload_bytes;
-        chunk_it->second.state = ChunkState::UploadedToGPU;
-        chunk_it->second.uploaded_to_gpu = true;
-
         uploads.push_back(std::move(pending));
 
         if (uploads.size() >= max_count) {
@@ -691,6 +685,26 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
     );
 
     return uploads;
+}
+
+bool WorldStreamer::confirm_chunk_uploaded(
+    ChunkCoord coord,
+    std::uint64_t version,
+    std::uint64_t rebuild_serial,
+    std::uint64_t upload_token
+) {
+    auto it = chunks_.find(coord);
+    if (it == chunks_.end() ||
+        it->second.generation_version != version ||
+        it->second.latest_rebuild_serial != rebuild_serial ||
+        it->second.latest_upload_token != upload_token) {
+        record_stale_upload_drop(coord);
+        return false;
+    }
+
+    it->second.state = ChunkState::UploadedToGPU;
+    it->second.uploaded_to_gpu = true;
+    return true;
 }
 
 std::vector<ChunkCoord> WorldStreamer::drain_pending_unloads() {
@@ -1348,36 +1362,55 @@ void WorldStreamer::worker_loop() {
         result.rebuild_serial = job.rebuild_serial;
         result.type = job.type;
 
-        if (job.type == ChunkJobType::GenerateTerrain) {
-            const auto start = std::chrono::steady_clock::now();
-            if (world_save_ != nullptr) {
-                result.chunk_data = world_save_->load_chunk(job.coord);
+        try {
+            if (job.type == ChunkJobType::GenerateTerrain) {
+                const auto start = std::chrono::steady_clock::now();
+                if (world_save_ != nullptr) {
+                    result.chunk_data = world_save_->load_chunk(job.coord);
+                }
+                if (!result.chunk_data.has_value()) {
+                    result.chunk_data = generator_.generate_chunk(job.coord, seed_);
+                }
+                const auto end = std::chrono::steady_clock::now();
+                result.generate_ms = std::chrono::duration<float, std::milli>(end - start).count();
+            } else if (job.type == ChunkJobType::Decorate) {
+                result.chunk_data = std::move(job.chunk_data);
+            } else if (job.type == ChunkJobType::CalculateLight) {
+                const auto start = std::chrono::steady_clock::now();
+                if (job.light_snapshot != nullptr) {
+                    ChunkLightResult light_result = calculate_chunk_light(*job.light_snapshot, block_registry_);
+                    result.provisional = light_result.provisional;
+                    result.borders_ready = light_result.borders_ready;
+                    result.border_signature = light_result.border_signature;
+                    result.light = std::move(light_result.light);
+                }
+                const auto end = std::chrono::steady_clock::now();
+                result.light_ms = std::chrono::duration<float, std::milli>(end - start).count();
+            } else if (job.snapshot != nullptr) {
+                const ChunkMeshSnapshot& snapshot = *job.snapshot;
+                const auto start = std::chrono::steady_clock::now();
+                result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), light_from_snapshot(snapshot), snapshot.leaves_mode);
+                result.provisional = snapshot.provisional;
+                const auto end = std::chrono::steady_clock::now();
+                result.mesh_ms = std::chrono::duration<float, std::milli>(end - start).count();
             }
-            if (!result.chunk_data.has_value()) {
-                result.chunk_data = generator_.generate_chunk(job.coord, seed_);
-            }
-            const auto end = std::chrono::steady_clock::now();
-            result.generate_ms = std::chrono::duration<float, std::milli>(end - start).count();
-        } else if (job.type == ChunkJobType::Decorate) {
-            result.chunk_data = std::move(job.chunk_data);
-        } else if (job.type == ChunkJobType::CalculateLight) {
-            const auto start = std::chrono::steady_clock::now();
-            if (job.light_snapshot != nullptr) {
-                ChunkLightResult light_result = calculate_chunk_light(*job.light_snapshot, block_registry_);
-                result.provisional = light_result.provisional;
-                result.borders_ready = light_result.borders_ready;
-                result.border_signature = light_result.border_signature;
-                result.light = std::move(light_result.light);
-            }
-            const auto end = std::chrono::steady_clock::now();
-            result.light_ms = std::chrono::duration<float, std::milli>(end - start).count();
-        } else if (job.snapshot != nullptr) {
-            const ChunkMeshSnapshot& snapshot = *job.snapshot;
-            const auto start = std::chrono::steady_clock::now();
-            result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), light_from_snapshot(snapshot), snapshot.leaves_mode);
-            result.provisional = snapshot.provisional;
-            const auto end = std::chrono::steady_clock::now();
-            result.mesh_ms = std::chrono::duration<float, std::milli>(end - start).count();
+        } catch (const std::exception& error) {
+            log_message(
+                LogLevel::Error,
+                std::string("WorldStreamer: worker job failed coord=(") +
+                    std::to_string(job.coord.x) + "," + std::to_string(job.coord.z) +
+                    ") type=" + std::to_string(static_cast<int>(job.type)) +
+                    " error=" + error.what()
+            );
+            continue;
+        } catch (...) {
+            log_message(
+                LogLevel::Error,
+                std::string("WorldStreamer: worker job failed with unknown exception coord=(") +
+                    std::to_string(job.coord.x) + "," + std::to_string(job.coord.z) +
+                    ") type=" + std::to_string(static_cast<int>(job.type))
+            );
+            continue;
         }
 
         {

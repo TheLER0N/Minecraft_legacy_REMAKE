@@ -1151,51 +1151,71 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
     frame_started_ = true;
 }
 
-void Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility) {
-    auto existing = chunk_buffers_.find(coord);
-    if (existing != chunk_buffers_.end()) {
-        defer_destroy_chunk_buffers(std::move(existing->second));
-        chunk_buffers_.erase(existing);
-    }
-
+bool Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility) {
     if (mesh.empty()) {
         log_message(LogLevel::Warning, "Renderer: chunk mesh is empty");
-        return;
+        return false;
     }
 
     ChunkRenderData render_data {};
     const auto opaque_sections = split_mesh_into_render_sections(mesh.opaque_mesh);
     const auto cutout_sections = split_mesh_into_render_sections(mesh.cutout_mesh);
     const auto transparent_sections = split_mesh_into_render_sections(mesh.transparent_mesh);
+
+    bool upload_ok = true;
     for (std::size_t section_index = 0; section_index < render_data.sections.size(); ++section_index) {
         RenderSection& section = render_data.sections[section_index];
-        upload_mesh_section(
+
+        upload_ok = upload_mesh_section(
             opaque_sections[section_index],
             section.opaque_vertex_buffer,
             section.opaque_index_buffer,
             section.opaque_index_count,
             section.opaque_vertex_count
-        );
-        upload_mesh_section(
+        ) && upload_ok;
+
+        upload_ok = upload_mesh_section(
             cutout_sections[section_index],
             section.cutout_vertex_buffer,
             section.cutout_index_buffer,
             section.cutout_index_count,
             section.cutout_vertex_count
-        );
-        upload_mesh_section(
+        ) && upload_ok;
+
+        upload_ok = upload_mesh_section(
             transparent_sections[section_index],
             section.transparent_vertex_buffer,
             section.transparent_index_buffer,
             section.transparent_index_count,
             section.transparent_vertex_count
-        );
+        ) && upload_ok;
+
         section.has_opaque_geometry = section.opaque_index_count > 0;
         section.has_geometry = section.has_opaque_geometry || section.cutout_index_count > 0 || section.transparent_index_count > 0;
         section.visibility = visibility.sections[section_index];
         section.visibility.has_geometry = section.has_geometry;
     }
-    chunk_buffers_[coord] = render_data;
+
+    if (!upload_ok) {
+        for (RenderSection& section : render_data.sections) {
+            destroy_render_section(section);
+        }
+        log_message(
+            LogLevel::Error,
+            std::string("Renderer: failed to upload chunk mesh coord=(") +
+                std::to_string(coord.x) + "," + std::to_string(coord.z) + ")"
+        );
+        return false;
+    }
+
+    auto existing = chunk_buffers_.find(coord);
+    if (existing != chunk_buffers_.end()) {
+        defer_destroy_chunk_buffers(std::move(existing->second));
+        chunk_buffers_.erase(existing);
+    }
+
+    chunk_buffers_[coord] = std::move(render_data);
+    return true;
 }
 
 void Renderer::draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button) {
@@ -2693,11 +2713,11 @@ void Renderer::destroy_deferred_chunk_buffers_immediate() {
     deferred_chunk_buffers_.clear();
 }
 
-void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count, std::uint32_t& vertex_count) {
+bool Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_buffer, GpuBuffer& index_buffer, std::uint32_t& index_count, std::uint32_t& vertex_count) {
     if (mesh.empty()) {
         index_count = 0;
         vertex_count = 0;
-        return;
+        return true;
     }
 
     const VkDeviceSize vertex_size = sizeof(Vertex) * mesh.vertices.size();
@@ -2714,17 +2734,45 @@ void Renderer::upload_mesh_section(const MeshSection& mesh, GpuBuffer& vertex_bu
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
 
+    if (vertex_buffer.buffer == VK_NULL_HANDLE || vertex_buffer.memory == VK_NULL_HANDLE ||
+        index_buffer.buffer == VK_NULL_HANDLE || index_buffer.memory == VK_NULL_HANDLE) {
+        log_message(LogLevel::Error, "Renderer: failed to allocate chunk mesh buffers");
+        destroy_buffer(vertex_buffer);
+        destroy_buffer(index_buffer);
+        index_count = 0;
+        vertex_count = 0;
+        return false;
+    }
+
     void* mapped = nullptr;
-    vkMapMemory(device_, vertex_buffer.memory, 0, vertex_size, 0, &mapped);
+    VkResult result = vkMapMemory(device_, vertex_buffer.memory, 0, vertex_size, 0, &mapped);
+    if (result != VK_SUCCESS || mapped == nullptr) {
+        log_message(LogLevel::Error, std::string("Renderer: vkMapMemory failed for vertex buffer result=") + vk_result_name(result));
+        destroy_buffer(vertex_buffer);
+        destroy_buffer(index_buffer);
+        index_count = 0;
+        vertex_count = 0;
+        return false;
+    }
     std::memcpy(mapped, mesh.vertices.data(), static_cast<std::size_t>(vertex_size));
     vkUnmapMemory(device_, vertex_buffer.memory);
 
-    vkMapMemory(device_, index_buffer.memory, 0, index_size, 0, &mapped);
+    mapped = nullptr;
+    result = vkMapMemory(device_, index_buffer.memory, 0, index_size, 0, &mapped);
+    if (result != VK_SUCCESS || mapped == nullptr) {
+        log_message(LogLevel::Error, std::string("Renderer: vkMapMemory failed for index buffer result=") + vk_result_name(result));
+        destroy_buffer(vertex_buffer);
+        destroy_buffer(index_buffer);
+        index_count = 0;
+        vertex_count = 0;
+        return false;
+    }
     std::memcpy(mapped, mesh.indices.data(), static_cast<std::size_t>(index_size));
     vkUnmapMemory(device_, index_buffer.memory);
 
     index_count = static_cast<std::uint32_t>(mesh.indices.size());
     vertex_count = static_cast<std::uint32_t>(mesh.vertices.size());
+    return true;
 }
 
 void Renderer::destroy_render_section(RenderSection& section) {
@@ -2786,11 +2834,21 @@ Renderer::GpuBuffer Renderer::create_buffer(VkDeviceSize size, VkBufferUsageFlag
     result.usage = usage;
     result.properties = properties;
 
+    if (size == 0) {
+        return result;
+    }
+
     VkBufferCreateInfo create_info {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     create_info.size = size;
     create_info.usage = usage;
     create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vkCreateBuffer(device_, &create_info, nullptr, &result.buffer);
+
+    VkResult vk_result = vkCreateBuffer(device_, &create_info, nullptr, &result.buffer);
+    if (vk_result != VK_SUCCESS || result.buffer == VK_NULL_HANDLE) {
+        log_message(LogLevel::Error, std::string("Renderer: vkCreateBuffer failed result=") + vk_result_name(vk_result));
+        result.buffer = VK_NULL_HANDLE;
+        return result;
+    }
 
     VkMemoryRequirements requirements {};
     vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
@@ -2798,8 +2856,24 @@ Renderer::GpuBuffer Renderer::create_buffer(VkDeviceSize size, VkBufferUsageFlag
     VkMemoryAllocateInfo alloc_info {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     alloc_info.allocationSize = requirements.size;
     alloc_info.memoryTypeIndex = find_memory_type(requirements.memoryTypeBits, properties);
-    vkAllocateMemory(device_, &alloc_info, nullptr, &result.memory);
-    vkBindBufferMemory(device_, result.buffer, result.memory, 0);
+
+    vk_result = vkAllocateMemory(device_, &alloc_info, nullptr, &result.memory);
+    if (vk_result != VK_SUCCESS || result.memory == VK_NULL_HANDLE) {
+        log_message(LogLevel::Error, std::string("Renderer: vkAllocateMemory failed result=") + vk_result_name(vk_result));
+        vkDestroyBuffer(device_, result.buffer, nullptr);
+        result.buffer = VK_NULL_HANDLE;
+        result.memory = VK_NULL_HANDLE;
+        result.size = 0;
+        return result;
+    }
+
+    vk_result = vkBindBufferMemory(device_, result.buffer, result.memory, 0);
+    if (vk_result != VK_SUCCESS) {
+        log_message(LogLevel::Error, std::string("Renderer: vkBindBufferMemory failed result=") + vk_result_name(vk_result));
+        destroy_buffer(result);
+        return {};
+    }
+
     return result;
 }
 
@@ -2827,6 +2901,12 @@ std::uint32_t Renderer::find_memory_type(std::uint32_t type_filter, VkMemoryProp
             return i;
         }
     }
+
+    log_message(
+        LogLevel::Error,
+        std::string("Renderer: no suitable Vulkan memory type, type_filter=") +
+            std::to_string(type_filter) + " properties=" + std::to_string(properties)
+    );
     return 0;
 }
 
