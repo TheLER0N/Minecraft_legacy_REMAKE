@@ -3,584 +3,1112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Туториал: поиск багов Android-версии через ADB bugreport</title>
+  <title>Android Crash Report Guide</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --panel: #111c33;
-      --panel-2: #17233d;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --accent: #60a5fa;
-      --accent-2: #22c55e;
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --code: #020617;
-      --border: rgba(148, 163, 184, 0.25);
+      --bg: #05070d;
+      --bg2: #0b1020;
+      --glass: rgba(255, 255, 255, .105);
+      --glass-strong: rgba(255, 255, 255, .15);
+      --glass-soft: rgba(255, 255, 255, .075);
+      --text: #f5f7fb;
+      --muted: rgba(245, 247, 251, .68);
+      --muted2: rgba(245, 247, 251, .48);
+      --line: rgba(255, 255, 255, .18);
+      --line-soft: rgba(255, 255, 255, .10);
+      --blue: #76a9ff;
+      --blue2: #3f8cff;
+      --cyan: #73e7ff;
+      --purple: #b891ff;
+      --green: #7ee6a4;
+      --yellow: #ffd166;
+      --red: #ff7a90;
+      --code-bg: rgba(4, 8, 18, .78);
+      --radius-xl: 36px;
+      --radius-lg: 26px;
+      --radius-md: 18px;
+      --blur: blur(26px) saturate(160%);
+      --shadow-glass: 0 24px 90px rgba(0, 0, 0, .36);
+      --shadow-soft: 0 14px 46px rgba(0, 0, 0, .24);
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Arial, sans-serif;
+      --mono: "SF Mono", "Cascadia Mono", Consolas, monospace;
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
-      font-family: "Segoe UI", Arial, sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), transparent 35%),
-        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.12), transparent 35%),
-        var(--bg);
+      min-height: 100vh;
+      font-family: var(--font);
       color: var(--text);
-      line-height: 1.6;
+      background:
+        radial-gradient(circle at 12% 4%, rgba(118, 169, 255, .26), transparent 32%),
+        radial-gradient(circle at 88% 12%, rgba(184, 145, 255, .20), transparent 30%),
+        radial-gradient(circle at 72% 78%, rgba(115, 231, 255, .13), transparent 32%),
+        linear-gradient(180deg, #070914 0%, #05070d 48%, #090d18 100%);
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overflow-x: hidden;
     }
 
-    header {
-      padding: 42px 24px 28px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(2, 6, 23, 0.55);
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      background-image:
+        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,.72), transparent 82%);
+      pointer-events: none;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: rgba(0, 0, 0, .16);
+      backdrop-filter: blur(0px);
+      pointer-events: none;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .orb {
+      position: fixed;
+      z-index: -1;
+      width: 420px;
+      height: 420px;
+      border-radius: 999px;
+      filter: blur(38px);
+      opacity: .48;
+      pointer-events: none;
+    }
+
+    .orb.one {
+      left: -160px;
+      top: 120px;
+      background: rgba(63, 140, 255, .42);
+    }
+
+    .orb.two {
+      right: -150px;
+      top: 250px;
+      background: rgba(184, 145, 255, .34);
+    }
+
+    .orb.three {
+      right: 14%;
+      bottom: -210px;
+      background: rgba(115, 231, 255, .22);
+    }
+
+    .nav-shell {
       position: sticky;
       top: 0;
-      backdrop-filter: blur(10px);
-      z-index: 10;
+      z-index: 20;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(8, 12, 24, .52);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
     }
 
-    .wrap {
-      max-width: 1120px;
+    .nav {
+      max-width: 1180px;
       margin: 0 auto;
+      min-height: 58px;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
     }
 
-    h1 {
-      margin: 0 0 12px;
-      font-size: clamp(30px, 4vw, 46px);
-      line-height: 1.1;
-      letter-spacing: -0.04em;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 750;
+      letter-spacing: -.01em;
+      white-space: nowrap;
     }
 
-    .subtitle {
-      color: var(--muted);
-      max-width: 820px;
-      font-size: 17px;
-      margin: 0;
-    }
-
-    main {
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 30px 24px 60px;
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      border-radius: 11px;
       display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 24px;
-    }
-
-    nav {
-      align-self: start;
-      position: sticky;
-      top: 132px;
-      background: rgba(17, 28, 51, 0.82);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 16px;
-    }
-
-    nav h2 {
-      font-size: 14px;
-      margin: 0 0 10px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    nav a {
-      display: block;
-      color: var(--text);
-      text-decoration: none;
-      padding: 8px 10px;
-      border-radius: 10px;
-      font-size: 14px;
-    }
-
-    nav a:hover {
-      background: var(--panel-2);
+      place-items: center;
       color: white;
-    }
-
-    section {
-      background: rgba(17, 28, 51, 0.88);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 24px;
-      margin-bottom: 22px;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.2);
-    }
-
-    h2 {
-      margin-top: 0;
-      font-size: 26px;
-      letter-spacing: -0.02em;
-    }
-
-    h3 {
-      margin-top: 26px;
-      font-size: 20px;
-    }
-
-    p, li {
-      color: #d1d5db;
-    }
-
-    .note {
-      border-left: 4px solid var(--accent);
-      background: rgba(96, 165, 250, 0.09);
-      padding: 14px 16px;
-      border-radius: 12px;
-      margin: 16px 0;
-    }
-
-    .warn {
-      border-left-color: var(--warn);
-      background: rgba(245, 158, 11, 0.11);
-    }
-
-    .danger {
-      border-left-color: var(--danger);
-      background: rgba(239, 68, 68, 0.11);
-    }
-
-    .ok {
-      border-left-color: var(--accent-2);
-      background: rgba(34, 197, 94, 0.1);
-    }
-
-    code {
-      font-family: Consolas, "Cascadia Mono", monospace;
-      color: #bfdbfe;
-    }
-
-    pre {
-      background: var(--code);
-      color: #dbeafe;
-      border: 1px solid rgba(96, 165, 250, 0.25);
-      border-radius: 16px;
-      padding: 16px;
-      overflow-x: auto;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.24), rgba(255,255,255,.05)),
+        linear-gradient(160deg, rgba(118,169,255,.82), rgba(184,145,255,.60));
+      border: 1px solid rgba(255,255,255,.28);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.38), 0 10px 26px rgba(63, 140, 255, .22);
       font-size: 14px;
-      line-height: 1.55;
-      white-space: pre-wrap;
-      word-break: break-word;
     }
 
-    .cmd {
+    .nav-links {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      transition: background .18s ease, color .18s ease, border-color .18s ease;
+      border: 1px solid transparent;
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, .10);
+      border-color: rgba(255, 255, 255, .14);
+    }
+
+    .glass {
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.17), rgba(255,255,255,.075)),
+        rgba(255,255,255,.06);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-glass);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+    }
+
+    .hero {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 78px 22px 34px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .hero-card {
+      min-height: 500px;
+      border-radius: var(--radius-xl);
+      padding: clamp(32px, 5vw, 60px);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
       position: relative;
     }
 
-    .cmd::before {
-      content: "PowerShell";
-      display: inline-block;
+    .hero-card::before {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      border-radius: calc(var(--radius-xl) - 1px);
+      background:
+        radial-gradient(circle at 80% 10%, rgba(118, 169, 255, .28), transparent 34%),
+        radial-gradient(circle at 8% 84%, rgba(184, 145, 255, .16), transparent 30%);
+      pointer-events: none;
+    }
+
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      right: -100px;
+      bottom: -140px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(115, 231, 255, .15), transparent 66%);
+      pointer-events: none;
+    }
+
+    .hero-text {
+      position: relative;
+      z-index: 1;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      padding: 8px 13px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .10);
+      color: var(--cyan);
+      border: 1px solid rgba(255,255,255,.16);
+      font-weight: 750;
+      font-size: 13px;
+      margin-bottom: 22px;
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.16);
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 800px;
+      font-size: clamp(42px, 7vw, 88px);
+      line-height: .94;
+      letter-spacing: -.075em;
+      font-weight: 850;
+    }
+
+    .gradient-text {
+      background: linear-gradient(90deg, #ffffff 0%, #dbeaff 42%, #b8f3ff 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero p {
+      max-width: 700px;
+      margin: 24px 0 0;
       color: var(--muted);
-      font-size: 12px;
+      font-size: clamp(18px, 2vw, 22px);
+      line-height: 1.45;
+      letter-spacing: -.015em;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 36px;
+    }
+
+    .btn {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 19px;
+      border-radius: 999px;
+      font-weight: 750;
+      font-size: 15px;
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+      border: 1px solid rgba(255,255,255,.18);
+    }
+
+    .btn-primary {
+      color: white;
+      background: linear-gradient(180deg, rgba(118,169,255,1), rgba(63,140,255,.86));
+      box-shadow: 0 14px 34px rgba(63, 140, 255, .28);
+    }
+
+    .btn-secondary {
+      color: var(--text);
+      background: rgba(255, 255, 255, .10);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255,255,255,.28);
+    }
+
+    .quick-card {
+      border-radius: var(--radius-xl);
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 22px;
+      min-height: 500px;
+    }
+
+    .quick-card h2 {
+      font-size: 31px;
+      line-height: 1.05;
+      margin: 0;
+      letter-spacing: -.05em;
+    }
+
+    .quick-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 12px;
+    }
+
+    .quick-list li {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 11px;
+      align-items: start;
+      color: rgba(245,247,251,.78);
+      font-size: 15px;
+      padding: 12px;
+      border-radius: 18px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.10);
+    }
+
+    .tick {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.22), rgba(255,255,255,.07)),
+        rgba(118,169,255,.18);
+      color: #dff4ff;
+      border: 1px solid rgba(255,255,255,.18);
+      font-weight: 850;
+      font-size: 13px;
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.18);
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 0 22px 80px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin: 16px 0 28px;
+    }
+
+    .stat {
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.13), rgba(255,255,255,.06));
+      border: 1px solid var(--line-soft);
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(20px) saturate(150%);
+      -webkit-backdrop-filter: blur(20px) saturate(150%);
+    }
+
+    .stat b {
+      display: block;
+      font-size: 44px;
+      line-height: .95;
+      letter-spacing: -.06em;
       margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    section {
+      margin-top: 18px;
+      padding: clamp(24px, 4vw, 42px);
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.12), rgba(255,255,255,.055));
+      border: 1px solid var(--line-soft);
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(22px) saturate(155%);
+      -webkit-backdrop-filter: blur(22px) saturate(155%);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: clamp(31px, 4vw, 50px);
+      line-height: 1;
+      letter-spacing: -.065em;
+      font-weight: 850;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 21px;
+      line-height: 1.15;
+      letter-spacing: -.035em;
+    }
+
+    p, li {
+      color: rgba(245,247,251,.74);
+      font-size: 16px;
+    }
+
+    code {
+      font-family: var(--mono);
+      color: #cfe8ff;
+      background: rgba(118,169,255,.12);
+      border: 1px solid rgba(118,169,255,.16);
+      padding: 1px 5px;
+      border-radius: 7px;
+      font-size: .94em;
+    }
+
+    .steps {
+      counter-reset: step;
+      display: grid;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .step {
+      counter-increment: step;
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 18px;
+      border-radius: 24px;
+      background: rgba(255,255,255,.065);
+      border: 1px solid rgba(255,255,255,.10);
+    }
+
+    .step::before {
+      content: counter(step);
+      width: 54px;
+      height: 54px;
+      border-radius: 19px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      font-weight: 850;
+      color: white;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.26), rgba(255,255,255,.07)),
+        linear-gradient(160deg, rgba(118,169,255,.92), rgba(184,145,255,.68));
+      border: 1px solid rgba(255,255,255,.20);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.25), 0 10px 25px rgba(63, 140, 255, .18);
+    }
+
+    .step h3 {
+      margin-top: 0;
+    }
+
+    .cmd-card {
+      margin: 14px 0;
+      border-radius: 22px;
+      overflow: hidden;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.025)),
+        var(--code-bg);
+      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 16px 42px rgba(0,0,0,.28);
+    }
+
+    .cmd-head {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 12px 8px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.055);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .cmd-title {
+      color: rgba(245,247,251,.66);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: .08em;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+    }
+
+    button.copy {
+      border: 1px solid rgba(255,255,255,.15);
+      color: white;
+      background: rgba(255,255,255,.10);
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-weight: 750;
+      font-size: 13px;
+      transition: background .18s ease, transform .18s ease, border-color .18s ease;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    button.copy:hover {
+      background: rgba(255,255,255,.16);
+      border-color: rgba(255,255,255,.25);
+      transform: translateY(-1px);
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #e8f0ff;
+      font-family: var(--mono);
+      font-size: 14px;
+      line-height: 1.58;
+    }
+
+    pre code {
+      color: inherit;
+      background: transparent;
+      border: 0;
+      padding: 0;
+      border-radius: 0;
+      font-size: inherit;
+    }
+
+    .note {
+      margin: 18px 0;
+      padding: 16px 18px;
+      border-radius: 22px;
+      background: rgba(118,169,255,.11);
+      color: rgba(232,244,255,.86);
+      border: 1px solid rgba(118,169,255,.18);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.08);
+    }
+
+    .note strong {
+      color: #ffffff;
+    }
+
+    .note.warn {
+      background: rgba(255, 209, 102, .11);
+      color: rgba(255, 241, 202, .92);
+      border-color: rgba(255, 209, 102, .20);
+    }
+
+    .note.danger {
+      background: rgba(255, 122, 144, .11);
+      color: rgba(255, 226, 231, .92);
+      border-color: rgba(255, 122, 144, .22);
+    }
+
+    .note.ok {
+      background: rgba(126, 230, 164, .11);
+      color: rgba(224, 255, 235, .92);
+      border-color: rgba(126, 230, 164, .20);
+    }
+
+    .type-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .type-card {
+      min-height: 174px;
+      padding: 22px;
+      border-radius: var(--radius-lg);
+      background: rgba(255,255,255,.065);
+      border: 1px solid rgba(255,255,255,.10);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.06);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 850;
+      margin-bottom: 14px;
+      letter-spacing: -.005em;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+
+    .tag.red {
+      color: #ffdce3;
+      background: rgba(255, 122, 144, .16);
+    }
+
+    .tag.yellow {
+      color: #fff2cf;
+      background: rgba(255, 209, 102, .15);
+    }
+
+    .tag.blue {
+      color: #ddecff;
+      background: rgba(118, 169, 255, .16);
+    }
+
+    .tag.green {
+      color: #e1ffeb;
+      background: rgba(126, 230, 164, .15);
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
       overflow: hidden;
-      border-radius: 16px;
-      border: 1px solid var(--border);
-      margin: 16px 0;
-      background: rgba(2, 6, 23, 0.35);
+      border-radius: 22px;
+      background: rgba(255,255,255,.055);
+      border: 1px solid rgba(255,255,255,.10);
+      margin-top: 18px;
     }
 
     th, td {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
+      padding: 16px;
       text-align: left;
       vertical-align: top;
+      border-bottom: 1px solid rgba(255,255,255,.09);
+      color: rgba(245,247,251,.74);
+      font-size: 15px;
     }
 
     th {
-      color: white;
-      background: rgba(96, 165, 250, 0.14);
+      color: #ffffff;
+      background: rgba(255,255,255,.08);
+      font-weight: 850;
     }
 
     tr:last-child td {
-      border-bottom: none;
+      border-bottom: 0;
     }
 
-    .step {
-      display: grid;
-      grid-template-columns: 42px 1fr;
-      gap: 14px;
-      align-items: start;
-      margin: 16px 0;
-    }
-
-    .num {
-      width: 42px;
-      height: 42px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, var(--accent), #2563eb);
-      color: white;
-      font-weight: 700;
-      display: grid;
-      place-items: center;
-    }
-
-    .badge {
-      display: inline-block;
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 13px;
-      margin: 3px;
-      background: rgba(2, 6, 23, 0.35);
-    }
-
-    footer {
-      color: var(--muted);
+    .footer {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 34px 22px 50px;
+      color: var(--muted2);
+      font-size: 14px;
       text-align: center;
-      padding: 28px 24px 40px;
-      border-top: 1px solid var(--border);
     }
 
-    @media (max-width: 900px) {
-      main {
+    @media (max-width: 920px) {
+      .hero-grid {
         grid-template-columns: 1fr;
       }
 
-      nav {
-        position: static;
+      .hero-card,
+      .quick-card {
+        min-height: auto;
       }
 
-      header {
-        position: static;
+      .stats,
+      .type-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .nav-links {
+        display: none;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .hero {
+        padding-top: 48px;
+      }
+
+      .hero-card,
+      .quick-card,
+      section {
+        border-radius: 24px;
+      }
+
+      .step {
+        grid-template-columns: 1fr;
+      }
+
+      .step::before {
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+      }
+
+      th, td {
+        display: block;
+        width: 100%;
+      }
+
+      th {
+        display: none;
+      }
+
+      td {
+        border-bottom: 1px solid rgba(255,255,255,.09);
       }
     }
   </style>
 </head>
+
 <body>
-<header>
-  <div class="wrap">
-    <h1>Поиск багов Android-версии через ADB bugreport</h1>
-    <p class="subtitle">
-      Туториал для проекта <strong>Minecraft Legacy Remake</strong>: как правильно снять <code>bugreport.zip</code>,
-      найти native crash, Java crash, ANR, ошибки Vulkan/SDL и понять, какой файл в C++ нужно исправлять.
-    </p>
-  </div>
-</header>
+  <div class="orb one"></div>
+  <div class="orb two"></div>
+  <div class="orb three"></div>
 
-<main>
-  <nav>
-    <h2>Навигация</h2>
-    <a href="#goal">1. Цель</a>
-    <a href="#setup">2. Подготовка</a>
-    <a href="#capture">3. Снятие bugreport</a>
-    <a href="#unpack">4. Распаковка</a>
-    <a href="#search">5. Поиск ошибок</a>
-    <a href="#classify">6. Классификация</a>
-    <a href="#example">7. Пример из проекта</a>
-    <a href="#logs">8. Внутренние логи игры</a>
-    <a href="#cycle">9. Рабочий цикл</a>
-    <a href="#checklist">10. Чек-лист</a>
-  </nav>
-
-  <div>
-    <section id="goal">
-      <h2>1. Цель</h2>
-      <p>
-        <code>bugreport.zip</code> нужен, когда обычный <code>logcat</code> пустой, игра закрывается без сообщения,
-        падает в native-коде или зависает после входа в мир.
-      </p>
-      <div class="note">
-        Для твоего случая главный сценарий: <strong>запустить игру → зайти в мир → дождаться краша → сразу снять bugreport</strong>.
-        Если снять bugreport до воспроизведения бага, нужных строк там может не быть.
+  <div class="nav-shell">
+    <div class="nav">
+      <div class="brand">
+        <div class="brand-mark">⌁</div>
+        <span>Crash Report Guide</span>
       </div>
-    </section>
+      <div class="nav-links">
+        <a href="#capture">Снять отчёт</a>
+        <a href="#search">Поиск</a>
+        <a href="#types">Типы ошибок</a>
+        <a href="#fixflow">Исправление</a>
+        <a href="#checklist">Чек-лист</a>
+      </div>
+    </div>
+  </div>
 
-    <section id="setup">
-      <h2>2. Подготовка PowerShell</h2>
-      <p>Задай переменные один раз в начале работы:</p>
-      <pre class="cmd"><code>$adb = "C:\Users\Пользователь\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+  <header class="hero" id="start">
+    <div class="hero-grid">
+      <section class="hero-card glass">
+        <div class="hero-text">
+          <div class="eyebrow">Minecraft Legacy Remake · Android</div>
+          <h1><span class="gradient-text">Найди причину краша</span> без лишнего шума.</h1>
+          <p>
+            Короткая инструкция по <code>bugreport.zip</code>: снять отчёт после падения,
+            найти <code>SIGABRT</code>, <code>SIGSEGV</code>, <code>VK_ERROR</code>, <code>ANR</code>
+            и понять, какой файл проекта исправлять.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#capture">Начать</a>
+            <a class="btn btn-secondary" href="#example">Посмотреть пример</a>
+          </div>
+        </div>
+      </section>
+
+      <aside class="quick-card glass">
+        <div>
+          <h2>Короткое правило</h2>
+        </div>
+        <ul class="quick-list">
+          <li><span class="tick">1</span><span>Очисти старые логи.</span></li>
+          <li><span class="tick">2</span><span>Запусти игру и повтори краш.</span></li>
+          <li><span class="tick">3</span><span>Сразу после краша сними <code>bugreport.zip</code>.</span></li>
+          <li><span class="tick">4</span><span>Ищи <code>com.minecraftlegacy.app</code> и <code>libmain.so</code>.</span></li>
+        </ul>
+        <div class="note ok">
+          Минимально достаточно одного файла: <strong>bugreport.zip</strong>.
+        </div>
+      </aside>
+    </div>
+  </header>
+
+  <main>
+    <div class="stats">
+      <div class="stat">
+        <b>1</b>
+        <span>главная команда для отчёта</span>
+      </div>
+      <div class="stat">
+        <b>5</b>
+        <span>ключевых слов для поиска</span>
+      </div>
+      <div class="stat">
+        <b>10 мин</b>
+        <span>на первичный разбор краша</span>
+      </div>
+    </div>
+
+    <section id="prepare">
+      <h2>1. Подготовь PowerShell</h2>
+      <p>Сначала задай переменные. Так команды будут короче и без ошибок в путях.</p>
+
+      <div class="cmd-card">
+        <div class="cmd-head">
+          <span class="cmd-title">PowerShell</span>
+          <button class="copy" onclick="copyCode(this)">Копировать</button>
+        </div>
+        <pre><code>$adb = "C:\Users\Пользователь\AppData\Local\Android\Sdk\platform-tools\adb.exe"
 $device = "PDNP05J000057115"
 $folder = "C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2"
-$bugreport = "$folder\bugreport.zip"
-$out = "$folder\android_crash_logcat.txt"</code></pre>
+$bugreport = "$folder\bugreport.zip"</code></pre>
+      </div>
 
-      <p>Проверь, что телефон виден:</p>
-      <pre class="cmd"><code>& $adb -s $device devices</code></pre>
+      <div class="cmd-card">
+        <div class="cmd-head">
+          <span class="cmd-title">Проверить телефон</span>
+          <button class="copy" onclick="copyCode(this)">Копировать</button>
+        </div>
+        <pre><code>& $adb -s $device devices</code></pre>
+      </div>
 
-      <p>Нормальный результат:</p>
-      <pre><code>PDNP05J000057115    device</code></pre>
-
-      <div class="warn note">
-        Если есть <code>emulator-5554 offline</code>, это не страшно. Просто всегда используй <code>-s PDNP05J000057115</code>.
+      <div class="note">
+        Если рядом есть <code>emulator-5554 offline</code>, ничего страшного. Главное — всегда использовать <code>-s $device</code>.
       </div>
     </section>
 
     <section id="capture">
-      <h2>3. Как правильно снять bugreport</h2>
+      <h2>2. Сними bugreport правильно</h2>
 
-      <div class="step">
-        <div class="num">1</div>
-        <div>
-          <h3>Очисти старые логи</h3>
-          <pre class="cmd"><code>& $adb -s $device logcat -b all -c</code></pre>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <h3>Очисти старые логи</h3>
+            <p>Так отчёт будет чище.</p>
+            <div class="cmd-card">
+              <div class="cmd-head">
+                <span class="cmd-title">Очистка логов</span>
+                <button class="copy" onclick="copyCode(this)">Копировать</button>
+              </div>
+              <pre><code>& $adb -s $device logcat -b all -c</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div>
+            <h3>Запусти игру</h3>
+            <p>Можно вручную с телефона или командой ниже.</p>
+            <div class="cmd-card">
+              <div class="cmd-head">
+                <span class="cmd-title">Запуск приложения</span>
+                <button class="copy" onclick="copyCode(this)">Копировать</button>
+              </div>
+              <pre><code>& $adb -s $device shell monkey -p com.minecraftlegacy.app -c android.intent.category.LAUNCHER 1</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div>
+            <h3>Повтори баг</h3>
+            <p>Зайди в мир и дождись краша, зависания или чёрного экрана.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div>
+            <h3>Сразу создай отчёт</h3>
+            <p>Команду запускай только после того, как баг уже произошёл.</p>
+            <div class="cmd-card">
+              <div class="cmd-head">
+                <span class="cmd-title">Создать bugreport.zip</span>
+                <button class="copy" onclick="copyCode(this)">Копировать</button>
+              </div>
+              <pre><code>& $adb -s $device bugreport "C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\bugreport.zip"</code></pre>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="step">
-        <div class="num">2</div>
-        <div>
-          <h3>Запусти игру</h3>
-          <p>Можно вручную на телефоне или командой:</p>
-          <pre class="cmd"><code>& $adb -s $device shell monkey -p com.minecraftlegacy.app -c android.intent.category.LAUNCHER 1</code></pre>
-        </div>
+      <div class="note danger">
+        Не делай так: <code>logcat -c → bugreport</code> без запуска игры. Отчёт будет почти пустой по нужной ошибке.
       </div>
-
-      <div class="step">
-        <div class="num">3</div>
-        <div>
-          <h3>Повтори баг</h3>
-          <p>На телефоне зайди в мир, дождись краша, зависания или неправильного поведения.</p>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="num">4</div>
-        <div>
-          <h3>Сразу сними bugreport</h3>
-          <pre class="cmd"><code>& $adb -s $device bugreport "C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\bugreport.zip"</code></pre>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="num">5</div>
-        <div>
-          <h3>Проверь файл</h3>
-          <pre class="cmd"><code>Get-Item $bugreport</code></pre>
-        </div>
-      </div>
-
-      <div class="danger note">
-        Не делай так: <code>logcat -c → bugreport</code> без запуска игры. Тогда отчёт будет почти бесполезным.
-      </div>
-    </section>
-
-    <section id="unpack">
-      <h2>4. Распаковка bugreport.zip</h2>
-      <p>Распакуй отчёт в отдельную папку:</p>
-      <pre class="cmd"><code>$extract = "$folder\bugreport_unpack"
-Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
-Expand-Archive $bugreport -DestinationPath $extract</code></pre>
-
-      <p>Проверь, что появились файлы:</p>
-      <pre class="cmd"><code>Get-ChildItem $extract -Recurse -File | Select-Object -First 30</code></pre>
     </section>
 
     <section id="search">
-      <h2>5. Быстрый поиск ошибок</h2>
-      <p>Главная команда поиска:</p>
-      <pre class="cmd"><code>Get-ChildItem "$folder\bugreport_unpack" -Recurse -File |
-  Select-String -Pattern "com.minecraftlegacy.app","libmain.so","SIGSEGV","SIGABRT","FATAL EXCEPTION","VK_ERROR","Vulkan","SDL","assert","ANR","tombstone" -ErrorAction SilentlyContinue</code></pre>
+      <h2>3. Распакуй и найди ошибку</h2>
 
-      <p>Если вывод слишком большой, сохрани результат в файл:</p>
-      <pre class="cmd"><code>Get-ChildItem "$folder\bugreport_unpack" -Recurse -File |
+      <h3>Распаковка</h3>
+      <div class="cmd-card">
+        <div class="cmd-head">
+          <span class="cmd-title">Expand-Archive</span>
+          <button class="copy" onclick="copyCode(this)">Копировать</button>
+        </div>
+        <pre><code>$extract = "$folder\bugreport_unpack"
+Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive $bugreport -DestinationPath $extract</code></pre>
+      </div>
+
+      <h3>Главный поиск</h3>
+      <div class="cmd-card">
+        <div class="cmd-head">
+          <span class="cmd-title">Поиск crash-строк</span>
+          <button class="copy" onclick="copyCode(this)">Копировать</button>
+        </div>
+        <pre><code>Get-ChildItem $extract -Recurse -File |
+  Select-String -Pattern "com.minecraftlegacy.app","libmain.so","SIGSEGV","SIGABRT","FATAL EXCEPTION","VK_ERROR","Vulkan","SDL","assert","ANR","tombstone" -ErrorAction SilentlyContinue</code></pre>
+      </div>
+
+      <h3>Сохранить результат</h3>
+      <div class="cmd-card">
+        <div class="cmd-head">
+          <span class="cmd-title">bugreport_search_result.txt</span>
+          <button class="copy" onclick="copyCode(this)">Копировать</button>
+        </div>
+        <pre><code>Get-ChildItem $extract -Recurse -File |
   Select-String -Pattern "com.minecraftlegacy.app","libmain.so","SIGSEGV","SIGABRT","FATAL EXCEPTION","VK_ERROR","Vulkan","SDL","assert","ANR","tombstone" -ErrorAction SilentlyContinue |
   Out-File "$folder\bugreport_search_result.txt" -Encoding UTF8</code></pre>
-
-      <p>Отдельные быстрые проверки:</p>
-      <pre class="cmd"><code># Native crash
-Get-ChildItem $extract -Recurse -File | Select-String -Pattern "SIGSEGV","SIGABRT","libmain.so","tombstone" -ErrorAction SilentlyContinue
-
-# Java crash
-Get-ChildItem $extract -Recurse -File | Select-String -Pattern "FATAL EXCEPTION","AndroidRuntime","MainActivity" -ErrorAction SilentlyContinue
-
-# Vulkan / SDL
-Get-ChildItem $extract -Recurse -File | Select-String -Pattern "VK_ERROR","Vulkan","SDL_Vulkan","SDL" -ErrorAction SilentlyContinue
-
-# Зависания
-Get-ChildItem $extract -Recurse -File | Select-String -Pattern "ANR","Input dispatching timed out","not responding" -ErrorAction SilentlyContinue</code></pre>
+      </div>
     </section>
 
-    <section id="classify">
-      <h2>6. Как понимать тип ошибки</h2>
+    <section id="types">
+      <h2>4. Как понять тип ошибки</h2>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Признак</th>
-            <th>Тип бага</th>
-            <th>Где искать в коде</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>SIGABRT</code>, <code>assertion failed</code></td>
-            <td>Код сам аварийно завершил игру</td>
-            <td><code>assert(...)</code>, <code>abort()</code>, <code>std::terminate()</code></td>
-          </tr>
-          <tr>
-            <td><code>SIGSEGV</code></td>
-            <td>Неправильное обращение к памяти</td>
-            <td>C++ указатели, массивы, Vulkan/SDL handles, потоки</td>
-          </tr>
-          <tr>
-            <td><code>FATAL EXCEPTION</code></td>
-            <td>Java/Kotlin crash</td>
-            <td><code>MainActivity.java</code>, <code>AndroidManifest.xml</code>, SDLActivity</td>
-          </tr>
-          <tr>
-            <td><code>ANR</code></td>
-            <td>Игра зависла</td>
-            <td>Главный поток, генерация чанков, бесконечный цикл, тяжёлая загрузка</td>
-          </tr>
-          <tr>
-            <td><code>VK_ERROR</code>, <code>VK_ERROR_DEVICE_LOST</code></td>
-            <td>Проблема Vulkan/GPU</td>
-            <td><code>renderer.cpp</code>, создание surface, swapchain, buffer, memory</td>
-          </tr>
-          <tr>
-            <td><code>libmain.so</code></td>
-            <td>Падение в C++ части игры</td>
-            <td><code>src/</code>: renderer, world streamer, generator, save</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="type-grid">
+        <div class="type-card">
+          <div class="tag red">SIGABRT</div>
+          <p><strong>Код сам остановил игру.</strong> Обычно это <code>assert()</code>, <code>abort()</code> или <code>std::terminate()</code>.</p>
+          <p>Главная строка: <code>Abort message</code>.</p>
+        </div>
 
-      <div class="note ok">
-        Если видишь <code>libmain.so</code> и рядом имя функции, это самое полезное место. Оно обычно показывает реальный C++ файл и цепочку вызовов.
+        <div class="type-card">
+          <div class="tag red">SIGSEGV</div>
+          <p><strong>Ошибка памяти.</strong> Часто это неверный указатель, выход за массив или сломанный Vulkan/SDL handle.</p>
+          <p>Ищи стек с <code>libmain.so</code>.</p>
+        </div>
+
+        <div class="type-card">
+          <div class="tag yellow">VK_ERROR</div>
+          <p><strong>Проблема Vulkan/GPU.</strong> Смотри создание surface, swapchain, buffer и memory.</p>
+          <p>Главный файл: <code>renderer.cpp</code>.</p>
+        </div>
+
+        <div class="type-card">
+          <div class="tag blue">FATAL EXCEPTION</div>
+          <p><strong>Java crash.</strong> Чаще всего проблема в <code>MainActivity.java</code>, <code>AndroidManifest.xml</code> или SDLActivity.</p>
+        </div>
+
+        <div class="type-card">
+          <div class="tag yellow">ANR</div>
+          <p><strong>Зависание.</strong> Игра долго не отвечает. Возможна тяжёлая генерация чанков или бесконечный цикл.</p>
+        </div>
+
+        <div class="type-card">
+          <div class="tag green">libmain.so</div>
+          <p><strong>Падение в C++.</strong> Самый полезный признак: по стеку можно найти файл и функцию проекта.</p>
+        </div>
       </div>
     </section>
 
     <section id="example">
-      <h2>7. Пример из твоего проекта</h2>
-      <p>В одном из отчётов был найден такой тип ошибки:</p>
-      <pre><code>Cmdline: com.minecraftlegacy.app
+      <h2>5. Пример из твоего краша</h2>
+      <p>В одном из отчётов был найден такой tombstone:</p>
+
+      <div class="cmd-card">
+        <div class="cmd-head">
+          <span class="cmd-title">Tombstone</span>
+          <button class="copy" onclick="copyCode(this)">Копировать</button>
+        </div>
+        <pre><code>Cmdline: com.minecraftlegacy.app
 name: SDLThread
 signal 6 (SIGABRT)
+
 Abort message:
 src/game/world_generator.cpp:1367:
 run_mesh_builder_self_check(...):
-assertion "seam_neighbor_mesh_faces == 5" failed</code></pre>
+assertion "seam_neighbor_mesh_faces == 5" failed
 
-      <p>Цепочка:</p>
-      <pre><code>run_mesh_builder_self_check()
+Stack:
+run_mesh_builder_self_check()
 ml::build_chunk_mesh(...)
 ml::WorldStreamer::worker_loop()</code></pre>
+      </div>
 
-      <h3>Расшифровка</h3>
-      <p>
-        Это означает, что игра не упала случайно. Её остановил <code>assert</code> внутри проверки mesh builder-а.
-        Такой баг не ловится обычным <code>try/catch</code>, потому что <code>assert</code> вызывает <code>abort()</code>.
-      </p>
-
-      <h3>Что делать</h3>
-      <pre><code>// Было:
-assert(seam_neighbor_mesh_faces == 5);
-
-// Лучше для Android runtime:
-if (seam_neighbor_mesh_faces != 5) {
-    log_message(
-        LogLevel::Warning,
-        std::string("MeshBuilder self-check failed: seam_neighbor_mesh_faces=") +
-        std::to_string(seam_neighbor_mesh_faces) +
-        ", expected=5"
-    );
-    return;
-}</code></pre>
-
-      <div class="warn note">
-        Самопроверки можно оставлять для debug-тестов, но нельзя давать им убивать Android-игру в runtime.
+      <div class="note warn">
+        Вывод: это не ADB и не Java. Игру остановил <code>assert</code> в C++ mesh builder-е.
       </div>
     </section>
 
-    <section id="logs">
-      <h2>8. Внутренние логи игры</h2>
-      <p>Если установлен патч с логгером, попробуй найти файлы внутри приложения:</p>
-      <pre class="cmd"><code>& $adb -s $device shell run-as com.minecraftlegacy.app find . -type f</code></pre>
-
-      <p>Если увидишь <code>latest.log</code> или <code>native_crash.log</code>, вытащи их:</p>
-      <pre class="cmd"><code>& $adb -s $device shell run-as com.minecraftlegacy.app cat ./files/logs/latest.log > "$folder\latest.log"
-& $adb -s $device shell run-as com.minecraftlegacy.app cat ./files/logs/native_crash.log > "$folder\native_crash.log"</code></pre>
-
-      <div class="warn note">
-        Если <code>run-as</code> пишет <code>package not debuggable</code>, значит APK собран не как debug. Переключи Build Variant на <strong>debug</strong>.
-      </div>
-    </section>
-
-    <section id="cycle">
-      <h2>9. Рабочий цикл поиска багов</h2>
-      <ol>
-        <li>Очистить логи: <code>logcat -b all -c</code>.</li>
-        <li>Запустить игру.</li>
-        <li>Повторить баг.</li>
-        <li>Снять <code>bugreport.zip</code>.</li>
-        <li>Распаковать отчёт.</li>
-        <li>Найти <code>SIGSEGV</code>, <code>SIGABRT</code>, <code>FATAL EXCEPTION</code>, <code>ANR</code>, <code>VK_ERROR</code>.</li>
-        <li>Определить файл и функцию.</li>
-        <li>Исправить только это место.</li>
-        <li>Пересобрать APK.</li>
-        <li>Повторить тест.</li>
-      </ol>
-
-      <div class="note">
-        Для каждого бага сохраняй отдельный архив: <code>bugreport_01.zip</code>, <code>bugreport_02.zip</code>, <code>bugreport_after_fix.zip</code>.
-        Так проще сравнивать прогресс.
-      </div>
-    </section>
-
-    <section id="checklist">
-      <h2>10. Чек-лист перед отправкой бага</h2>
-
-      <p>После каждого краша запиши:</p>
+    <section id="fixflow">
+      <h2>6. Цикл исправления</h2>
       <table>
         <thead>
           <tr>
-            <th>Поле</th>
-            <th>Пример</th>
+            <th>Шаг</th>
+            <th>Что сделать</th>
+            <th>Что получаешь</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Что делал перед багом</td>
-            <td>Запустил игру → нажал Play → началась загрузка мира</td>
+            <td>1</td>
+            <td>Снять <code>bugreport.zip</code> после краша</td>
+            <td>Сырой отчёт Android</td>
           </tr>
           <tr>
-            <td>Когда упало</td>
-            <td>Через 1–3 секунды после входа в мир</td>
+            <td>2</td>
+            <td>Найти <code>SIGABRT</code>, <code>SIGSEGV</code>, <code>VK_ERROR</code> или <code>ANR</code></td>
+            <td>Тип ошибки</td>
           </tr>
           <tr>
-            <td>Тип падения</td>
-            <td><code>SIGABRT</code> / <code>SIGSEGV</code> / <code>FATAL EXCEPTION</code> / <code>ANR</code></td>
+            <td>3</td>
+            <td>Найти файл и функцию в стеке</td>
+            <td>Например: <code>world_generator.cpp</code></td>
           </tr>
           <tr>
-            <td>Файл из стека</td>
-            <td><code>world_generator.cpp</code>, <code>renderer.cpp</code>, <code>platform_app.cpp</code></td>
+            <td>4</td>
+            <td>Исправить только это место</td>
+            <td>Меньше риска сломать проект</td>
           </tr>
           <tr>
-            <td>Функция</td>
-            <td><code>build_chunk_mesh()</code>, <code>create_surface()</code>, <code>upload_chunk_mesh()</code></td>
+            <td>5</td>
+            <td>Пересобрать APK и повторить тест</td>
+            <td>Проверка исправления</td>
           </tr>
         </tbody>
       </table>
+    </section>
 
-      <p>Минимальный набор файлов, который надо сохранить:</p>
-      <div>
-        <span class="badge">bugreport.zip</span>
-        <span class="badge">bugreport_search_result.txt</span>
-        <span class="badge">latest.log</span>
-        <span class="badge">native_crash.log</span>
-        <span class="badge">что нажал перед крашем</span>
+    <section id="checklist">
+      <h2>7. Что сохранять после каждого бага</h2>
+
+      <div class="type-grid">
+        <div class="type-card">
+          <div class="tag green">Обязательно</div>
+          <ul>
+            <li><code>bugreport.zip</code></li>
+            <li>что нажал перед крашем</li>
+            <li>когда упало: сразу или через несколько секунд</li>
+          </ul>
+        </div>
+
+        <div class="type-card">
+          <div class="tag blue">Желательно</div>
+          <ul>
+            <li><code>bugreport_search_result.txt</code></li>
+            <li><code>latest.log</code></li>
+            <li><code>native_crash.log</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="note ok">
+        Минимально можешь прислать только <code>bugreport.zip</code>. Обычно его хватает для поиска причины.
       </div>
     </section>
-  </div>
-</main>
+  </main>
 
-<footer>
-  Туториал подготовлен для Android-отладки проекта Minecraft Legacy Remake через ADB bugreport.
-</footer>
+  <footer class="footer">
+    Glass-style HTML-туториал для отладки Android-версии Minecraft Legacy Remake через ADB bugreport.
+  </footer>
+
+  <script>
+    function copyCode(button) {
+      const card = button.closest(".cmd-card");
+      const code = card.querySelector("code").innerText;
+
+      if (!navigator.clipboard) {
+        const area = document.createElement("textarea");
+        area.value = code;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        document.body.removeChild(area);
+        showCopied(button);
+        return;
+      }
+
+      navigator.clipboard.writeText(code).then(() => showCopied(button));
+    }
+
+    function showCopied(button) {
+      const old = button.innerText;
+      button.innerText = "Скопировано";
+      setTimeout(() => button.innerText = old, 1300);
+    }
+  </script>
 </body>
 </html>
