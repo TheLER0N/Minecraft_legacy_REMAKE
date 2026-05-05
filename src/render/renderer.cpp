@@ -4131,7 +4131,7 @@ bool Renderer::load_menu_textures() {
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("panorama/panorama_tu69_night.png"), false, false, menu_panorama_night_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("button/button.png"), false, true, menu_button_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("button/button_highlighted.png"), false, true, menu_button_highlighted_) &&
-        load_menu_texture(asset_pack_resolver().resolve_file_utf8("sound/ui/logo/legacy_console_edition_logo.png.png"), false, true, menu_logo_) &&
+        load_menu_texture(asset_pack_resolver().resolve_file_utf8("logo/legacy_console_edition_logo.png.png"), false, true, menu_logo_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("photo/pic.png"), false, false, startup_pic_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("photo/mojang.png"), false, false, startup_mojang_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("photo/KING.png"), false, false, startup_king_);
