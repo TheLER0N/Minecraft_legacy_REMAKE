@@ -30,7 +30,7 @@ constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 constexpr std::size_t kChunkUploadByteBudgetPerFrame = 512ull * 1024ull;
 constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 512ull * 1024ull;
 constexpr std::size_t kChunkUploadMaxCountPerFrame = 1;
-constexpr int kInitialChunkRadius = 3;
+constexpr int kInitialChunkRadius = 8;
 #else
 constexpr std::size_t kChunkUploadByteBudgetPerFrame = 2ull * 1024ull * 1024ull;
 constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 2ull * 1024ull * 1024ull;
@@ -193,9 +193,7 @@ bool Application::initialize() {
     }
     player_.set_body_position({32.0f, 100.0f, 80.0f});
     player_.set_view_from_forward(camera_.forward());
-#ifndef __ANDROID__
     platform_.start_menu_music();
-#endif
     return true;
 }
 
@@ -237,9 +235,7 @@ void Application::start_world() {
         }
     }
     platform_.set_mouse_capture(true);
-#ifndef __ANDROID__
     platform_.enter_world_music();
-#endif
     app_state_ = AppState::InWorld;
 }
 
@@ -354,9 +350,7 @@ int Application::run() {
         platform_.pump_events();
         const InputState& input = platform_.current_input();
         const float dt = platform_.frame_delta_seconds();
-#ifndef __ANDROID__
         platform_.update_music(dt);
-#endif
 
         if (app_state_ == AppState::StartupSplash) {
             platform_.set_mouse_capture(false);
@@ -451,9 +445,7 @@ int Application::run() {
         if (input.escape_pressed || input.gamepad_start_pressed) {
             world_streamer_->flush_dirty_chunks(8);
             platform_.set_mouse_capture(false);
-#ifndef __ANDROID__
             platform_.start_menu_music();
-#endif
             app_state_ = AppState::MainMenu;
             hovered_block_.reset();
             block_break_.target.reset();
