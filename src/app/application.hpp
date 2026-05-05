@@ -66,6 +66,7 @@ private:
     int selected_menu_button_ {0};
     int last_hovered_pause_button_ {-1};
     int selected_pause_button_ {0};
+    bool pause_resume_waiting_for_jump_release_ {false};
     std::optional<BlockHit> hovered_block_;
     BlockBreakState block_break_ {};
     LeavesRenderMode leaves_render_mode_ {LeavesRenderMode::Fancy};

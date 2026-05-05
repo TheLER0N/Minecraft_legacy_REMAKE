@@ -470,10 +470,19 @@ int Application::run() {
                 : (input.menu_confirm_pressed ? selected_pause_button_ : -1);
 
             bool resume_requested = input.escape_pressed || input.gamepad_start_pressed;
+            if (input.escape_pressed || input.gamepad_start_pressed) {
+                pause_resume_waiting_for_jump_release_ = false;
+            }
 
             if (activated_button == kPlayGameButtonIndex) {
                 platform_.play_ui_press_sound();
-                resume_requested = true;
+                if (input.menu_confirm_pressed && input.pressed(Key::Up)) {
+                    pause_resume_waiting_for_jump_release_ = true;
+                    resume_requested = false;
+                } else {
+                    pause_resume_waiting_for_jump_release_ = false;
+                    resume_requested = true;
+                }
             } else if (activated_button == kExitGameButtonIndex) {
                 platform_.play_ui_press_sound();
                 if (world_streamer_ != nullptr) {
@@ -485,10 +494,20 @@ int Application::run() {
                 selected_menu_button_ = 0;
                 last_hovered_menu_button_ = -1;
                 selected_pause_button_ = 0;
+                pause_resume_waiting_for_jump_release_ = false;
                 hovered_block_.reset();
                 block_break_.target.reset();
                 block_break_.repeat_seconds = 0.0f;
                 continue;
+            }
+
+            if (pause_resume_waiting_for_jump_release_) {
+                if (!input.pressed(Key::Up)) {
+                    pause_resume_waiting_for_jump_release_ = false;
+                    resume_requested = true;
+                } else {
+                    resume_requested = false;
+                }
             }
 
             if (resume_requested) {
@@ -517,6 +536,7 @@ int Application::run() {
             selected_pause_button_ = 0;
             last_hovered_pause_button_ = -1;
             app_state_ = AppState::PauseMenu;
+            pause_resume_waiting_for_jump_release_ = false;
             hovered_block_.reset();
             block_break_.target.reset();
             block_break_.repeat_seconds = 0.0f;
