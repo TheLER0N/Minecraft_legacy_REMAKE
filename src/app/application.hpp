@@ -26,7 +26,8 @@ private:
     enum class AppState {
         StartupSplash,
         MainMenu,
-        InWorld
+        InWorld,
+        PauseMenu
     };
 
     struct MenuButton {
@@ -63,6 +64,8 @@ private:
     float menu_exit_delay_seconds_ {0.0f};
     int last_hovered_menu_button_ {-1};
     int selected_menu_button_ {0};
+    int last_hovered_pause_button_ {-1};
+    int selected_pause_button_ {0};
     std::optional<BlockHit> hovered_block_;
     BlockBreakState block_break_ {};
     LeavesRenderMode leaves_render_mode_ {LeavesRenderMode::Fancy};

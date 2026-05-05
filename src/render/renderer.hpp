@@ -80,6 +80,7 @@ public:
     void begin_frame(const CameraFrameData& camera);
     void draw_startup_splash(float time_seconds, float fade_multiplier);
     void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
+    void draw_pause_menu(int hovered_button);
     bool upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility);
     void unload_chunk_mesh(ChunkCoord coord);
     void set_cave_visibility_frame(const CaveVisibilityFrame& frame);
@@ -226,6 +227,7 @@ private:
     void draw_debug_hud(const FrameResources& frame);
     void update_startup_splash_buffers(float time_seconds, float fade_multiplier);
     void update_main_menu_buffers(float time_seconds, bool use_night_panorama, int hovered_button);
+    void update_pause_menu_buffers(int hovered_button);
     void draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set);
     void draw_colored_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkPipeline pipeline);
     void upload_dynamic_buffer(GpuBuffer& buffer, const std::vector<Vertex>& vertices);

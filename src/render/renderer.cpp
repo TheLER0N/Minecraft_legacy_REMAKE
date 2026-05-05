@@ -1240,6 +1240,22 @@ void Renderer::draw_main_menu(float time_seconds, bool use_night_panorama, int h
     draw_colored_buffer(frame, menu_text_vertex_buffer_, menu_text_vertex_count_, hotbar_fill_pipeline_);
 }
 
+
+void Renderer::draw_pause_menu(int hovered_button) {
+    if (!frame_started_) {
+        return;
+    }
+
+    update_pause_menu_buffers(hovered_button);
+
+    const FrameResources& frame = frames_[current_frame_];
+    draw_colored_buffer(frame, menu_overlay_vertex_buffer_, menu_overlay_vertex_count_, hotbar_fill_pipeline_);
+    draw_textured_buffer(frame, menu_logo_vertex_buffer_, menu_logo_vertex_count_, menu_logo_.descriptor_set);
+    draw_textured_buffer(frame, menu_button_vertex_buffer_, menu_button_vertex_count_, menu_button_.descriptor_set);
+    draw_textured_buffer(frame, menu_button_highlight_vertex_buffer_, menu_button_highlight_vertex_count_, menu_button_highlighted_.descriptor_set);
+    draw_textured_buffer(frame, menu_font_vertex_buffer_, menu_font_vertex_count_, menu_font_.texture.descriptor_set);
+    draw_colored_buffer(frame, menu_text_vertex_buffer_, menu_text_vertex_count_, hotbar_fill_pipeline_);
+}
 void Renderer::draw_startup_splash(float time_seconds, float fade_multiplier) {
     if (!frame_started_) {
         return;
@@ -3624,6 +3640,136 @@ void Renderer::update_main_menu_buffers(float time_seconds, bool use_night_panor
     upload_dynamic_buffer(menu_font_vertex_buffer_, font_vertices);
 }
 
+
+void Renderer::update_pause_menu_buffers(int hovered_button) {
+    menu_panorama_vertex_count_ = 0;
+    menu_logo_vertex_count_ = 0;
+    menu_button_vertex_count_ = 0;
+    menu_button_highlight_vertex_count_ = 0;
+    menu_overlay_vertex_count_ = 0;
+    menu_text_vertex_count_ = 0;
+    menu_font_vertex_count_ = 0;
+
+    const VkExtent2D extent = logical_extent();
+    if (extent.width == 0 || extent.height == 0) {
+        return;
+    }
+
+    const float width = static_cast<float>(extent.width);
+    const float height = static_cast<float>(extent.height);
+    const float scale = menu_layout_scale(width, height);
+    const float ui_origin_x = (width - kMenuVirtualWidth * scale) * 0.5f;
+    const float ui_origin_y = (height - kMenuVirtualHeight * scale) * 0.5f;
+
+    std::vector<Vertex> overlay_vertices;
+    overlay_vertices.reserve(6);
+    append_hud_rect_fill(overlay_vertices, 0.0f, 0.0f, width, height, width, height, {0.0f, 0.0f, 0.0f});
+    menu_overlay_vertex_count_ = static_cast<std::uint32_t>(overlay_vertices.size());
+    upload_dynamic_buffer(menu_overlay_vertex_buffer_, overlay_vertices);
+
+    std::vector<Vertex> logo_vertices;
+    logo_vertices.reserve(6);
+    const float logo_width = kMenuLogoWidth * scale;
+    const float logo_height = logo_width * (207.0f / 857.0f);
+    const float logo_left = ui_origin_x + (kMenuVirtualWidth * scale - logo_width) * 0.5f;
+    const float logo_top = ui_origin_y + kMenuLogoTop * scale;
+    append_hud_textured_quad(logo_vertices, logo_left, logo_top, logo_left + logo_width, logo_top + logo_height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
+    menu_logo_vertex_count_ = static_cast<std::uint32_t>(logo_vertices.size());
+    upload_dynamic_buffer(menu_logo_vertex_buffer_, logo_vertices);
+
+    constexpr std::array<const char*, 6> labels {{
+        "Resume Game",
+        "Help & Options",
+        "Leaderboards",
+        "Achievements",
+        "Save Game",
+        "Exit Game"
+    }};
+
+    const float button_width = kMenuButtonWidth * scale;
+    const float button_height = kMenuButtonHeight * scale;
+    const float gap = kMenuButtonGap * scale;
+    const float left = ui_origin_x + (kMenuVirtualWidth - kMenuButtonWidth) * 0.5f * scale;
+    const float first_top = ui_origin_y + kMenuFirstButtonTop * scale;
+
+    std::vector<Vertex> button_vertices;
+    std::vector<Vertex> button_highlight_vertices;
+    std::vector<Vertex> text_vertices;
+    std::vector<Vertex> font_vertices;
+    button_vertices.reserve(6 * labels.size());
+    button_highlight_vertices.reserve(6);
+    text_vertices.reserve(7000);
+    font_vertices.reserve(7000);
+
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        const float top = first_top + static_cast<float>(i) * (button_height + gap);
+        std::vector<Vertex>& target = static_cast<int>(i) == hovered_button ? button_highlight_vertices : button_vertices;
+        append_hud_textured_quad(target, left, top, left + button_width, top + button_height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
+
+        const std::string label = labels[i];
+        const float preferred_text_scale = std::max(1.0f, scale);
+        const float text_scale = std::max(1.0f, std::min(preferred_text_scale, (button_width * 0.82f) / pixel_text_width(label, 1.0f)));
+        const float font_pixel_height = 8.0f * preferred_text_scale;
+        const float text_width = menu_font_.loaded ? menu_font_text_width(label, font_pixel_height) : pixel_text_width(label, text_scale);
+
+        float actual_pixel_height = font_pixel_height;
+        if (text_width > button_width * 0.82f && menu_font_.loaded) {
+            actual_pixel_height = actual_pixel_height * ((button_width * 0.82f) / text_width);
+        }
+
+        const float actual_text_width = menu_font_.loaded ? menu_font_text_width(label, actual_pixel_height) : text_width;
+        const float text_left = left + (button_width - actual_text_width) * 0.5f;
+        const float text_top = top + (button_height - actual_pixel_height) * 0.5f;
+        const Vec3 text_color = static_cast<int>(i) == hovered_button ? Vec3 {1.0f, 1.0f, 0.25f} : Vec3 {1.0f, 1.0f, 1.0f};
+        const float outline = std::max(1.0f, scale * 0.55f);
+        const std::array<Vec2, 8> outline_offsets {{
+            {-outline, 0.0f},
+            {outline, 0.0f},
+            {0.0f, -outline},
+            {0.0f, outline},
+            {-outline, -outline},
+            {outline, -outline},
+            {-outline, outline},
+            {outline, outline}
+        }};
+
+        if (menu_font_.loaded) {
+            for (const Vec2& offset : outline_offsets) {
+                append_menu_font_text(font_vertices, label, text_left + offset.x, text_top + offset.y, actual_pixel_height, width, height, {0.0f, 0.0f, 0.0f});
+            }
+            append_menu_font_text(font_vertices, label, text_left, text_top, actual_pixel_height, width, height, text_color);
+        } else {
+            for (const Vec2& offset : outline_offsets) {
+                append_pixel_text(text_vertices, label, text_left + offset.x, text_top + offset.y, text_scale, width, height, {0.0f, 0.0f, 0.0f});
+            }
+            append_pixel_text(text_vertices, label, text_left, text_top, text_scale, width, height, text_color);
+        }
+    }
+
+    const std::string hint = "A Select    B Back";
+    const float hint_height = 8.0f * scale;
+    const float hint_width = menu_font_.loaded ? menu_font_text_width(hint, hint_height) : pixel_text_width(hint, scale);
+    const float hint_left = 26.0f * scale;
+    const float hint_top = height - 30.0f * scale;
+    (void)hint_width;
+
+    if (menu_font_.loaded) {
+        append_menu_font_text(font_vertices, hint, hint_left + 1.0f * scale, hint_top + 1.0f * scale, hint_height, width, height, {0.0f, 0.0f, 0.0f});
+        append_menu_font_text(font_vertices, hint, hint_left, hint_top, hint_height, width, height, {1.0f, 1.0f, 1.0f});
+    } else {
+        append_pixel_text(text_vertices, hint, hint_left + 1.0f * scale, hint_top + 1.0f * scale, scale, width, height, {0.0f, 0.0f, 0.0f});
+        append_pixel_text(text_vertices, hint, hint_left, hint_top, scale, width, height, {1.0f, 1.0f, 1.0f});
+    }
+
+    menu_button_vertex_count_ = static_cast<std::uint32_t>(button_vertices.size());
+    menu_button_highlight_vertex_count_ = static_cast<std::uint32_t>(button_highlight_vertices.size());
+    menu_text_vertex_count_ = static_cast<std::uint32_t>(text_vertices.size());
+    menu_font_vertex_count_ = static_cast<std::uint32_t>(font_vertices.size());
+    upload_dynamic_buffer(menu_button_vertex_buffer_, button_vertices);
+    upload_dynamic_buffer(menu_button_highlight_vertex_buffer_, button_highlight_vertices);
+    upload_dynamic_buffer(menu_text_vertex_buffer_, text_vertices);
+    upload_dynamic_buffer(menu_font_vertex_buffer_, font_vertices);
+}
 void Renderer::draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set) {
     if (vertex_count == 0 || buffer.buffer == VK_NULL_HANDLE || hotbar_texture_pipeline_ == VK_NULL_HANDLE || descriptor_set == VK_NULL_HANDLE) {
         return;

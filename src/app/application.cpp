@@ -442,15 +442,84 @@ int Application::run() {
             continue;
         }
 
-        if (input.escape_pressed || input.gamepad_start_pressed) {
-            world_streamer_->flush_dirty_chunks(8);
+
+        if (app_state_ == AppState::PauseMenu) {
             platform_.set_mouse_capture(false);
-            platform_.start_menu_music();
-            app_state_ = AppState::MainMenu;
+
+            const int hovered_button = hovered_menu_button(input);
+            const int previous_selected_pause_button = selected_pause_button_;
+
+            if (hovered_button != -1) {
+                selected_pause_button_ = hovered_button;
+            }
+            if (input.menu_up_pressed) {
+                selected_pause_button_ = (selected_pause_button_ + 5) % 6;
+            }
+            if (input.menu_down_pressed) {
+                selected_pause_button_ = (selected_pause_button_ + 1) % 6;
+            }
+
+            if (selected_pause_button_ != previous_selected_pause_button ||
+                (hovered_button != -1 && hovered_button != last_hovered_pause_button_)) {
+                platform_.play_ui_focus_sound();
+            }
+            last_hovered_pause_button_ = hovered_button;
+
+            const int activated_button = input.left_click_pressed && hovered_button != -1
+                ? hovered_button
+                : (input.menu_confirm_pressed ? selected_pause_button_ : -1);
+
+            bool resume_requested = input.escape_pressed || input.gamepad_start_pressed;
+
+            if (activated_button == kPlayGameButtonIndex) {
+                platform_.play_ui_press_sound();
+                resume_requested = true;
+            } else if (activated_button == kExitGameButtonIndex) {
+                platform_.play_ui_press_sound();
+                if (world_streamer_ != nullptr) {
+                    world_streamer_->flush_all_dirty_chunks();
+                }
+                platform_.set_mouse_capture(false);
+                platform_.start_menu_music();
+                app_state_ = AppState::MainMenu;
+                selected_menu_button_ = 0;
+                last_hovered_menu_button_ = -1;
+                selected_pause_button_ = 0;
+                hovered_block_.reset();
+                block_break_.target.reset();
+                block_break_.repeat_seconds = 0.0f;
+                continue;
+            }
+
+            if (resume_requested) {
+                platform_.set_mouse_capture(true);
+                platform_.enter_world_music();
+                app_state_ = AppState::InWorld;
+                continue;
+            }
+
+            const PlatformWindow& window = platform_.window();
+            const float aspect_ratio = static_cast<float>(window.width) / static_cast<float>(window.height == 0 ? 1 : window.height);
+            const CameraFrameData camera_frame = debug_fly_enabled_
+                ? camera_.frame_data(aspect_ratio)
+                : player_.camera_frame_data(aspect_ratio);
+
+            renderer_.begin_frame(camera_frame);
+            if (world_streamer_ != nullptr) {
+                renderer_.draw_visible_chunks(world_streamer_->visible_chunks());
+            }
+            renderer_.draw_pause_menu(selected_pause_button_);
+            renderer_.end_frame();
+            continue;
+        }
+        if (input.escape_pressed || input.gamepad_start_pressed) {
+            platform_.set_mouse_capture(false);
+            selected_pause_button_ = 0;
+            last_hovered_pause_button_ = -1;
+            app_state_ = AppState::PauseMenu;
             hovered_block_.reset();
             block_break_.target.reset();
             block_break_.repeat_seconds = 0.0f;
-            debug_fly_enabled_ = false;
             continue;
         }
         if (platform_.current_input().toggle_wireframe_pressed) {
