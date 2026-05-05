@@ -307,6 +307,7 @@ private:
     MenuTexture menu_button_ {};
     MenuTexture menu_button_highlighted_ {};
     MenuTexture menu_logo_ {};
+    MenuTexture pause_overlay_ {};
     MenuTexture startup_pic_ {};
     MenuTexture startup_mojang_ {};
     MenuTexture startup_king_ {};

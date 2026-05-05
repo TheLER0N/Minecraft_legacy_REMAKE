@@ -1249,13 +1249,14 @@ void Renderer::draw_pause_menu(int hovered_button) {
     update_pause_menu_buffers(hovered_button);
 
     const FrameResources& frame = frames_[current_frame_];
-    draw_colored_buffer(frame, menu_overlay_vertex_buffer_, menu_overlay_vertex_count_, hotbar_fill_pipeline_);
+    draw_textured_buffer(frame, menu_overlay_vertex_buffer_, menu_overlay_vertex_count_, pause_overlay_.descriptor_set);
     draw_textured_buffer(frame, menu_logo_vertex_buffer_, menu_logo_vertex_count_, menu_logo_.descriptor_set);
     draw_textured_buffer(frame, menu_button_vertex_buffer_, menu_button_vertex_count_, menu_button_.descriptor_set);
     draw_textured_buffer(frame, menu_button_highlight_vertex_buffer_, menu_button_highlight_vertex_count_, menu_button_highlighted_.descriptor_set);
     draw_textured_buffer(frame, menu_font_vertex_buffer_, menu_font_vertex_count_, menu_font_.texture.descriptor_set);
     draw_colored_buffer(frame, menu_text_vertex_buffer_, menu_text_vertex_count_, hotbar_fill_pipeline_);
 }
+
 void Renderer::draw_startup_splash(float time_seconds, float fade_multiplier) {
     if (!frame_started_) {
         return;
@@ -3663,7 +3664,7 @@ void Renderer::update_pause_menu_buffers(int hovered_button) {
 
     std::vector<Vertex> overlay_vertices;
     overlay_vertices.reserve(6);
-    append_hud_rect_fill(overlay_vertices, 0.0f, 0.0f, width, height, width, height, {0.0f, 0.0f, 0.0f});
+    append_hud_textured_quad(overlay_vertices, 0.0f, 0.0f, width, height, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
     menu_overlay_vertex_count_ = static_cast<std::uint32_t>(overlay_vertices.size());
     upload_dynamic_buffer(menu_overlay_vertex_buffer_, overlay_vertices);
 
@@ -3748,10 +3749,8 @@ void Renderer::update_pause_menu_buffers(int hovered_button) {
 
     const std::string hint = "A Select    B Back";
     const float hint_height = 8.0f * scale;
-    const float hint_width = menu_font_.loaded ? menu_font_text_width(hint, hint_height) : pixel_text_width(hint, scale);
     const float hint_left = 26.0f * scale;
     const float hint_top = height - 30.0f * scale;
-    (void)hint_width;
 
     if (menu_font_.loaded) {
         append_menu_font_text(font_vertices, hint, hint_left + 1.0f * scale, hint_top + 1.0f * scale, hint_height, width, height, {0.0f, 0.0f, 0.0f});
@@ -3770,6 +3769,7 @@ void Renderer::update_pause_menu_buffers(int hovered_button) {
     upload_dynamic_buffer(menu_text_vertex_buffer_, text_vertices);
     upload_dynamic_buffer(menu_font_vertex_buffer_, font_vertices);
 }
+
 void Renderer::draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set) {
     if (vertex_count == 0 || buffer.buffer == VK_NULL_HANDLE || hotbar_texture_pipeline_ == VK_NULL_HANDLE || descriptor_set == VK_NULL_HANDLE) {
         return;
@@ -4273,6 +4273,13 @@ bool Renderer::load_menu_textures() {
     if (!load_menu_font()) {
         log_message(LogLevel::Error, "Renderer: failed to load menu font");
     }
+
+    const std::vector<std::uint8_t> pause_overlay_pixels {0, 0, 0, 230};
+    if (!load_menu_texture_from_rgba(pause_overlay_pixels, 1, 1, false, false, pause_overlay_)) {
+        log_message(LogLevel::Error, "Renderer: failed to create 50 percent pause overlay texture");
+        return false;
+    }
+
     return load_menu_texture(asset_pack_resolver().resolve_file_utf8("panorama/panorama_tu69_day.png"), false, false, menu_panorama_day_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("panorama/panorama_tu69_night.png"), false, false, menu_panorama_night_) &&
         load_menu_texture(asset_pack_resolver().resolve_file_utf8("button/button.png"), false, true, menu_button_) &&
@@ -4518,6 +4525,7 @@ void Renderer::destroy_textures() {
     destroy_menu_texture(menu_button_);
     destroy_menu_texture(menu_button_highlighted_);
     destroy_menu_texture(menu_logo_);
+    destroy_menu_texture(pause_overlay_);
     destroy_menu_texture(startup_pic_);
     destroy_menu_texture(startup_mojang_);
     destroy_menu_texture(startup_king_);
