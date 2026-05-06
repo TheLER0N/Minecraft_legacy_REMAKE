@@ -1,4 +1,4 @@
-#include "game/world_streamer.hpp"
+﻿#include "game/world_streamer.hpp"
 
 #include "common/log.hpp"
 
@@ -20,12 +20,12 @@ constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
 #ifdef __ANDROID__
 constexpr int kMaxChunkRadius = 6;
-constexpr std::size_t kMaxNewChunkRequestsPerFrame = 1;
-constexpr std::size_t kMaxResultsPerTick = 6;
+constexpr std::size_t kMaxNewChunkRequestsPerFrame = 2;
+constexpr std::size_t kMaxResultsPerTick = 10;
 #else
 constexpr int kMaxChunkRadius = 100;
-constexpr std::size_t kMaxNewChunkRequestsPerFrame = 4;
-constexpr std::size_t kMaxResultsPerTick = 16;
+constexpr std::size_t kMaxNewChunkRequestsPerFrame = 12;
+constexpr std::size_t kMaxResultsPerTick = 48;
 #endif
 
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
@@ -1446,44 +1446,87 @@ bool WorldStreamer::desired_chunk(const ChunkCoord& origin, const ChunkCoord& ca
 float WorldStreamer::chunk_priority_score(ChunkCoord coord, Vec3 observer_position, Vec3 observer_forward) const {
     const float center_x = static_cast<float>(coord.x * kChunkWidth) + static_cast<float>(kChunkWidth) * 0.5f;
     const float center_z = static_cast<float>(coord.z * kChunkDepth) + static_cast<float>(kChunkDepth) * 0.5f;
-    const Vec3 to_chunk {
-        center_x - observer_position.x,
-        0.0f,
-        center_z - observer_position.z
-    };
-    const float distance_sq = dot(to_chunk, to_chunk);
-    const Vec3 planar_forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
-    if (length(planar_forward) <= 0.00001f || distance_sq <= 0.00001f) {
-        return distance_sq;
+
+    const float to_chunk_x = center_x - observer_position.x;
+    const float to_chunk_z = center_z - observer_position.z;
+    const float distance_sq = to_chunk_x * to_chunk_x + to_chunk_z * to_chunk_z;
+    const float distance = std::sqrt(std::max(distance_sq, 0.0001f));
+
+    Vec3 forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
+    if (length(forward) <= 0.00001f) {
+        forward = {0.0f, 0.0f, -1.0f};
     }
 
-    const float facing = dot(normalize(to_chunk), planar_forward);
-    const float bucket = facing > 0.25f ? 0.0f : (facing > -0.25f ? 1.0f : 2.0f);
-    return bucket * 1000000.0f + distance_sq;
+    const float dir_x = to_chunk_x / distance;
+    const float dir_z = to_chunk_z / distance;
+    const float dot = std::clamp(dir_x * forward.x + dir_z * forward.z, -1.0f, 1.0f);
+    const float side = std::abs(dir_x * forward.z - dir_z * forward.x);
+
+    const int dx = coord.x - observer_chunk_.x;
+    const int dz = coord.z - observer_chunk_.z;
+    const int ring = std::max(std::abs(dx), std::abs(dz));
+
+    const float front_priority = (1.0f - dot) * 36.0f;
+    const float side_priority = side * 8.0f;
+    const float behind_penalty = dot < -0.10f ? 160.0f : 0.0f;
+
+    return static_cast<float>(ring) * 100.0f + distance * 0.50f + front_priority + side_priority + behind_penalty;
 }
 
 float WorldStreamer::job_priority_score_locked(const ChunkJob& job) const {
     float score = chunk_priority_score(job.coord, observer_position_, observer_forward_);
-    if (job.type == ChunkJobType::Decorate) {
-        score += 50000.0f;
-    } else if (job.type == ChunkJobType::CalculateLight) {
-        score += 100000.0f;
-    } else if (job.type == ChunkJobType::BuildMesh) {
-        score += 150000.0f;
+
+    switch (job.type) {
+    case ChunkJobType::GenerateTerrain:
+        score -= 20.0f;
+        break;
+    case ChunkJobType::Decorate:
+        score -= 12.0f;
+        break;
+    case ChunkJobType::CalculateLight:
+        score -= 8.0f;
+        break;
+    case ChunkJobType::BuildMesh:
+        if (job.snapshot != nullptr && job.snapshot->provisional) {
+            score -= 10.0f;
+        }
+        break;
     }
+
     return score;
 }
 
 void WorldStreamer::push_job_locked(ChunkJob&& job) {
-    const float score = job_priority_score_locked(job);
-    const auto insert_at = std::find_if(
+    constexpr std::size_t kMaxQueuedChunkJobs = 4096;
+
+    if (job_queue_.size() >= kMaxQueuedChunkJobs) {
+        const auto worst_it = std::max_element(
+            job_queue_.begin(),
+            job_queue_.end(),
+            [this](const ChunkJob& lhs, const ChunkJob& rhs) {
+                return job_priority_score_locked(lhs) < job_priority_score_locked(rhs);
+            }
+        );
+
+        if (worst_it != job_queue_.end() && job_priority_score_locked(*worst_it) > job_priority_score_locked(job)) {
+            *worst_it = std::move(job);
+        } else {
+            ++dropped_jobs_;
+            return;
+        }
+    } else {
+        job_queue_.push_back(std::move(job));
+    }
+
+    std::stable_sort(
         job_queue_.begin(),
         job_queue_.end(),
-        [&](const ChunkJob& existing) {
-            return score < job_priority_score_locked(existing);
+        [this](const ChunkJob& lhs, const ChunkJob& rhs) {
+            return job_priority_score_locked(lhs) < job_priority_score_locked(rhs);
         }
     );
-    job_queue_.insert(insert_at, std::move(job));
+
+    cv_.notify_one();
 }
 
 void WorldStreamer::queue_generate_job(ChunkCoord coord, std::uint64_t version) {
@@ -1965,3 +2008,4 @@ LightMeshSnapshot WorldStreamer::light_from_snapshot(const ChunkMeshSnapshot& sn
 }
 
 }
+
