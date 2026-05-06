@@ -278,7 +278,9 @@ void Application::render_world_transition_frames(int frame_count, const char* me
 
     for (int i = 0; i < frame_count && !platform_.should_close(); ++i) {
         platform_.pump_events();
-        menu_time_seconds_ += 1.0f / 60.0f;
+
+        const float dt = platform_.frame_delta_seconds();
+        menu_time_seconds_ += dt > 0.0001f ? std::min(dt, 0.1f) : (1.0f / 60.0f);
 
         renderer_.begin_frame(loading_camera);
         renderer_.draw_menu_panorama_message(
@@ -296,6 +298,17 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
 
     render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Загрузка мира");
 
+    const auto loading_started = std::chrono::steady_clock::now();
+
+    const int selected_radius = std::max(1, world_streamer_->chunk_radius());
+    const int required_preload_radius = std::clamp(
+        static_cast<int>(std::ceil(static_cast<float>(selected_radius) * world_runtime_tuning().preload_required_fraction)),
+        1,
+        selected_radius
+    );
+
+    const int full_preload_radius = selected_radius;
+
     const int spawn_block_x = static_cast<int>(std::floor(spawn_position.x));
     const int spawn_block_z = static_cast<int>(std::floor(spawn_position.z));
     const int probe_y = std::clamp(
@@ -304,38 +317,41 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         kWorldMaxY
     );
 
-    const int max_frames = world_runtime_tuning().spawn_preload_max_frames;
-    const int preload_radius = world_runtime_tuning().spawn_preload_radius;
-    const std::size_t required_area_chunks =
-        static_cast<std::size_t>((preload_radius * 2 + 1) * (preload_radius * 2 + 1));
-    const std::size_t min_visible_chunks =
-        std::max(world_runtime_tuning().spawn_preload_min_visible_chunks, required_area_chunks);
+    const int warning_frame = world_runtime_tuning().spawn_preload_max_frames;
     const std::size_t requests_per_frame = world_runtime_tuning().spawn_preload_requests_per_frame;
     const std::size_t upload_max_count = world_runtime_tuning().spawn_preload_upload_max_count;
+    const std::size_t required_area_chunks =
+        static_cast<std::size_t>((required_preload_radius * 2 + 1) * (required_preload_radius * 2 + 1));
 
-    std::vector<std::array<int, 2>> preload_probe_offsets;
-    preload_probe_offsets.reserve(required_area_chunks);
-    for (int dz = -preload_radius; dz <= preload_radius; ++dz) {
-        for (int dx = -preload_radius; dx <= preload_radius; ++dx) {
-            preload_probe_offsets.push_back({{dx * kChunkWidth, dz * kChunkDepth}});
+    std::vector<std::array<int, 2>> required_probe_offsets;
+    required_probe_offsets.reserve(required_area_chunks);
+    for (int dz = -required_preload_radius; dz <= required_preload_radius; ++dz) {
+        for (int dx = -required_preload_radius; dx <= required_preload_radius; ++dx) {
+            required_probe_offsets.push_back({{dx * kChunkWidth, dz * kChunkDepth}});
         }
     }
 
     bool spawn_column_loaded_once = false;
+    bool required_area_ready_once = false;
+    bool warning_logged = false;
 
     log_message(
         LogLevel::Info,
-        std::string("Application: variant B preload begin [radius=") +
-            std::to_string(preload_radius) +
-            ", required_area_chunks=" + std::to_string(required_area_chunks) +
-            ", min_visible=" + std::to_string(min_visible_chunks) +
-            ", max_frames=" + std::to_string(max_frames) + "]"
+        std::string("Application: half-distance preload begin [selected_radius=") +
+            std::to_string(selected_radius) +
+            ", required_radius=" + std::to_string(required_preload_radius) +
+            ", required_chunks=" + std::to_string(required_area_chunks) +
+            ", min_seconds=" + std::to_string(world_runtime_tuning().world_loading_min_seconds) + "]"
     );
 
-    for (int frame = 0; frame < max_frames && !platform_.should_close(); ++frame) {
+    for (int frame = 0; !platform_.should_close(); ++frame) {
         platform_.pump_events();
 
-        world_streamer_->request_spawn_preload(spawn_position, preload_radius, requests_per_frame);
+        const auto now = std::chrono::steady_clock::now();
+        const float elapsed_seconds = std::chrono::duration<float>(now - loading_started).count();
+
+        const int active_preload_radius = required_area_ready_once ? full_preload_radius : required_preload_radius;
+        world_streamer_->request_spawn_preload(spawn_position, active_preload_radius, requests_per_frame);
 
         for (int apply_tick = 0; apply_tick < 4; ++apply_tick) {
             world_streamer_->tick_generation_jobs();
@@ -367,7 +383,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         world_streamer_->refresh_visible_chunks();
 
         int loaded_probe_columns = 0;
-        for (const auto& offset : preload_probe_offsets) {
+        for (const auto& offset : required_probe_offsets) {
             const BlockQueryResult query = world_streamer_->query_block_at_world(
                 spawn_block_x + offset[0],
                 probe_y,
@@ -388,41 +404,49 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         spawn_column_loaded_once = spawn_column_loaded_once || spawn_probe.status == BlockQueryStatus::Loaded;
         const WorldStreamer::StreamingStats stats = world_streamer_->stats();
 
-        if (spawn_column_loaded_once &&
-            loaded_probe_columns >= static_cast<int>(preload_probe_offsets.size()) &&
-            stats.visible_chunks >= min_visible_chunks) {
+        required_area_ready_once =
+            spawn_column_loaded_once &&
+            loaded_probe_columns >= static_cast<int>(required_probe_offsets.size()) &&
+            stats.visible_chunks >= required_area_chunks;
+
+        if (required_area_ready_once &&
+            elapsed_seconds >= world_runtime_tuning().world_loading_min_seconds) {
             log_message(
                 LogLevel::Info,
-                std::string("Application: variant B preload done [frame=") +
+                std::string("Application: half-distance preload done [frame=") +
+                    std::to_string(frame) +
+                    ", elapsed=" + std::to_string(elapsed_seconds) +
+                    ", visible=" + std::to_string(stats.visible_chunks) +
+                    ", probes=" + std::to_string(loaded_probe_columns) +
+                    "/" + std::to_string(required_probe_offsets.size()) +
+                    ", selected_radius=" + std::to_string(selected_radius) +
+                    ", required_radius=" + std::to_string(required_preload_radius) + "]"
+            );
+
+            return true;
+        }
+
+        if (!warning_logged && frame >= warning_frame) {
+            warning_logged = true;
+            log_message(
+                LogLevel::Warning,
+                std::string("Application: half-distance preload is taking longer than expected [frame=") +
                     std::to_string(frame) +
                     ", visible=" + std::to_string(stats.visible_chunks) +
                     ", probes=" + std::to_string(loaded_probe_columns) +
-                    "/" + std::to_string(preload_probe_offsets.size()) + "]"
+                    "/" + std::to_string(required_probe_offsets.size()) + "]"
             );
-
-            render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Загрузка мира");
-            return true;
         }
 
         render_world_transition_frames(1, "Загрузка мира");
     }
 
-    if (platform_.should_close()) {
-        return false;
-    }
-
-    const WorldStreamer::StreamingStats stats = world_streamer_->stats();
-    log_message(
-        LogLevel::Warning,
-        std::string("Application: variant B preload timeout [visible=") +
-            std::to_string(stats.visible_chunks) +
-            ", spawn_loaded=" + (spawn_column_loaded_once ? "true" : "false") + "]"
-    );
-
-    return spawn_column_loaded_once;
+    return false;
 }
 void Application::unload_world_for_menu() {
-    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Выход из мира");
+    const auto leaving_started = std::chrono::steady_clock::now();
+
+    render_world_transition_frames(1, "Выход из мира");
 
     if (world_streamer_ != nullptr) {
         world_streamer_->flush_all_dirty_chunks();
@@ -443,7 +467,20 @@ void Application::unload_world_for_menu() {
     block_break_.target.reset();
     block_break_.repeat_seconds = 0.0f;
 
-    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Выход из мира");
+    while (!platform_.should_close()) {
+        const float elapsed_seconds = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - leaving_started
+        ).count();
+
+        if (elapsed_seconds >= world_runtime_tuning().world_leaving_min_seconds &&
+            world_streamer_ == nullptr &&
+            world_save_ == nullptr &&
+            renderer_.resident_chunk_mesh_count() == 0) {
+            break;
+        }
+
+        render_world_transition_frames(1, "Выход из мира");
+    }
 }
 Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame(Vec3 observer_position) {
     const int camera_x = static_cast<int>(std::floor(observer_position.x));

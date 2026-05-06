@@ -1,19 +1,18 @@
 Patch report
 Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
-Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_223343
-Time: 2026-05-06 22:33:43
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_224443
+Time: 2026-05-06 22:44:43
 
-OK: world_runtime_tuning.hpp rewritten for variant B
-    - desktop spawn_preload_radius = 2
-    - desktop spawn_preload_min_visible_chunks = 25
-    - rest of radius 16 continues via streaming backlog after entry
-OK: renderer.hpp added unload_all_chunk_meshes and resident_chunk_mesh_count
-OK: src/render/renderer.hpp written
-OK: renderer.cpp inserted unload_all_chunk_meshes implementation
+OK: world_runtime_tuning.hpp rewritten
+    - preload_required_fraction = 0.5
+    - world_loading_min_seconds = 2.0
+    - world_leaving_min_seconds = 2.0
+    - spawn_preload_radius/min_visible no longer define the main requirement
+OK: replaced Renderer::draw_menu_panorama_message without black cube
 OK: src/render/renderer.cpp written
-OK: application.cpp added <vector> include
-OK: replaced Application::preload_world_spawn variant B
-OK: replaced Application::unload_world_for_menu complete renderer/world release
+OK: replaced Application transition helpers with normal panorama speed
+OK: replaced Application::preload_world_spawn half selected distance
+OK: replaced Application::unload_world_for_menu two seconds and full release
 OK: src/app/application.cpp written
 
 Changed files:
@@ -23,15 +22,18 @@ Changed files:
 - src/app/application.cpp
 
 What changed:
-- Variant B loading: wait for safe 5x5 spawn area, not the full radius-16 world.
-- The player enters the world only after center-first preload reaches the safe area.
-- Normal streaming backlog continues loading the rest of radius 16 after entry.
-- Exit now flushes dirty chunks, unloads every resident renderer chunk mesh, then resets WorldStreamer and WorldSave.
-- This reduces long full-world loading while still preventing spawn falling and stale world memory.
+- Loading no longer waits for fixed 5x5.
+- Required preload radius is now ceil(selected_chunk_radius * 0.5).
+- The loading screen stays for at least 2 seconds.
+- If required chunks are not ready after 2 seconds, loading continues.
+- If required chunks are ready early, the game keeps preloading farther chunks until 2 seconds pass.
+- Exit screen stays for at least 2 seconds and waits for renderer/world release.
+- Removed the black rectangle/cube behind transition text.
+- Panorama time now uses platform frame delta instead of fixed 1/60 increments.
 
 Next step:
 1. Run build_release.bat.
-2. Start a world and check logs for: Application: variant B preload done.
-3. Check that the player does not fall at spawn.
-4. Exit to menu and check that resident chunk meshes are cleared without rendering the world.
+2. Start world: the loading screen must stay at least 2 seconds.
+3. With chunk radius 16, required preload radius must be 8.
+4. Exit world: the exit screen must stay at least 2 seconds and return only after cleanup.
 5. If build fails, send the first compiler error and 30 lines after it.

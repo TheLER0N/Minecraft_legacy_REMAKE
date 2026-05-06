@@ -1259,24 +1259,6 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
     const float width = static_cast<float>(extent.width == 0 ? 1 : extent.width);
     const float height = static_cast<float>(extent.height == 0 ? 1 : extent.height);
 
-    std::vector<Vertex> overlay_vertices;
-    append_hud_rect_fill(
-        overlay_vertices,
-        0.0f,
-        height * 0.42f,
-        width,
-        height * 0.58f,
-        width,
-        height,
-        {0.0f, 0.0f, 0.0f}
-    );
-
-    upload_dynamic_buffer(menu_overlay_vertex_buffer_, overlay_vertices);
-    menu_overlay_vertex_count_ = static_cast<std::uint32_t>(overlay_vertices.size());
-    if (menu_overlay_vertex_count_ > 0) {
-        draw_colored_buffer(frame, menu_overlay_vertex_buffer_, menu_overlay_vertex_count_, hotbar_fill_pipeline_);
-    }
-
     if (menu_font_.loaded && !message.empty()) {
         constexpr float text_height = 30.0f;
         const float text_width = menu_font_text_width(message, text_height);
@@ -1284,6 +1266,18 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
         const float text_y = (height - text_height) * 0.5f;
 
         std::vector<Vertex> text_vertices;
+
+        append_menu_font_text(
+            text_vertices,
+            message,
+            text_x + 2.0f,
+            text_y + 2.0f,
+            text_height,
+            width,
+            height,
+            {0.0f, 0.0f, 0.0f}
+        );
+
         append_menu_font_text(
             text_vertices,
             message,

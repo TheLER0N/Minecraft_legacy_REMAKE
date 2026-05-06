@@ -125,9 +125,9 @@ Backup-File $RendererCppPath
 Backup-File $ApplicationCppPath
 
 # ----------------------------------------------------------------------
-# 1. Runtime tuning: practical loading variant B.
-#    Variant B = do not wait for all 1089 radius-16 chunks.
-#    Wait for safe 5x5 spawn area, then let normal streaming finish the rest.
+# 1. Runtime tuning:
+#    - mandatory preload fraction = 0.5 of selected chunk radius
+#    - loading/leaving minimum time = 2 seconds
 # ----------------------------------------------------------------------
 
 $RuntimeTuningText = @'
@@ -161,13 +161,16 @@ struct WorldRuntimeTuning {
     float forward_buffer_safety_blocks {24.0f};
     float fast_flight_speed_threshold {25.0f};
     float very_fast_flight_speed_threshold {45.0f};
-    int spawn_preload_radius {2};
-    std::size_t spawn_preload_min_visible_chunks {25};
+    int spawn_preload_radius {0};
+    std::size_t spawn_preload_min_visible_chunks {0};
     int spawn_preload_max_frames {1200};
     std::size_t spawn_preload_requests_per_frame {20};
     std::size_t spawn_preload_upload_max_count {20};
     std::size_t streaming_backlog_requests_per_frame {8};
     std::size_t world_exit_mesh_unload_budget_per_step {128};
+    float preload_required_fraction {0.5f};
+    float world_loading_min_seconds {2.0f};
+    float world_leaving_min_seconds {2.0f};
     int transition_black_frames {30};
 };
 
@@ -204,13 +207,16 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         20.0f,
         18.0f,
         35.0f,
-        1,
-        std::size_t {9},
-        700,
+        0,
+        std::size_t {0},
+        900,
         std::size_t {8},
         std::size_t {8},
         std::size_t {4},
         std::size_t {64},
+        0.5f,
+        2.0f,
+        2.0f,
         30
     };
 #else
@@ -246,13 +252,16 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         24.0f,
         25.0f,
         45.0f,
-        2,
-        std::size_t {25},
+        0,
+        std::size_t {0},
         1200,
         std::size_t {20},
         std::size_t {20},
         std::size_t {8},
         std::size_t {128},
+        0.5f,
+        2.0f,
+        2.0f,
         30
     };
 #endif
@@ -262,17 +271,129 @@ inline WorldRuntimeTuning world_runtime_tuning() {
 '@
 
 Write-Utf8NoBom $RuntimeTuningPath $RuntimeTuningText
-Add-Log $Log "OK: world_runtime_tuning.hpp rewritten for variant B"
-Add-Log $Log "    - desktop spawn_preload_radius = 2"
-Add-Log $Log "    - desktop spawn_preload_min_visible_chunks = 25"
-Add-Log $Log "    - rest of radius 16 continues via streaming backlog after entry"
+Add-Log $Log "OK: world_runtime_tuning.hpp rewritten"
+Add-Log $Log "    - preload_required_fraction = 0.5"
+Add-Log $Log "    - world_loading_min_seconds = 2.0"
+Add-Log $Log "    - world_leaving_min_seconds = 2.0"
+Add-Log $Log "    - spawn_preload_radius/min_visible no longer define the main requirement"
 
 # ----------------------------------------------------------------------
-# 2. Renderer: unload every resident chunk mesh, not only visible chunks.
+# 2. Renderer: remove black cube/overlay from panorama loading screen.
 # ----------------------------------------------------------------------
 
+$RendererCppText = Read-Utf8Text $RendererCppPath
+$RendererCppChanged = $false
+
+$RendererPanoramaMessageMethod = @'
+void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message) {
+    if (!frame_started_) {
+        return;
+    }
+
+    update_main_menu_buffers(time_seconds, use_night_panorama, -1);
+
+    const FrameResources& frame = frames_[current_frame_];
+    const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
+
+    if (menu_panorama_vertex_count_ > 0 && panorama.descriptor_set != VK_NULL_HANDLE) {
+        draw_textured_buffer(frame, menu_panorama_vertex_buffer_, menu_panorama_vertex_count_, panorama.descriptor_set);
+    }
+
+    const VkExtent2D extent = logical_extent();
+    const float width = static_cast<float>(extent.width == 0 ? 1 : extent.width);
+    const float height = static_cast<float>(extent.height == 0 ? 1 : extent.height);
+
+    if (menu_font_.loaded && !message.empty()) {
+        constexpr float text_height = 30.0f;
+        const float text_width = menu_font_text_width(message, text_height);
+        const float text_x = (width - text_width) * 0.5f;
+        const float text_y = (height - text_height) * 0.5f;
+
+        std::vector<Vertex> text_vertices;
+
+        append_menu_font_text(
+            text_vertices,
+            message,
+            text_x + 2.0f,
+            text_y + 2.0f,
+            text_height,
+            width,
+            height,
+            {0.0f, 0.0f, 0.0f}
+        );
+
+        append_menu_font_text(
+            text_vertices,
+            message,
+            text_x,
+            text_y,
+            text_height,
+            width,
+            height,
+            {1.0f, 1.0f, 1.0f}
+        );
+
+        upload_dynamic_buffer(menu_font_vertex_buffer_, text_vertices);
+        menu_font_vertex_count_ = static_cast<std::uint32_t>(text_vertices.size());
+        if (menu_font_vertex_count_ > 0 && menu_font_.texture.descriptor_set != VK_NULL_HANDLE) {
+            draw_textured_buffer(frame, menu_font_vertex_buffer_, menu_font_vertex_count_, menu_font_.texture.descriptor_set);
+        }
+    }
+}
+
+'@
+
+if ($RendererCppText.Contains("void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message)")) {
+    $RendererCppText = Replace-BetweenMarkers `
+        $RendererCppText `
+        "void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message) {" `
+        "void Renderer::draw_pause_menu" `
+        $RendererPanoramaMessageMethod `
+        "Renderer::draw_menu_panorama_message without black cube" `
+        ([ref]$RendererCppChanged) `
+        $Log
+} else {
+    $insertMarker = "void Renderer::draw_pause_menu"
+    $insertAt = $RendererCppText.IndexOf($insertMarker)
+
+    if ($insertAt -lt 0) {
+        $insertMarker = "bool Renderer::upload_chunk_mesh"
+        $insertAt = $RendererCppText.IndexOf($insertMarker)
+    }
+
+    if ($insertAt -lt 0) {
+        throw "Cannot insert draw_menu_panorama_message: insertion marker not found"
+    }
+
+    $RendererCppText = $RendererCppText.Substring(0, $insertAt) + $RendererPanoramaMessageMethod + $RendererCppText.Substring($insertAt)
+    $RendererCppChanged = $true
+    Add-Log $Log "OK: inserted Renderer::draw_menu_panorama_message without black cube"
+}
+
+if ($RendererCppChanged) {
+    Write-Utf8NoBom $RendererCppPath $RendererCppText
+    Add-Log $Log "OK: src/render/renderer.cpp written"
+}
+
+# Ensure renderer.hpp has the transition method declaration.
 $RendererHppText = Read-Utf8Text $RendererHppPath
 $RendererHppChanged = $false
+
+if (-not $RendererHppText.Contains("void draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message);")) {
+    $oldDecl = '    void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);'
+    $newDecl = @'
+    void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
+    void draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message);
+'@
+
+    if ($RendererHppText.Contains($oldDecl)) {
+        $RendererHppText = $RendererHppText.Replace($oldDecl, $newDecl.TrimEnd())
+        $RendererHppChanged = $true
+        Add-Log $Log "OK: renderer.hpp added draw_menu_panorama_message declaration"
+    } else {
+        throw "Cannot patch renderer.hpp: draw_main_menu declaration anchor not found"
+    }
+}
 
 if (-not $RendererHppText.Contains("void unload_all_chunk_meshes();")) {
     $oldDecl = '    void unload_chunk_mesh(ChunkCoord coord);'
@@ -285,12 +406,10 @@ if (-not $RendererHppText.Contains("void unload_all_chunk_meshes();")) {
     if ($RendererHppText.Contains($oldDecl)) {
         $RendererHppText = $RendererHppText.Replace($oldDecl, $newDecl.TrimEnd())
         $RendererHppChanged = $true
-        Add-Log $Log "OK: renderer.hpp added unload_all_chunk_meshes and resident_chunk_mesh_count"
+        Add-Log $Log "OK: renderer.hpp added unload_all_chunk_meshes declaration"
     } else {
         throw "Cannot patch renderer.hpp: unload_chunk_mesh declaration anchor not found"
     }
-} else {
-    Add-Log $Log "OK: renderer.hpp unload_all_chunk_meshes already exists"
 }
 
 if ($RendererHppChanged) {
@@ -298,8 +417,9 @@ if ($RendererHppChanged) {
     Add-Log $Log "OK: src/render/renderer.hpp written"
 }
 
+# Ensure renderer.cpp has full unload method.
 $RendererCppText = Read-Utf8Text $RendererCppPath
-$RendererCppChanged = $false
+$RendererCppChanged2 = $false
 
 $RendererUnloadAllMethod = @'
 void Renderer::unload_all_chunk_meshes() {
@@ -330,37 +450,68 @@ if (-not $RendererCppText.Contains("void Renderer::unload_all_chunk_meshes()")) 
     }
 
     if ($insertAt -lt 0) {
-        throw "Cannot insert renderer unload_all_chunk_meshes: insertion marker not found"
+        throw "Cannot insert unload_all_chunk_meshes: insertion marker not found"
     }
 
     $RendererCppText = $RendererCppText.Substring(0, $insertAt) + $RendererUnloadAllMethod + $RendererCppText.Substring($insertAt)
-    $RendererCppChanged = $true
-    Add-Log $Log "OK: renderer.cpp inserted unload_all_chunk_meshes implementation"
-} else {
-    Add-Log $Log "OK: renderer.cpp unload_all_chunk_meshes already exists"
+    $RendererCppChanged2 = $true
+    Add-Log $Log "OK: renderer.cpp inserted unload_all_chunk_meshes"
 }
 
-if ($RendererCppChanged) {
+if ($RendererCppChanged2) {
     Write-Utf8NoBom $RendererCppPath $RendererCppText
-    Add-Log $Log "OK: src/render/renderer.cpp written"
+    Add-Log $Log "OK: src/render/renderer.cpp written after unload method insertion"
 }
 
 # ----------------------------------------------------------------------
-# 3. Application: practical 5x5 spawn loading and complete world unload.
+# 3. Application: normal panorama speed, half-distance preload, 2 sec loading and leaving.
 # ----------------------------------------------------------------------
 
 $ApplicationCppText = Read-Utf8Text $ApplicationCppPath
 $ApplicationCppChanged = $false
 
-if (-not $ApplicationCppText.Contains("#include <vector>")) {
-    if ($ApplicationCppText.Contains("#include <string>")) {
-        $ApplicationCppText = $ApplicationCppText.Replace("#include <string>", "#include <string>`r`n#include <vector>")
-        $ApplicationCppChanged = $true
-        Add-Log $Log "OK: application.cpp added <vector> include"
-    } else {
-        Add-Log $Log "WARN: application.cpp <string> include anchor not found; <vector> not inserted"
+$TransitionHelpers = @'
+void Application::render_black_transition_frames(int frame_count) {
+    render_world_transition_frames(frame_count, "Загрузка мира");
+}
+
+void Application::render_world_transition_frames(int frame_count, const char* message) {
+    const CameraFrameData loading_camera {
+        Mat4::identity(),
+        Mat4::identity(),
+        Mat4::identity(),
+        {},
+        {0.0f, 0.0f, -1.0f},
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f}
+    };
+
+    for (int i = 0; i < frame_count && !platform_.should_close(); ++i) {
+        platform_.pump_events();
+
+        const float dt = platform_.frame_delta_seconds();
+        menu_time_seconds_ += dt > 0.0001f ? std::min(dt, 0.1f) : (1.0f / 60.0f);
+
+        renderer_.begin_frame(loading_camera);
+        renderer_.draw_menu_panorama_message(
+            menu_time_seconds_,
+            menu_uses_night_panorama_,
+            message != nullptr ? message : ""
+        );
+        renderer_.end_frame();
     }
 }
+
+'@
+
+$ApplicationCppText = Replace-BetweenMarkers `
+    $ApplicationCppText `
+    "void Application::render_black_transition_frames(int frame_count) {" `
+    "bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {" `
+    $TransitionHelpers `
+    "Application transition helpers with normal panorama speed" `
+    ([ref]$ApplicationCppChanged) `
+    $Log
 
 $PreloadWorldSpawnFunction = @'
 bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
@@ -370,6 +521,17 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
 
     render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Загрузка мира");
 
+    const auto loading_started = std::chrono::steady_clock::now();
+
+    const int selected_radius = std::max(1, world_streamer_->chunk_radius());
+    const int required_preload_radius = std::clamp(
+        static_cast<int>(std::ceil(static_cast<float>(selected_radius) * world_runtime_tuning().preload_required_fraction)),
+        1,
+        selected_radius
+    );
+
+    const int full_preload_radius = selected_radius;
+
     const int spawn_block_x = static_cast<int>(std::floor(spawn_position.x));
     const int spawn_block_z = static_cast<int>(std::floor(spawn_position.z));
     const int probe_y = std::clamp(
@@ -378,38 +540,41 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         kWorldMaxY
     );
 
-    const int max_frames = world_runtime_tuning().spawn_preload_max_frames;
-    const int preload_radius = world_runtime_tuning().spawn_preload_radius;
-    const std::size_t required_area_chunks =
-        static_cast<std::size_t>((preload_radius * 2 + 1) * (preload_radius * 2 + 1));
-    const std::size_t min_visible_chunks =
-        std::max(world_runtime_tuning().spawn_preload_min_visible_chunks, required_area_chunks);
+    const int warning_frame = world_runtime_tuning().spawn_preload_max_frames;
     const std::size_t requests_per_frame = world_runtime_tuning().spawn_preload_requests_per_frame;
     const std::size_t upload_max_count = world_runtime_tuning().spawn_preload_upload_max_count;
+    const std::size_t required_area_chunks =
+        static_cast<std::size_t>((required_preload_radius * 2 + 1) * (required_preload_radius * 2 + 1));
 
-    std::vector<std::array<int, 2>> preload_probe_offsets;
-    preload_probe_offsets.reserve(required_area_chunks);
-    for (int dz = -preload_radius; dz <= preload_radius; ++dz) {
-        for (int dx = -preload_radius; dx <= preload_radius; ++dx) {
-            preload_probe_offsets.push_back({{dx * kChunkWidth, dz * kChunkDepth}});
+    std::vector<std::array<int, 2>> required_probe_offsets;
+    required_probe_offsets.reserve(required_area_chunks);
+    for (int dz = -required_preload_radius; dz <= required_preload_radius; ++dz) {
+        for (int dx = -required_preload_radius; dx <= required_preload_radius; ++dx) {
+            required_probe_offsets.push_back({{dx * kChunkWidth, dz * kChunkDepth}});
         }
     }
 
     bool spawn_column_loaded_once = false;
+    bool required_area_ready_once = false;
+    bool warning_logged = false;
 
     log_message(
         LogLevel::Info,
-        std::string("Application: variant B preload begin [radius=") +
-            std::to_string(preload_radius) +
-            ", required_area_chunks=" + std::to_string(required_area_chunks) +
-            ", min_visible=" + std::to_string(min_visible_chunks) +
-            ", max_frames=" + std::to_string(max_frames) + "]"
+        std::string("Application: half-distance preload begin [selected_radius=") +
+            std::to_string(selected_radius) +
+            ", required_radius=" + std::to_string(required_preload_radius) +
+            ", required_chunks=" + std::to_string(required_area_chunks) +
+            ", min_seconds=" + std::to_string(world_runtime_tuning().world_loading_min_seconds) + "]"
     );
 
-    for (int frame = 0; frame < max_frames && !platform_.should_close(); ++frame) {
+    for (int frame = 0; !platform_.should_close(); ++frame) {
         platform_.pump_events();
 
-        world_streamer_->request_spawn_preload(spawn_position, preload_radius, requests_per_frame);
+        const auto now = std::chrono::steady_clock::now();
+        const float elapsed_seconds = std::chrono::duration<float>(now - loading_started).count();
+
+        const int active_preload_radius = required_area_ready_once ? full_preload_radius : required_preload_radius;
+        world_streamer_->request_spawn_preload(spawn_position, active_preload_radius, requests_per_frame);
 
         for (int apply_tick = 0; apply_tick < 4; ++apply_tick) {
             world_streamer_->tick_generation_jobs();
@@ -441,7 +606,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         world_streamer_->refresh_visible_chunks();
 
         int loaded_probe_columns = 0;
-        for (const auto& offset : preload_probe_offsets) {
+        for (const auto& offset : required_probe_offsets) {
             const BlockQueryResult query = world_streamer_->query_block_at_world(
                 spawn_block_x + offset[0],
                 probe_y,
@@ -462,38 +627,44 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         spawn_column_loaded_once = spawn_column_loaded_once || spawn_probe.status == BlockQueryStatus::Loaded;
         const WorldStreamer::StreamingStats stats = world_streamer_->stats();
 
-        if (spawn_column_loaded_once &&
-            loaded_probe_columns >= static_cast<int>(preload_probe_offsets.size()) &&
-            stats.visible_chunks >= min_visible_chunks) {
+        required_area_ready_once =
+            spawn_column_loaded_once &&
+            loaded_probe_columns >= static_cast<int>(required_probe_offsets.size()) &&
+            stats.visible_chunks >= required_area_chunks;
+
+        if (required_area_ready_once &&
+            elapsed_seconds >= world_runtime_tuning().world_loading_min_seconds) {
             log_message(
                 LogLevel::Info,
-                std::string("Application: variant B preload done [frame=") +
+                std::string("Application: half-distance preload done [frame=") +
+                    std::to_string(frame) +
+                    ", elapsed=" + std::to_string(elapsed_seconds) +
+                    ", visible=" + std::to_string(stats.visible_chunks) +
+                    ", probes=" + std::to_string(loaded_probe_columns) +
+                    "/" + std::to_string(required_probe_offsets.size()) +
+                    ", selected_radius=" + std::to_string(selected_radius) +
+                    ", required_radius=" + std::to_string(required_preload_radius) + "]"
+            );
+
+            return true;
+        }
+
+        if (!warning_logged && frame >= warning_frame) {
+            warning_logged = true;
+            log_message(
+                LogLevel::Warning,
+                std::string("Application: half-distance preload is taking longer than expected [frame=") +
                     std::to_string(frame) +
                     ", visible=" + std::to_string(stats.visible_chunks) +
                     ", probes=" + std::to_string(loaded_probe_columns) +
-                    "/" + std::to_string(preload_probe_offsets.size()) + "]"
+                    "/" + std::to_string(required_probe_offsets.size()) + "]"
             );
-
-            render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Загрузка мира");
-            return true;
         }
 
         render_world_transition_frames(1, "Загрузка мира");
     }
 
-    if (platform_.should_close()) {
-        return false;
-    }
-
-    const WorldStreamer::StreamingStats stats = world_streamer_->stats();
-    log_message(
-        LogLevel::Warning,
-        std::string("Application: variant B preload timeout [visible=") +
-            std::to_string(stats.visible_chunks) +
-            ", spawn_loaded=" + (spawn_column_loaded_once ? "true" : "false") + "]"
-    );
-
-    return spawn_column_loaded_once;
+    return false;
 }
 
 '@
@@ -503,13 +674,15 @@ $ApplicationCppText = Replace-BetweenMarkers `
     "bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {" `
     "void Application::unload_world_for_menu() {" `
     $PreloadWorldSpawnFunction `
-    "Application::preload_world_spawn variant B" `
+    "Application::preload_world_spawn half selected distance" `
     ([ref]$ApplicationCppChanged) `
     $Log
 
 $UnloadWorldForMenuFunction = @'
 void Application::unload_world_for_menu() {
-    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Выход из мира");
+    const auto leaving_started = std::chrono::steady_clock::now();
+
+    render_world_transition_frames(1, "Выход из мира");
 
     if (world_streamer_ != nullptr) {
         world_streamer_->flush_all_dirty_chunks();
@@ -530,7 +703,20 @@ void Application::unload_world_for_menu() {
     block_break_.target.reset();
     block_break_.repeat_seconds = 0.0f;
 
-    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Выход из мира");
+    while (!platform_.should_close()) {
+        const float elapsed_seconds = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - leaving_started
+        ).count();
+
+        if (elapsed_seconds >= world_runtime_tuning().world_leaving_min_seconds &&
+            world_streamer_ == nullptr &&
+            world_save_ == nullptr &&
+            renderer_.resident_chunk_mesh_count() == 0) {
+            break;
+        }
+
+        render_world_transition_frames(1, "Выход из мира");
+    }
 }
 
 '@
@@ -540,7 +726,7 @@ $ApplicationCppText = Replace-BetweenMarkers `
     "void Application::unload_world_for_menu() {" `
     "Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame" `
     $UnloadWorldForMenuFunction `
-    "Application::unload_world_for_menu complete renderer/world release" `
+    "Application::unload_world_for_menu two seconds and full release" `
     ([ref]$ApplicationCppChanged) `
     $Log
 
@@ -558,44 +744,52 @@ $RendererHppAfter = Read-Utf8Text $RendererHppPath
 $RendererCppAfter = Read-Utf8Text $RendererCppPath
 $ApplicationCppAfter = Read-Utf8Text $ApplicationCppPath
 
-if (-not $RuntimeTuningAfter.Contains("int spawn_preload_radius {2};")) {
-    throw "Validation failed: desktop/practical spawn_preload_radius target missing"
+if (-not $RuntimeTuningAfter.Contains("float preload_required_fraction {0.5f};")) {
+    throw "Validation failed: preload_required_fraction missing"
 }
 
-if (-not $RuntimeTuningAfter.Contains("std::size_t spawn_preload_min_visible_chunks {25};")) {
-    throw "Validation failed: spawn_preload_min_visible_chunks 25 missing"
+if (-not $RuntimeTuningAfter.Contains("float world_loading_min_seconds {2.0f};")) {
+    throw "Validation failed: world_loading_min_seconds missing"
 }
 
-if (-not $RendererHppAfter.Contains("void unload_all_chunk_meshes();")) {
-    throw "Validation failed: renderer unload_all_chunk_meshes declaration missing"
+if (-not $RuntimeTuningAfter.Contains("float world_leaving_min_seconds {2.0f};")) {
+    throw "Validation failed: world_leaving_min_seconds missing"
 }
 
-if (-not $RendererCppAfter.Contains("void Renderer::unload_all_chunk_meshes()")) {
-    throw "Validation failed: renderer unload_all_chunk_meshes implementation missing"
+if ($RendererCppAfter.Contains("height * 0.42f") -and $RendererCppAfter.Contains("draw_menu_panorama_message")) {
+    throw "Validation failed: black overlay/cube may still exist in panorama message renderer"
 }
 
-if (-not $ApplicationCppAfter.Contains("Application: variant B preload begin")) {
-    throw "Validation failed: variant B preload function missing"
+if (-not $RendererCppAfter.Contains("text_x + 2.0f")) {
+    throw "Validation failed: text shadow path missing"
 }
 
-if (-not $ApplicationCppAfter.Contains("dx * kChunkWidth")) {
-    throw "Validation failed: chunk-spaced preload probes missing"
+if (-not $ApplicationCppAfter.Contains("selected_radius = std::max(1, world_streamer_->chunk_radius())")) {
+    throw "Validation failed: selected render distance radius is not used"
+}
+
+if (-not $ApplicationCppAfter.Contains("preload_required_fraction")) {
+    throw "Validation failed: preload_required_fraction not used in Application"
+}
+
+if (-not $ApplicationCppAfter.Contains("world_loading_min_seconds")) {
+    throw "Validation failed: 2 second loading gate missing"
+}
+
+if (-not $ApplicationCppAfter.Contains("world_leaving_min_seconds")) {
+    throw "Validation failed: 2 second leaving gate missing"
+}
+
+if (-not $ApplicationCppAfter.Contains("active_preload_radius = required_area_ready_once ? full_preload_radius : required_preload_radius")) {
+    throw "Validation failed: fast-device extra preload behavior missing"
+}
+
+if (-not $ApplicationCppAfter.Contains("renderer_.resident_chunk_mesh_count() == 0")) {
+    throw "Validation failed: resident chunk mesh cleanup check missing"
 }
 
 if (-not $ApplicationCppAfter.Contains("renderer_.unload_all_chunk_meshes();")) {
-    throw "Validation failed: complete renderer unload call missing"
-}
-
-if (-not $ApplicationCppAfter.Contains("world_streamer_->flush_all_dirty_chunks();")) {
-    throw "Validation failed: world save flush missing before unload"
-}
-
-if (-not $ApplicationCppAfter.Contains("world_streamer_.reset();")) {
-    throw "Validation failed: world_streamer reset missing"
-}
-
-if (-not $ApplicationCppAfter.Contains("world_save_.reset();")) {
-    throw "Validation failed: world_save reset missing"
+    throw "Validation failed: unload_all_chunk_meshes call missing"
 }
 
 Add-Log $Log ""
@@ -606,17 +800,20 @@ Add-Log $Log "- src/render/renderer.cpp"
 Add-Log $Log "- src/app/application.cpp"
 Add-Log $Log ""
 Add-Log $Log "What changed:"
-Add-Log $Log "- Variant B loading: wait for safe 5x5 spawn area, not the full radius-16 world."
-Add-Log $Log "- The player enters the world only after center-first preload reaches the safe area."
-Add-Log $Log "- Normal streaming backlog continues loading the rest of radius 16 after entry."
-Add-Log $Log "- Exit now flushes dirty chunks, unloads every resident renderer chunk mesh, then resets WorldStreamer and WorldSave."
-Add-Log $Log "- This reduces long full-world loading while still preventing spawn falling and stale world memory."
+Add-Log $Log "- Loading no longer waits for fixed 5x5."
+Add-Log $Log "- Required preload radius is now ceil(selected_chunk_radius * 0.5)."
+Add-Log $Log "- The loading screen stays for at least 2 seconds."
+Add-Log $Log "- If required chunks are not ready after 2 seconds, loading continues."
+Add-Log $Log "- If required chunks are ready early, the game keeps preloading farther chunks until 2 seconds pass."
+Add-Log $Log "- Exit screen stays for at least 2 seconds and waits for renderer/world release."
+Add-Log $Log "- Removed the black rectangle/cube behind transition text."
+Add-Log $Log "- Panorama time now uses platform frame delta instead of fixed 1/60 increments."
 Add-Log $Log ""
 Add-Log $Log "Next step:"
 Add-Log $Log "1. Run build_release.bat."
-Add-Log $Log "2. Start a world and check logs for: Application: variant B preload done."
-Add-Log $Log "3. Check that the player does not fall at spawn."
-Add-Log $Log "4. Exit to menu and check that resident chunk meshes are cleared without rendering the world."
+Add-Log $Log "2. Start world: the loading screen must stay at least 2 seconds."
+Add-Log $Log "3. With chunk radius 16, required preload radius must be 8."
+Add-Log $Log "4. Exit world: the exit screen must stay at least 2 seconds and return only after cleanup."
 Add-Log $Log "5. If build fails, send the first compiler error and 30 lines after it."
 
 Write-Utf8NoBom $ReportPath (($Log -join [Environment]::NewLine) + [Environment]::NewLine)

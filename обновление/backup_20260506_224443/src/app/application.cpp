@@ -12,6 +12,7 @@
 #include <limits>
 #include <random>
 #include <string>
+#include <vector>
 
 namespace ml {
 
@@ -293,7 +294,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         return false;
     }
 
-    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Загрузка мира");
 
     const int spawn_block_x = static_cast<int>(std::floor(spawn_position.x));
     const int spawn_block_z = static_cast<int>(std::floor(spawn_position.z));
@@ -303,29 +304,30 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         kWorldMaxY
     );
 
-    constexpr std::array<std::array<int, 2>, 9> preload_probe_offsets {{
-        {{0, 0}},
-        {{1, 0}},
-        {{-1, 0}},
-        {{0, 1}},
-        {{0, -1}},
-        {{1, 1}},
-        {{-1, 1}},
-        {{1, -1}},
-        {{-1, -1}}
-    }};
-
     const int max_frames = world_runtime_tuning().spawn_preload_max_frames;
     const int preload_radius = world_runtime_tuning().spawn_preload_radius;
-    const std::size_t min_visible_chunks = world_runtime_tuning().spawn_preload_min_visible_chunks;
+    const std::size_t required_area_chunks =
+        static_cast<std::size_t>((preload_radius * 2 + 1) * (preload_radius * 2 + 1));
+    const std::size_t min_visible_chunks =
+        std::max(world_runtime_tuning().spawn_preload_min_visible_chunks, required_area_chunks);
     const std::size_t requests_per_frame = world_runtime_tuning().spawn_preload_requests_per_frame;
     const std::size_t upload_max_count = world_runtime_tuning().spawn_preload_upload_max_count;
+
+    std::vector<std::array<int, 2>> preload_probe_offsets;
+    preload_probe_offsets.reserve(required_area_chunks);
+    for (int dz = -preload_radius; dz <= preload_radius; ++dz) {
+        for (int dx = -preload_radius; dx <= preload_radius; ++dx) {
+            preload_probe_offsets.push_back({{dx * kChunkWidth, dz * kChunkDepth}});
+        }
+    }
+
     bool spawn_column_loaded_once = false;
 
     log_message(
         LogLevel::Info,
-        std::string("Application: preload spawn chunks begin [radius=") +
+        std::string("Application: variant B preload begin [radius=") +
             std::to_string(preload_radius) +
+            ", required_area_chunks=" + std::to_string(required_area_chunks) +
             ", min_visible=" + std::to_string(min_visible_chunks) +
             ", max_frames=" + std::to_string(max_frames) + "]"
     );
@@ -391,17 +393,18 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
             stats.visible_chunks >= min_visible_chunks) {
             log_message(
                 LogLevel::Info,
-                std::string("Application: preload spawn chunks done [frame=") +
+                std::string("Application: variant B preload done [frame=") +
                     std::to_string(frame) +
                     ", visible=" + std::to_string(stats.visible_chunks) +
-                    ", probes=" + std::to_string(loaded_probe_columns) + "]"
+                    ", probes=" + std::to_string(loaded_probe_columns) +
+                    "/" + std::to_string(preload_probe_offsets.size()) + "]"
             );
 
-            render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+            render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Загрузка мира");
             return true;
         }
 
-        render_black_transition_frames(1);
+        render_world_transition_frames(1, "Загрузка мира");
     }
 
     if (platform_.should_close()) {
@@ -411,7 +414,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     const WorldStreamer::StreamingStats stats = world_streamer_->stats();
     log_message(
         LogLevel::Warning,
-        std::string("Application: preload spawn chunks timeout; continuing [visible=") +
+        std::string("Application: variant B preload timeout [visible=") +
             std::to_string(stats.visible_chunks) +
             ", spawn_loaded=" + (spawn_column_loaded_once ? "true" : "false") + "]"
     );
@@ -423,11 +426,11 @@ void Application::unload_world_for_menu() {
 
     if (world_streamer_ != nullptr) {
         world_streamer_->flush_all_dirty_chunks();
+    }
 
-        for (const ActiveChunk& chunk : world_streamer_->visible_chunks()) {
-            renderer_.unload_chunk_mesh(chunk.coord);
-        }
+    renderer_.unload_all_chunk_meshes();
 
+    if (world_streamer_ != nullptr) {
         for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
             renderer_.unload_chunk_mesh(coord);
         }

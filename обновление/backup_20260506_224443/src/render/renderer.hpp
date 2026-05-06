@@ -84,6 +84,8 @@ public:
     void draw_pause_menu(int hovered_button);
     bool upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility);
     void unload_chunk_mesh(ChunkCoord coord);
+    void unload_all_chunk_meshes();
+    std::size_t resident_chunk_mesh_count() const;
     void set_cave_visibility_frame(const CaveVisibilityFrame& frame);
     void draw_visible_chunks(std::span<const ActiveChunk> visible_chunks);
     void end_frame();

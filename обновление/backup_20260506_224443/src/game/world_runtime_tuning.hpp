@@ -28,12 +28,13 @@ struct WorldRuntimeTuning {
     float forward_buffer_safety_blocks {24.0f};
     float fast_flight_speed_threshold {25.0f};
     float very_fast_flight_speed_threshold {45.0f};
-    int spawn_preload_radius {1};
-    std::size_t spawn_preload_min_visible_chunks {9};
-    int spawn_preload_max_frames {900};
-    std::size_t spawn_preload_requests_per_frame {16};
-    std::size_t spawn_preload_upload_max_count {16};
+    int spawn_preload_radius {2};
+    std::size_t spawn_preload_min_visible_chunks {25};
+    int spawn_preload_max_frames {1200};
+    std::size_t spawn_preload_requests_per_frame {20};
+    std::size_t spawn_preload_upload_max_count {20};
     std::size_t streaming_backlog_requests_per_frame {8};
+    std::size_t world_exit_mesh_unload_budget_per_step {128};
     int transition_black_frames {30};
 };
 
@@ -71,11 +72,12 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         18.0f,
         35.0f,
         1,
-        std::size_t {4},
-        600,
+        std::size_t {9},
+        700,
         std::size_t {8},
         std::size_t {8},
         std::size_t {4},
+        std::size_t {64},
         30
     };
 #else
@@ -111,12 +113,13 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         24.0f,
         25.0f,
         45.0f,
-        1,
-        std::size_t {9},
-        900,
-        std::size_t {16},
-        std::size_t {16},
+        2,
+        std::size_t {25},
+        1200,
+        std::size_t {20},
+        std::size_t {20},
         std::size_t {8},
+        std::size_t {128},
         30
     };
 #endif
