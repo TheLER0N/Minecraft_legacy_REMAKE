@@ -1,42 +1,33 @@
 Patch report
 Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
-Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_232511
-Time: 2026-05-06 23:25:11
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260507_000644
+Time: 2026-05-07 00:06:44
 
-OK: world_runtime_tuning.hpp rewritten
-OK: world_streamer.cpp added contiguous_generation_ring_window helper
-OK: replaced WorldStreamer::update_observer ring-window generation
-OK: replaced WorldStreamer::request_spawn_preload ring-window generation
-OK: replaced WorldStreamer::refresh_visible_chunks continuous no-gap visibility
-OK: replaced WorldStreamer::drain_pending_uploads_by_budget ring-first upload
+OK: world_runtime_tuning.hpp rewritten for adaptive corridor streaming
+OK: world_streamer.cpp replaced helper block with corridor helpers
+OK: replaced WorldStreamer::update_observer adaptive corridor scheduler
+OK: replaced WorldStreamer::refresh_visible_chunks connected visible set
+OK: replaced WorldStreamer::drain_pending_uploads_by_budget corridor priority
 OK: src/game/world_streamer.cpp written
-OK: replaced Renderer::draw_menu_panorama_message no buttons/no black cube
-OK: src/render/renderer.cpp written
-OK: replaced Application transition helpers no button flicker
-OK: replaced Application::preload_world_spawn optimized no-gap half distance
-OK: replaced Application::unload_world_for_menu 2sec full cleanup
-OK: src/app/application.cpp written
 
 Changed files:
 - src/game/world_runtime_tuning.hpp
-- src/game/world_streamer.hpp
 - src/game/world_streamer.cpp
-- src/render/renderer.hpp
 - src/render/renderer.cpp
-- src/app/application.cpp
 
 What changed:
-- Keeps no-gap visual output: only continuous uploaded rings are visible.
-- Restores optimization: generation/upload may run up to 3 rings ahead.
-- Pending uploads are sorted ring-first to fill near holes before far chunks.
-- Loading still waits for half selected chunk radius and at least 2 seconds.
-- If half radius is ready early, preload continues farther until the 2 second gate ends.
-- Transition renderer clears menu button/logo counts and draws only panorama plus text.
-- Exit keeps the 2 second gate and waits for renderer/world cleanup.
+- Added adaptive corridor streaming for normal world fast flight.
+- At low speed, streaming still behaves like normal square/safe loading.
+- At high speed, scheduler prioritizes safety bubble + forward corridor.
+- Direction is blended from motion velocity and camera look direction.
+- Expected elytra speed is configured as 78.4 blocks/sec.
+- Visible chunks are now a connected set from the player, so ready far chunks do not appear as islands.
+- Pending uploads are sorted by corridor priority so near/forward chunks reach Renderer first.
+- Transition screen button counters are cleared to reduce loading/exit button flicker.
 
 Next step:
 1. Run build_release.bat.
-2. With radius 16, check log: required_radius=8, ring_window=3.
-3. Confirm terrain appears without holes, but generation no longer stalls one ring at a time.
-4. Confirm buttons do not flicker during loading/exit.
+2. Test walking: nearby chunks should still fill normally.
+3. Test elytra speed around 78.4 blocks/sec: forward corridor should receive priority.
+4. Confirm far chunks do not appear as disconnected islands.
 5. If build fails, send the first compiler error and 30 lines after it.
