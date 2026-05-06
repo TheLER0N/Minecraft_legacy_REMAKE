@@ -54,6 +54,7 @@ public:
     //
     void update_observer(Vec3 position);
     void update_observer(Vec3 position, Vec3 forward);
+    void update_observer(Vec3 position, Vec3 forward, float dt_seconds);
     void tick_generation_jobs();
     std::span<const ActiveChunk> visible_chunks() const;
     void refresh_visible_chunks();
@@ -242,6 +243,9 @@ private:
     Vec3 observer_forward_ {0.0f, 0.0f, -1.0f};
     Vec3 last_streaming_update_position_ {};
     bool has_streaming_update_position_ {false};
+    Vec3 previous_observer_position_ {};
+    bool has_previous_observer_position_ {false};
+    float observer_speed_blocks_per_second_ {0.0f};
     std::uint64_t next_chunk_version_ {1};
     std::uint64_t next_light_job_token_ {1};
     std::uint64_t next_rebuild_serial_ {1};

@@ -20,6 +20,14 @@ struct WorldRuntimeTuning {
     float forward_priority_weight {30.0f};
     float side_priority_weight {18.0f};
     float back_priority_penalty {1000.0f};
+    int min_forward_buffer_chunks {3};
+    int max_forward_buffer_chunks {8};
+    int min_forward_width_chunks {3};
+    int max_forward_width_chunks {7};
+    float forward_buffer_pipeline_seconds {0.75f};
+    float forward_buffer_safety_blocks {24.0f};
+    float fast_flight_speed_threshold {25.0f};
+    float very_fast_flight_speed_threshold {45.0f};
 };
 
 inline WorldRuntimeTuning world_runtime_tuning() {
@@ -46,7 +54,15 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         4.0f,
         24.0f,
         18.0f,
-        1000.0f
+        1000.0f,
+        3,
+        5,
+        3,
+        5,
+        0.75f,
+        20.0f,
+        18.0f,
+        35.0f
     };
 #else
     const std::size_t reserved_threads = hardware_threads >= 8 ? 2 : 1;
@@ -72,7 +88,15 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         4.0f,
         30.0f,
         18.0f,
-        1000.0f
+        1000.0f,
+        3,
+        8,
+        3,
+        7,
+        0.75f,
+        24.0f,
+        25.0f,
+        45.0f
     };
 #endif
 }

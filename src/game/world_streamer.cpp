@@ -63,6 +63,63 @@ float back_priority_penalty() {
     return world_runtime_tuning().back_priority_penalty;
 }
 
+int min_forward_buffer_chunks() {
+    return world_runtime_tuning().min_forward_buffer_chunks;
+}
+
+int max_forward_buffer_chunks() {
+    return world_runtime_tuning().max_forward_buffer_chunks;
+}
+
+int min_forward_width_chunks() {
+    return world_runtime_tuning().min_forward_width_chunks;
+}
+
+int max_forward_width_chunks() {
+    return world_runtime_tuning().max_forward_width_chunks;
+}
+
+float forward_buffer_pipeline_seconds() {
+    return world_runtime_tuning().forward_buffer_pipeline_seconds;
+}
+
+float forward_buffer_safety_blocks() {
+    return world_runtime_tuning().forward_buffer_safety_blocks;
+}
+
+float fast_flight_speed_threshold() {
+    return world_runtime_tuning().fast_flight_speed_threshold;
+}
+
+float very_fast_flight_speed_threshold() {
+    return world_runtime_tuning().very_fast_flight_speed_threshold;
+}
+
+int adaptive_forward_buffer_chunks(float speed_blocks_per_second) {
+    const float needed_blocks =
+        speed_blocks_per_second * forward_buffer_pipeline_seconds() +
+        forward_buffer_safety_blocks();
+
+    const int calculated = static_cast<int>(std::ceil(needed_blocks / static_cast<float>(kChunkWidth)));
+    return std::clamp(calculated, min_forward_buffer_chunks(), max_forward_buffer_chunks());
+}
+
+int adaptive_forward_width_chunks(float speed_blocks_per_second) {
+    int width = min_forward_width_chunks();
+
+    if (speed_blocks_per_second >= very_fast_flight_speed_threshold()) {
+        width = max_forward_width_chunks();
+    } else if (speed_blocks_per_second >= fast_flight_speed_threshold()) {
+        width = std::min(max_forward_width_chunks(), min_forward_width_chunks() + 2);
+    }
+
+    if ((width % 2) == 0) {
+        ++width;
+    }
+
+    return std::clamp(width, min_forward_width_chunks(), max_forward_width_chunks());
+}
+
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 
@@ -219,10 +276,14 @@ WorldStreamer::~WorldStreamer() {
 }
 
 void WorldStreamer::update_observer(Vec3 position) {
-    update_observer(position, observer_forward_);
+    update_observer(position, observer_forward_, 0.0f);
 }
 
 void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
+    update_observer(position, forward, 0.0f);
+}
+
+void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_seconds) {
     const ChunkCoord origin = world_to_chunk(position);
     ++frame_counter_;
     observer_position_ = position;
@@ -231,6 +292,18 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
         observer_forward_ = {0.0f, 0.0f, -1.0f};
     }
 
+    if (has_previous_observer_position_ && dt_seconds > 0.0001f) {
+        const float dx = position.x - previous_observer_position_.x;
+        const float dz = position.z - previous_observer_position_.z;
+        const float instant_speed = std::sqrt(dx * dx + dz * dz) / dt_seconds;
+
+        observer_speed_blocks_per_second_ =
+            observer_speed_blocks_per_second_ * 0.85f +
+            instant_speed * 0.15f;
+    }
+
+    previous_observer_position_ = position;
+    has_previous_observer_position_ = true;
     observer_chunk_ = origin;
 
     const float streaming_distance = streaming_update_distance_blocks();
@@ -1519,10 +1592,34 @@ float WorldStreamer::chunk_priority_score(ChunkCoord coord, Vec3 observer_positi
     const float side_abs = std::abs(side_axis);
     const float dist_sq = dx * dx + dz * dz;
 
+    const int forward_depth = adaptive_forward_buffer_chunks(observer_speed_blocks_per_second_);
+    const int forward_width = adaptive_forward_width_chunks(observer_speed_blocks_per_second_);
+    const float half_width = static_cast<float>(forward_width) * 0.5f;
+
+    const bool hot_zone = dist_sq <= 4.0f;
+    const bool in_forward_corridor =
+        forward_axis > 0.25f &&
+        forward_axis <= static_cast<float>(forward_depth) + 0.5f &&
+        side_abs <= half_width;
+
+    if (hot_zone) {
+        return -30000.0f + dist_sq + side_abs * 0.5f;
+    }
+
+    if (in_forward_corridor) {
+        const float front_edge_distance = std::abs(static_cast<float>(forward_depth) - forward_axis);
+        return
+            -20000.0f +
+            front_edge_distance * 12.0f +
+            side_abs * 5.0f -
+            forward_axis * 2.0f +
+            dist_sq * 0.01f;
+    }
+
     float score =
-        -forward_axis * forward_priority_weight() +
-        side_abs * side_priority_weight() +
-        dist_sq * 0.02f;
+        dist_sq * 0.35f -
+        forward_axis * forward_priority_weight() +
+        side_abs * side_priority_weight();
 
     if (forward_axis < -0.25f) {
         score += back_priority_penalty() + std::abs(forward_axis) * forward_priority_weight();

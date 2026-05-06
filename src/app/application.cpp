@@ -615,7 +615,7 @@ int Application::run() {
 
         const Vec3 observer_position = debug_fly_enabled_ ? camera_.position() : player_.position();
         const Vec3 observer_forward = debug_fly_enabled_ ? camera_.forward() : player_.forward();
-        world_streamer_->update_observer(observer_position, observer_forward);
+        world_streamer_->update_observer(observer_position, observer_forward, dt);
         const Renderer::CaveVisibilityFrame cave_visibility_frame = update_cave_visibility_frame(observer_position);
         renderer_.set_cave_visibility_frame(cave_visibility_frame);
         for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
