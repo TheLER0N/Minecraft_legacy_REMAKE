@@ -41,6 +41,7 @@ public:
         std::size_t queued_final_meshes {0};
         std::size_t pending_upload_bytes {0};
         std::size_t uploaded_bytes_this_frame {0};
+        std::size_t uploaded_sections_this_frame {0};
         std::size_t stale_results {0};
         std::size_t stale_uploads {0};
         std::size_t provisional_uploads {0};
@@ -92,7 +93,7 @@ public:
     void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
     void draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message);
     void draw_pause_menu(int hovered_button);
-    bool upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility);
+    bool upload_chunk_mesh(ChunkCoord coord, const ChunkMeshPayload& mesh, const ChunkVisibilityMetadata& visibility);
     void unload_chunk_mesh(ChunkCoord coord);
     void unload_all_chunk_meshes();
     std::size_t resident_chunk_mesh_count() const;

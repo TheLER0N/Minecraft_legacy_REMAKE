@@ -3,6 +3,7 @@
 #include "common/math.hpp"
 #include "game/block.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -87,6 +88,36 @@ struct ChunkMesh {
 
     bool empty() const {
         return opaque_mesh.empty() && cutout_mesh.empty() && transparent_mesh.empty();
+    }
+};
+
+struct ChunkSectionMesh {
+    MeshSection opaque_mesh;
+    MeshSection cutout_mesh;
+    MeshSection transparent_mesh;
+
+    bool empty() const {
+        return opaque_mesh.empty() && cutout_mesh.empty() && transparent_mesh.empty();
+    }
+};
+
+struct ChunkSectionMeshes {
+    std::array<ChunkSectionMesh, kChunkSectionCount> sections {};
+
+    bool empty() const {
+        return std::all_of(sections.begin(), sections.end(), [](const ChunkSectionMesh& section) {
+            return section.empty();
+        });
+    }
+};
+
+struct ChunkMeshPayload {
+    ChunkMesh legacy_mesh {};
+    ChunkSectionMeshes section_meshes {};
+    bool has_section_meshes {false};
+
+    bool empty() const {
+        return has_section_meshes ? section_meshes.empty() : legacy_mesh.empty();
     }
 };
 
@@ -186,7 +217,7 @@ struct PendingChunkUpload {
     std::uint64_t rebuild_serial {0};
     std::uint64_t upload_token {0};
     bool provisional {false};
-    ChunkMesh mesh {};
+    ChunkMeshPayload mesh {};
     ChunkVisibilityMetadata visibility {};
 };
 

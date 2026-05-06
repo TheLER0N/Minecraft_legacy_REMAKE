@@ -164,6 +164,38 @@ std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     return vertices * sizeof(Vertex) + indices * sizeof(std::uint32_t);
 }
 
+std::size_t mesh_byte_count(const ChunkSectionMesh& mesh) {
+    const std::size_t vertices = mesh.opaque_mesh.vertices.size() + mesh.cutout_mesh.vertices.size() + mesh.transparent_mesh.vertices.size();
+    const std::size_t indices = mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
+    return vertices * sizeof(Vertex) + indices * sizeof(std::uint32_t);
+}
+
+std::size_t mesh_byte_count(const ChunkMeshPayload& mesh) {
+    if (!mesh.has_section_meshes) {
+        return mesh_byte_count(mesh.legacy_mesh);
+    }
+
+    std::size_t bytes = 0;
+    for (const ChunkSectionMesh& section : mesh.section_meshes.sections) {
+        bytes += mesh_byte_count(section);
+    }
+    return bytes;
+}
+
+std::size_t mesh_section_count(const ChunkMeshPayload& mesh) {
+    if (!mesh.has_section_meshes) {
+        return mesh.legacy_mesh.empty() ? 0 : 1;
+    }
+
+    std::size_t count = 0;
+    for (const ChunkSectionMesh& section : mesh.section_meshes.sections) {
+        if (!section.empty()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 }
 
 Application::Application() = default;
@@ -828,11 +860,13 @@ int Application::run() {
         }
 
         std::size_t uploaded_bytes_this_frame = 0;
+        std::size_t uploaded_sections_this_frame = 0;
         const auto upload_start = std::chrono::steady_clock::now();
         //
         for (PendingChunkUpload& upload : pending_uploads) {
             const std::size_t upload_bytes = mesh_byte_count(upload.mesh);
             uploaded_bytes_this_frame += upload_bytes;
+            uploaded_sections_this_frame += mesh_section_count(upload.mesh);
 
 #ifdef __ANDROID__
             log_message(
@@ -963,6 +997,7 @@ int Application::run() {
                     streaming_stats.queued_final_meshes,
                     streaming_stats.pending_upload_bytes,
                     uploaded_bytes_this_frame,
+                    uploaded_sections_this_frame,
                     streaming_stats.stale_results,
                     streaming_stats.stale_uploads,
                     streaming_stats.provisional_uploads,

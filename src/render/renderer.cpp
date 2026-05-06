@@ -1180,23 +1180,34 @@ void Renderer::begin_frame(const CameraFrameData& camera) {
     frame_started_ = true;
 }
 
-bool Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility) {
+bool Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMeshPayload& mesh, const ChunkVisibilityMetadata& visibility) {
     if (mesh.empty()) {
         log_message(LogLevel::Warning, "Renderer: chunk mesh is empty");
         return false;
     }
 
     ChunkRenderData render_data {};
-    const auto opaque_sections = split_mesh_into_render_sections(mesh.opaque_mesh);
-    const auto cutout_sections = split_mesh_into_render_sections(mesh.cutout_mesh);
-    const auto transparent_sections = split_mesh_into_render_sections(mesh.transparent_mesh);
+    std::array<ChunkSectionMesh, kChunkSectionCount> legacy_sections {};
+    if (!mesh.has_section_meshes) {
+        const auto opaque_sections = split_mesh_into_render_sections(mesh.legacy_mesh.opaque_mesh);
+        const auto cutout_sections = split_mesh_into_render_sections(mesh.legacy_mesh.cutout_mesh);
+        const auto transparent_sections = split_mesh_into_render_sections(mesh.legacy_mesh.transparent_mesh);
+        for (std::size_t section_index = 0; section_index < legacy_sections.size(); ++section_index) {
+            legacy_sections[section_index].opaque_mesh = opaque_sections[section_index];
+            legacy_sections[section_index].cutout_mesh = cutout_sections[section_index];
+            legacy_sections[section_index].transparent_mesh = transparent_sections[section_index];
+        }
+    }
 
     bool upload_ok = true;
     for (std::size_t section_index = 0; section_index < render_data.sections.size(); ++section_index) {
         RenderSection& section = render_data.sections[section_index];
+        const ChunkSectionMesh& source_section = mesh.has_section_meshes
+            ? mesh.section_meshes.sections[section_index]
+            : legacy_sections[section_index];
 
         upload_ok = upload_mesh_section(
-            opaque_sections[section_index],
+            source_section.opaque_mesh,
             section.opaque_vertex_buffer,
             section.opaque_index_buffer,
             section.opaque_index_count,
@@ -1204,7 +1215,7 @@ bool Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const 
         ) && upload_ok;
 
         upload_ok = upload_mesh_section(
-            cutout_sections[section_index],
+            source_section.cutout_mesh,
             section.cutout_vertex_buffer,
             section.cutout_index_buffer,
             section.cutout_index_count,
@@ -1212,7 +1223,7 @@ bool Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const 
         ) && upload_ok;
 
         upload_ok = upload_mesh_section(
-            transparent_sections[section_index],
+            source_section.transparent_mesh,
             section.transparent_vertex_buffer,
             section.transparent_index_buffer,
             section.transparent_index_count,
@@ -2188,6 +2199,7 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.queued_final_meshes != data.queued_final_meshes ||
         debug_hud_data_.pending_upload_bytes != data.pending_upload_bytes ||
         debug_hud_data_.uploaded_bytes_this_frame != data.uploaded_bytes_this_frame ||
+        debug_hud_data_.uploaded_sections_this_frame != data.uploaded_sections_this_frame ||
         debug_hud_data_.stale_results != data.stale_results ||
         debug_hud_data_.stale_uploads != data.stale_uploads ||
         debug_hud_data_.provisional_uploads != data.provisional_uploads ||
@@ -3628,7 +3640,8 @@ void Renderer::update_debug_hud_buffer() {
         " LIGHTms:" + std::to_string(static_cast<int>(debug_hud_data_.light_ms + 0.5f)) +
         " MESHms:" + std::to_string(static_cast<int>(debug_hud_data_.mesh_ms + 0.5f)) +
         " UPms:" + std::to_string(static_cast<int>(debug_hud_data_.upload_ms + 0.5f));
-    const std::string uploaded = "UPKB:" + std::to_string(debug_hud_data_.uploaded_bytes_this_frame / 1024);
+    const std::string uploaded = "UPKB:" + std::to_string(debug_hud_data_.uploaded_bytes_this_frame / 1024) +
+        " UPSEC:" + std::to_string(debug_hud_data_.uploaded_sections_this_frame);
     const std::string culling_modes = std::string("SEC:") + (section_culling_enabled_ ? "ON" : "OFF") +
         " OCC:" + (occlusion_culling_enabled_ ? "ON" : "OFF");
     const std::string cavevis = std::string("CAVEVIS:") + (debug_hud_data_.cave_visibility_cave_mode ? "CAVE" : "SURF") +

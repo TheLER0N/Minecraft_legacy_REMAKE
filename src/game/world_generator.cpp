@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -843,7 +844,9 @@ ChunkMesh build_mesh_from_sampler(
     LightSampleFn&& light_sample,
     const BlockRegistry& block_registry,
     LeavesRenderMode leaves_mode,
-    std::size_t* face_count_out = nullptr);
+    std::size_t* face_count_out = nullptr,
+    std::optional<VerticalRange> emit_range = std::nullopt,
+    const ChunkLightData* precomputed_light = nullptr);
 
 template <typename SampleFn>
 ChunkMesh build_mesh_from_sampler(
@@ -882,11 +885,15 @@ ChunkMesh build_mesh_from_sampler(
     LightSampleFn&& light_sample,
     const BlockRegistry& block_registry,
     LeavesRenderMode leaves_mode,
-    std::size_t* face_count_out) {
+    std::size_t* face_count_out,
+    std::optional<VerticalRange> emit_range,
+    const ChunkLightData* precomputed_light) {
     ChunkMesh mesh {};
     std::size_t face_count = 0;
     VerticalRange occupied_range {};
-    for (int y = 0; y < kChunkHeight; ++y) {
+    const int scan_min_y = emit_range.has_value() ? emit_range->min_y : 0;
+    const int scan_max_y = emit_range.has_value() ? emit_range->max_y : kChunkHeight - 1;
+    for (int y = scan_min_y; y <= scan_max_y; ++y) {
         bool has_renderable = false;
         for (int z = 0; z < kChunkDepth && !has_renderable; ++z) {
             for (int x = 0; x < kChunkWidth; ++x) {
@@ -911,11 +918,14 @@ ChunkMesh build_mesh_from_sampler(
         return mesh;
     }
 
-    const VerticalRange work_range {
-        std::max(0, occupied_range.min_y - kMeshVerticalPadding),
-        std::min(kChunkHeight - 1, occupied_range.max_y + kMeshVerticalPadding)
-    };
-    const ChunkLightData light = build_light_data_from_sampler(light_sample);
+    const VerticalRange work_range = emit_range.has_value()
+        ? *emit_range
+        : VerticalRange {
+            std::max(0, occupied_range.min_y - kMeshVerticalPadding),
+            std::min(kChunkHeight - 1, occupied_range.max_y + kMeshVerticalPadding)
+        };
+    const ChunkLightData built_light = precomputed_light == nullptr ? build_light_data_from_sampler(light_sample) : ChunkLightData {};
+    const ChunkLightData& light = precomputed_light == nullptr ? built_light : *precomputed_light;
 
     const auto emit_greedy_mask = [&](int face_index, int slice, int mask_width, int mask_height, int v_min, int v_max, std::vector<MaskCell>& mask) {
         (void)mask_height;
@@ -2012,7 +2022,52 @@ ChunkMesh build_chunk_mesh(
         return sample_sky_light(light, x, y, z);
     };
 
-    return build_mesh_from_sampler(sample, light_sample, block_registry, leaves_mode);
+    return build_mesh_from_sampler(sample, light_sample, block_registry, leaves_mode, nullptr);
+}
+
+ChunkMeshPayload build_chunk_section_meshes(
+    const ChunkData& chunk_data,
+    ChunkCoord coord,
+    const BlockRegistry& block_registry,
+    const ChunkMeshNeighbors& neighbors,
+    const LightMeshSnapshot& light,
+    LeavesRenderMode leaves_mode) {
+    (void)coord;
+    run_mesh_builder_self_check(block_registry);
+
+    const auto sample = [&](int x, int y, int z) -> BlockId {
+        return sample_block_for_mesh(chunk_data, neighbors, x, y, z);
+    };
+    const auto light_sample = [&](int x, int y, int z) -> std::uint8_t {
+        return sample_sky_light(light, x, y, z);
+    };
+    const ChunkLightData mesh_light = build_light_data_from_sampler(light_sample);
+
+    ChunkMeshPayload payload {};
+    payload.has_section_meshes = true;
+
+    for (int section_index = 0; section_index < kChunkSectionCount; ++section_index) {
+        const VerticalRange section_range {
+            section_index * kChunkSectionHeight,
+            std::min(kChunkHeight - 1, (section_index + 1) * kChunkSectionHeight - 1)
+        };
+        ChunkMesh section_mesh = build_mesh_from_sampler(
+            sample,
+            light_sample,
+            block_registry,
+            leaves_mode,
+            nullptr,
+            section_range,
+            &mesh_light
+        );
+
+        ChunkSectionMesh& output = payload.section_meshes.sections[static_cast<std::size_t>(section_index)];
+        output.opaque_mesh = std::move(section_mesh.opaque_mesh);
+        output.cutout_mesh = std::move(section_mesh.cutout_mesh);
+        output.transparent_mesh = std::move(section_mesh.transparent_mesh);
+    }
+
+    return payload;
 }
 
 }

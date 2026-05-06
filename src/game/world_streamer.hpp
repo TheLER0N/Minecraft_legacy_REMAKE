@@ -163,7 +163,7 @@ private:
         float mesh_ms {0.0f};
         std::optional<ChunkData> chunk_data {};
         std::optional<ChunkLight> light {};
-        ChunkMesh mesh {};
+        ChunkMeshPayload mesh {};
         ChunkVisibilityMetadata visibility {};
         std::uint64_t border_signature {0};
         bool borders_ready {false};

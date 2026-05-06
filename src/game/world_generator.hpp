@@ -94,5 +94,13 @@ ChunkMesh build_chunk_mesh(
     const LightMeshSnapshot& light,
     LeavesRenderMode leaves_mode = LeavesRenderMode::Fancy
 );
+ChunkMeshPayload build_chunk_section_meshes(
+    const ChunkData& chunk_data,
+    ChunkCoord coord,
+    const BlockRegistry& block_registry,
+    const ChunkMeshNeighbors& neighbors,
+    const LightMeshSnapshot& light,
+    LeavesRenderMode leaves_mode = LeavesRenderMode::Fancy
+);
 
 }

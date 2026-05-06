@@ -382,16 +382,74 @@ std::size_t mesh_vertex_count(const ChunkMesh& mesh) {
     return mesh.opaque_mesh.vertices.size() + mesh.cutout_mesh.vertices.size() + mesh.transparent_mesh.vertices.size();
 }
 
+std::size_t mesh_vertex_count(const ChunkSectionMesh& mesh) {
+    return mesh.opaque_mesh.vertices.size() + mesh.cutout_mesh.vertices.size() + mesh.transparent_mesh.vertices.size();
+}
+
+std::size_t mesh_vertex_count(const ChunkMeshPayload& mesh) {
+    if (!mesh.has_section_meshes) {
+        return mesh_vertex_count(mesh.legacy_mesh);
+    }
+
+    std::size_t count = 0;
+    for (const ChunkSectionMesh& section : mesh.section_meshes.sections) {
+        count += mesh_vertex_count(section);
+    }
+    return count;
+}
+
 std::size_t mesh_index_count(const ChunkMesh& mesh) {
     return mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
+}
+
+std::size_t mesh_index_count(const ChunkSectionMesh& mesh) {
+    return mesh.opaque_mesh.indices.size() + mesh.cutout_mesh.indices.size() + mesh.transparent_mesh.indices.size();
+}
+
+std::size_t mesh_index_count(const ChunkMeshPayload& mesh) {
+    if (!mesh.has_section_meshes) {
+        return mesh_index_count(mesh.legacy_mesh);
+    }
+
+    std::size_t count = 0;
+    for (const ChunkSectionMesh& section : mesh.section_meshes.sections) {
+        count += mesh_index_count(section);
+    }
+    return count;
 }
 
 std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
 }
 
+std::size_t mesh_byte_count(const ChunkSectionMesh& mesh) {
+    return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
+}
+
+std::size_t mesh_byte_count(const ChunkMeshPayload& mesh) {
+    return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
+}
+
 bool mesh_has_geometry(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) > 0 || mesh_index_count(mesh) > 0;
+}
+
+bool mesh_has_geometry(const ChunkMeshPayload& mesh) {
+    return mesh_vertex_count(mesh) > 0 || mesh_index_count(mesh) > 0;
+}
+
+std::size_t mesh_section_count(const ChunkMeshPayload& mesh) {
+    if (!mesh.has_section_meshes) {
+        return mesh_has_geometry(mesh.legacy_mesh) ? 1 : 0;
+    }
+
+    std::size_t count = 0;
+    for (const ChunkSectionMesh& section : mesh.section_meshes.sections) {
+        if (!section.empty()) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 constexpr std::uint8_t section_side_bit(int side) {
@@ -1448,9 +1506,7 @@ bool WorldStreamer::has_pending_upload_locked(ChunkCoord coord) const {
 
 void WorldStreamer::add_pending_upload_stats_locked(const PendingChunkUpload& upload) {
     pending_upload_bytes_ += mesh_byte_count(upload.mesh);
-    if (mesh_has_geometry(upload.mesh)) {
-        ++pending_upload_sections_;
-    }
+    pending_upload_sections_ += mesh_section_count(upload.mesh);
     if (upload.provisional) {
         ++pending_upload_provisional_count_;
     }
@@ -1459,9 +1515,8 @@ void WorldStreamer::add_pending_upload_stats_locked(const PendingChunkUpload& up
 void WorldStreamer::subtract_pending_upload_stats_locked(const PendingChunkUpload& upload) {
     const std::size_t bytes = mesh_byte_count(upload.mesh);
     pending_upload_bytes_ = bytes <= pending_upload_bytes_ ? pending_upload_bytes_ - bytes : 0;
-    if (mesh_has_geometry(upload.mesh) && pending_upload_sections_ > 0) {
-        --pending_upload_sections_;
-    }
+    const std::size_t sections = mesh_section_count(upload.mesh);
+    pending_upload_sections_ = sections <= pending_upload_sections_ ? pending_upload_sections_ - sections : 0;
     if (upload.provisional && pending_upload_provisional_count_ > 0) {
         --pending_upload_provisional_count_;
     }
@@ -2130,7 +2185,7 @@ void WorldStreamer::worker_loop() {
             } else if (job.snapshot != nullptr) {
                 const ChunkMeshSnapshot& snapshot = *job.snapshot;
                 const auto start = std::chrono::steady_clock::now();
-                result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), light_from_snapshot(snapshot), snapshot.leaves_mode);
+                result.mesh = build_chunk_section_meshes(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), light_from_snapshot(snapshot), snapshot.leaves_mode);
                 result.visibility = build_visibility_metadata(snapshot.chunk, block_registry_);
                 result.provisional = snapshot.provisional;
                 const auto end = std::chrono::steady_clock::now();
