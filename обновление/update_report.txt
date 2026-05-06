@@ -1,39 +1,43 @@
 Patch report
 Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
-Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_224443
-Time: 2026-05-06 22:44:43
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_231737
+Time: 2026-05-06 23:17:37
 
 OK: world_runtime_tuning.hpp rewritten
-    - preload_required_fraction = 0.5
-    - world_loading_min_seconds = 2.0
-    - world_leaving_min_seconds = 2.0
-    - spawn_preload_radius/min_visible no longer define the main requirement
-OK: replaced Renderer::draw_menu_panorama_message without black cube
+OK: world_streamer.hpp added continuous radius API
+OK: src/game/world_streamer.hpp written
+OK: world_streamer.cpp inserted continuous radius methods
+OK: replaced WorldStreamer::update_observer contiguous ring-first
+OK: replaced WorldStreamer::request_spawn_preload contiguous ring-only
+OK: replaced WorldStreamer::refresh_visible_chunks continuous no-gap visibility
+OK: src/game/world_streamer.cpp written
+OK: replaced Renderer::draw_menu_panorama_message no buttons/no black cube
 OK: src/render/renderer.cpp written
-OK: replaced Application transition helpers with normal panorama speed
-OK: replaced Application::preload_world_spawn half selected distance
-OK: replaced Application::unload_world_for_menu two seconds and full release
+OK: replaced Application transition helpers no button flicker
+OK: replaced Application::preload_world_spawn contiguous half distance
+OK: replaced Application::unload_world_for_menu 2sec full cleanup
 OK: src/app/application.cpp written
 
 Changed files:
 - src/game/world_runtime_tuning.hpp
+- src/game/world_streamer.hpp
+- src/game/world_streamer.cpp
 - src/render/renderer.hpp
 - src/render/renderer.cpp
 - src/app/application.cpp
 
 What changed:
-- Loading no longer waits for fixed 5x5.
-- Required preload radius is now ceil(selected_chunk_radius * 0.5).
-- The loading screen stays for at least 2 seconds.
-- If required chunks are not ready after 2 seconds, loading continues.
-- If required chunks are ready early, the game keeps preloading farther chunks until 2 seconds pass.
-- Exit screen stays for at least 2 seconds and waits for renderer/world release.
-- Removed the black rectangle/cube behind transition text.
-- Panorama time now uses platform frame delta instead of fixed 1/60 increments.
+- Chunk generation is now contiguous ring-first from the player.
+- Loading waits for continuous uploaded radius = ceil(selected_chunk_radius * 0.5).
+- Far chunks are hidden until all rings between player and that chunk are uploaded.
+- The normal in-world streamer queues only the first incomplete ring.
+- Loading/exit screens use panorama + text, no black cube.
+- Menu buttons are not drawn by the transition method.
+- Exit waits at least 2 seconds and checks renderer/world cleanup.
 
 Next step:
 1. Run build_release.bat.
-2. Start world: the loading screen must stay at least 2 seconds.
-3. With chunk radius 16, required preload radius must be 8.
-4. Exit world: the exit screen must stay at least 2 seconds and return only after cleanup.
+2. Start world with radius 16 and verify log required_radius=8.
+3. Confirm terrain appears as a solid carpet from player outward, not as islands.
+4. Confirm menu buttons do not flicker during loading/exit.
 5. If build fails, send the first compiler error and 30 lines after it.
