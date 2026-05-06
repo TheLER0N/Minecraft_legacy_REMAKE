@@ -33,6 +33,7 @@ struct WorldRuntimeTuning {
     int spawn_preload_max_frames {900};
     std::size_t spawn_preload_requests_per_frame {16};
     std::size_t spawn_preload_upload_max_count {16};
+    std::size_t streaming_backlog_requests_per_frame {8};
     int transition_black_frames {30};
 };
 
@@ -74,6 +75,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         600,
         std::size_t {8},
         std::size_t {8},
+        std::size_t {4},
         30
     };
 #else
@@ -114,6 +116,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         900,
         std::size_t {16},
         std::size_t {16},
+        std::size_t {8},
         30
     };
 #endif

@@ -261,6 +261,10 @@ void Application::start_world() {
 }
 
 void Application::render_black_transition_frames(int frame_count) {
+    render_world_transition_frames(frame_count, "Загрузка мира");
+}
+
+void Application::render_world_transition_frames(int frame_count, const char* message) {
     const CameraFrameData loading_camera {
         Mat4::identity(),
         Mat4::identity(),
@@ -273,11 +277,17 @@ void Application::render_black_transition_frames(int frame_count) {
 
     for (int i = 0; i < frame_count && !platform_.should_close(); ++i) {
         platform_.pump_events();
+        menu_time_seconds_ += 1.0f / 60.0f;
+
         renderer_.begin_frame(loading_camera);
+        renderer_.draw_menu_panorama_message(
+            menu_time_seconds_,
+            menu_uses_night_panorama_,
+            message != nullptr ? message : ""
+        );
         renderer_.end_frame();
     }
 }
-
 bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     if (world_streamer_ == nullptr) {
         return false;
@@ -377,7 +387,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         const WorldStreamer::StreamingStats stats = world_streamer_->stats();
 
         if (spawn_column_loaded_once &&
-            loaded_probe_columns >= 5 &&
+            loaded_probe_columns >= static_cast<int>(preload_probe_offsets.size()) &&
             stats.visible_chunks >= min_visible_chunks) {
             log_message(
                 LogLevel::Info,
@@ -409,7 +419,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     return spawn_column_loaded_once;
 }
 void Application::unload_world_for_menu() {
-    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Выход из мира");
 
     if (world_streamer_ != nullptr) {
         world_streamer_->flush_all_dirty_chunks();
@@ -430,7 +440,7 @@ void Application::unload_world_for_menu() {
     block_break_.target.reset();
     block_break_.repeat_seconds = 0.0f;
 
-    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+    render_world_transition_frames(world_runtime_tuning().transition_black_frames, "Выход из мира");
 }
 Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame(Vec3 observer_position) {
     const int camera_x = static_cast<int>(std::floor(observer_position.x));

@@ -80,6 +80,7 @@ public:
     void begin_frame(const CameraFrameData& camera);
     void draw_startup_splash(float time_seconds, float fade_multiplier);
     void draw_main_menu(float time_seconds, bool use_night_panorama, int hovered_button);
+    void draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message);
     void draw_pause_menu(int hovered_button);
     bool upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const ChunkVisibilityMetadata& visibility);
     void unload_chunk_mesh(ChunkCoord coord);

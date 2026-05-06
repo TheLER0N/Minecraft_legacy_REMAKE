@@ -247,6 +247,9 @@ private:
     Vec3 previous_observer_position_ {};
     bool has_previous_observer_position_ {false};
     float observer_speed_blocks_per_second_ {0.0f};
+    std::vector<ChunkCoord> streaming_backlog_;
+    std::size_t streaming_backlog_cursor_ {0};
+    ChunkCoord streaming_backlog_origin_ {};
     std::uint64_t next_chunk_version_ {1};
     std::uint64_t next_light_job_token_ {1};
     std::uint64_t next_rebuild_serial_ {1};

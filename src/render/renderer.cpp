@@ -1241,6 +1241,67 @@ void Renderer::draw_main_menu(float time_seconds, bool use_night_panorama, int h
 }
 
 
+void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_panorama, const std::string& message) {
+    if (!frame_started_) {
+        return;
+    }
+
+    update_main_menu_buffers(time_seconds, use_night_panorama, -1);
+
+    const FrameResources& frame = frames_[current_frame_];
+    const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
+
+    if (menu_panorama_vertex_count_ > 0 && panorama.descriptor_set != VK_NULL_HANDLE) {
+        draw_textured_buffer(frame, menu_panorama_vertex_buffer_, menu_panorama_vertex_count_, panorama.descriptor_set);
+    }
+
+    const VkExtent2D extent = logical_extent();
+    const float width = static_cast<float>(extent.width == 0 ? 1 : extent.width);
+    const float height = static_cast<float>(extent.height == 0 ? 1 : extent.height);
+
+    std::vector<Vertex> overlay_vertices;
+    append_hud_rect_fill(
+        overlay_vertices,
+        0.0f,
+        height * 0.42f,
+        width,
+        height * 0.58f,
+        width,
+        height,
+        {0.0f, 0.0f, 0.0f}
+    );
+
+    upload_dynamic_buffer(menu_overlay_vertex_buffer_, overlay_vertices);
+    menu_overlay_vertex_count_ = static_cast<std::uint32_t>(overlay_vertices.size());
+    if (menu_overlay_vertex_count_ > 0) {
+        draw_colored_buffer(frame, menu_overlay_vertex_buffer_, menu_overlay_vertex_count_, hotbar_fill_pipeline_);
+    }
+
+    if (menu_font_.loaded && !message.empty()) {
+        constexpr float text_height = 30.0f;
+        const float text_width = menu_font_text_width(message, text_height);
+        const float text_x = (width - text_width) * 0.5f;
+        const float text_y = (height - text_height) * 0.5f;
+
+        std::vector<Vertex> text_vertices;
+        append_menu_font_text(
+            text_vertices,
+            message,
+            text_x,
+            text_y,
+            text_height,
+            width,
+            height,
+            {1.0f, 1.0f, 1.0f}
+        );
+
+        upload_dynamic_buffer(menu_font_vertex_buffer_, text_vertices);
+        menu_font_vertex_count_ = static_cast<std::uint32_t>(text_vertices.size());
+        if (menu_font_vertex_count_ > 0 && menu_font_.texture.descriptor_set != VK_NULL_HANDLE) {
+            draw_textured_buffer(frame, menu_font_vertex_buffer_, menu_font_vertex_count_, menu_font_.texture.descriptor_set);
+        }
+    }
+}
 void Renderer::draw_pause_menu(int hovered_button) {
     if (!frame_started_) {
         return;

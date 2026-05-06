@@ -39,6 +39,10 @@ std::size_t max_job_queue_size() {
     return world_runtime_tuning().max_job_queue_size;
 }
 
+std::size_t streaming_backlog_requests_per_frame() {
+    return world_runtime_tuning().streaming_backlog_requests_per_frame;
+}
+
 float completed_result_apply_budget_ms() {
     return world_runtime_tuning().completed_result_apply_budget_ms;
 }
@@ -312,60 +316,85 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     const float move_distance_sq = move_dx * move_dx + move_dz * move_dz;
     const float required_distance_sq = streaming_distance * streaming_distance;
 
-    if (has_streaming_update_position_ && move_distance_sq < required_distance_sq) {
-        refresh_visible_chunks();
-        flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
-        return;
-    }
+    const bool should_rebuild_backlog =
+        !has_streaming_update_position_ ||
+        move_distance_sq >= required_distance_sq ||
+        streaming_backlog_.empty() ||
+        streaming_backlog_origin_.x != origin.x ||
+        streaming_backlog_origin_.z != origin.z;
 
-    last_streaming_update_position_ = position;
-    has_streaming_update_position_ = true;
+    if (should_rebuild_backlog) {
+        last_streaming_update_position_ = position;
+        has_streaming_update_position_ = true;
+        streaming_backlog_origin_ = origin;
+        streaming_backlog_.clear();
+        streaming_backlog_cursor_ = 0;
+        streaming_backlog_.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
 
-    std::vector<ChunkCoord> missing_chunks;
-    missing_chunks.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+        for (int dz = -chunk_radius_; dz <= chunk_radius_; ++dz) {
+            for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
+                const ChunkCoord coord {origin.x + dx, origin.z + dz};
 
-    for (int dz = -chunk_radius_; dz <= chunk_radius_; ++dz) {
-        for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
-            const ChunkCoord coord {origin.x + dx, origin.z + dz};
+                if (auto it = chunks_.find(coord); it != chunks_.end()) {
+                    it->second.last_touched_frame = frame_counter_;
+                    continue;
+                }
 
-            if (auto it = chunks_.find(coord); it != chunks_.end()) {
-                it->second.last_touched_frame = frame_counter_;
-                continue;
+                streaming_backlog_.push_back(coord);
             }
+        }
 
-            missing_chunks.push_back(coord);
+        std::sort(
+            streaming_backlog_.begin(),
+            streaming_backlog_.end(),
+            [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
+                const float lhs_score = chunk_priority_score(lhs, observer_position_, observer_forward_);
+                const float rhs_score = chunk_priority_score(rhs, observer_position_, observer_forward_);
+
+                if (lhs_score != rhs_score) {
+                    return lhs_score < rhs_score;
+                }
+
+                if (lhs.x != rhs.x) {
+                    return lhs.x < rhs.x;
+                }
+
+                return lhs.z < rhs.z;
+            }
+        );
+    } else {
+        for (auto& [coord, record] : chunks_) {
+            if (desired_chunk(origin, coord)) {
+                record.last_touched_frame = frame_counter_;
+            }
         }
     }
 
-    std::sort(
-        missing_chunks.begin(),
-        missing_chunks.end(),
-        [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
-            const float lhs_score = chunk_priority_score(lhs, observer_position_, observer_forward_);
-            const float rhs_score = chunk_priority_score(rhs, observer_position_, observer_forward_);
-
-            if (lhs_score != rhs_score) {
-                return lhs_score < rhs_score;
-            }
-
-            if (lhs.x != rhs.x) {
-                return lhs.x < rhs.x;
-            }
-
-            return lhs.z < rhs.z;
-        }
+    const std::size_t request_budget = std::min(
+        max_new_chunk_requests_per_frame(),
+        streaming_backlog_requests_per_frame()
     );
 
     std::size_t requested_this_frame = 0;
 
-    for (const ChunkCoord& coord : missing_chunks) {
-        if (requested_this_frame >= max_new_chunk_requests_per_frame()) {
-            break;
+    while (streaming_backlog_cursor_ < streaming_backlog_.size() &&
+           requested_this_frame < request_budget) {
+        const ChunkCoord coord = streaming_backlog_[streaming_backlog_cursor_++];
+
+        if (chunks_.find(coord) != chunks_.end()) {
+            continue;
+        }
+
+        if (!desired_chunk(origin, coord)) {
+            continue;
         }
 
         {
             std::lock_guard lock(mutex_);
             if (job_queue_.size() >= max_job_queue_size()) {
+                if (streaming_backlog_cursor_ > 0) {
+                    --streaming_backlog_cursor_;
+                }
                 break;
             }
         }
@@ -379,6 +408,11 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
         chunks_.emplace(coord, std::move(record));
         queue_generate_job(coord, version);
         ++requested_this_frame;
+    }
+
+    if (streaming_backlog_cursor_ >= streaming_backlog_.size()) {
+        streaming_backlog_.clear();
+        streaming_backlog_cursor_ = 0;
     }
 
     {
@@ -441,6 +475,9 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
     previous_observer_position_ = position;
     has_previous_observer_position_ = true;
     observer_speed_blocks_per_second_ = 0.0f;
+    streaming_backlog_.clear();
+    streaming_backlog_cursor_ = 0;
+    streaming_backlog_origin_ = center;
 
     const int preload_radius = std::clamp(radius, 0, chunk_radius_);
     std::vector<ChunkCoord> ordered_chunks;
