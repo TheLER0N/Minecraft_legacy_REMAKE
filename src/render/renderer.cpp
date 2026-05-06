@@ -1337,6 +1337,21 @@ void Renderer::draw_startup_splash(float time_seconds, float fade_multiplier) {
     draw_textured_buffer(frame, startup_splash_vertex_buffer_, startup_splash_vertex_count_, texture->descriptor_set);
 }
 
+void Renderer::unload_all_chunk_meshes() {
+    for (auto& [coord, render_data] : chunk_buffers_) {
+        (void)coord;
+        for (RenderSection& section : render_data.sections) {
+            destroy_render_section(section);
+        }
+    }
+
+    chunk_buffers_.clear();
+    destroy_deferred_chunk_buffers_immediate();
+}
+
+std::size_t Renderer::resident_chunk_mesh_count() const {
+    return chunk_buffers_.size();
+}
 void Renderer::unload_chunk_mesh(ChunkCoord coord) {
     auto existing = chunk_buffers_.find(coord);
     if (existing == chunk_buffers_.end()) {
