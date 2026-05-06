@@ -1,29 +1,33 @@
 Patch report
 Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
-Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260507_011315
-Time: 2026-05-07 01:13:15
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260507_022156
+Time: 2026-05-07 02:21:56
 
-OK: inserted chunk bucket helpers
-OK: replaced full function WorldStreamer::update_observer bucketed
-OK: replaced full function WorldStreamer::request_spawn_preload bucketed
+OK: added sort throttle constants
+OK: streaming_backlog_ std::sort guarded sort calls: 0
+OK: job_queue_ stable_sort guarded sort calls: 0
+OK: inserted flexible guard into rebuild_job_queue_priority_locked
+SKIP: renderer draw-stat logging already disabled or customized
 OK: src/game/world_streamer.cpp written
+No application.cpp changes were needed.
 
 Changed files:
 - src/game/world_streamer.cpp
+- src/app/application.cpp
 
 What changed:
-- Added coarse chunk priority buckets.
-- Rewrote update_observer as a full function to avoid fragile partial replacements.
-- Replaced streaming_backlog_ sort with bucket reorder.
-- Replaced update_observer job_queue_ stable_sort with bucket move.
-- Rewrote request_spawn_preload as a full function.
-- Kept ordered_chunks ring sort for safe spawn preload.
-- Did not change graphics, textures, shaders, lighting, block geometry, render distance, or mesh generation.
+- Added sort throttling constants.
+- Guards old streaming_backlog_ sort if it still exists.
+- Guards old job_queue_ stable_sort if it still exists.
+- Guards rebuild_job_queue_priority_locked with flexible multiline signature detection.
+- Does not fail if rebuild_job_queue_priority_locked implementation is not present in the .cpp.
+- Keeps graphics, textures, shaders, lighting, render distance, and mesh generation unchanged.
+- Keeps corridor as priority-only logic.
 
 Expected result:
-- Lower CPU spikes during movement and chunk generation.
-- Less micro-freeze from sorting large queues.
-- Chunk loading still prioritizes player/safety/forward areas.
+- Fewer CPU spikes during world generation.
+- Less stutter from large queue sorting/reprioritization.
+- No visual changes.
 
 Next step:
 1. Run build.bat.

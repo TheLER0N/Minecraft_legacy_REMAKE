@@ -358,6 +358,9 @@ void reorder_chunk_coords_by_buckets(
     }
 }
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
+constexpr std::size_t kMaxExactStreamingBacklogSortSize = 768;
+constexpr std::size_t kMaxExactJobQueueSortSize = 192;
+constexpr std::size_t kMaxJobQueuePriorityRebuildSize = 384;
 
 #ifdef __ANDROID__
 constexpr std::uint64_t kGrassUpdateIntervalFrames = 30;
@@ -2321,6 +2324,12 @@ void WorldStreamer::rebuild_job_queue_priority_locked(
     Vec3 direction,
     float speed_blocks_per_second
 ) {
+
+    // ML_PERF_THROTTLE_JOB_PRIORITY_REBUILD
+    if (job_queue_.size() > kMaxJobQueuePriorityRebuildSize) {
+        job_queue_priority_dirty_ = true;
+        return;
+    }
     if (!job_queue_priority_dirty_ || job_queue_.size() < 2) {
         job_queue_priority_dirty_ = false;
         return;
