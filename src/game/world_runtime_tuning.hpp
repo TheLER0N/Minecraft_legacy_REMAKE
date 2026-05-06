@@ -17,6 +17,7 @@ struct WorldRuntimeTuning {
     float completed_result_apply_budget_ms {1.5f};
 
     int target_chunk_radius {16};
+    int keep_radius_extra_chunks {3};
     float streaming_update_distance_blocks {4.0f};
 
     float forward_priority_weight {30.0f};
@@ -47,7 +48,7 @@ struct WorldRuntimeTuning {
     float world_leaving_min_seconds {2.0f};
     int transition_black_frames {30};
 
-    // Adaptive corridor streaming for fast flight in normal worlds.
+    // Fast-flight priority tuning. This must not be used as a hard visibility mask.
     bool adaptive_corridor_streaming_enabled {true};
     float corridor_speed_threshold_blocks_per_second {30.0f};
     float elytra_expected_speed_blocks_per_second {78.4f};
@@ -64,8 +65,8 @@ struct WorldRuntimeTuning {
     int corridor_generation_ahead_chunks {4};
 
     std::size_t corridor_requests_per_frame {24};
-    std::size_t corridor_uploads_per_frame {24};
-    std::size_t corridor_upload_byte_budget {8ull * 1024ull * 1024ull};
+    std::size_t corridor_uploads_per_frame {16};
+    std::size_t corridor_upload_byte_budget {6ull * 1024ull * 1024ull};
 };
 
 inline WorldRuntimeTuning world_runtime_tuning() {
@@ -90,6 +91,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         1.0f,
 
         8,
+        2,
         4.0f,
 
         24.0f,
@@ -161,6 +163,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         1.5f,
 
         16,
+        3,
         4.0f,
 
         30.0f,
@@ -199,7 +202,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         0.25f,
 
         2,
-        3,
+        4,
         8,
         16,
         3,
@@ -207,8 +210,8 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         4,
 
         std::size_t {24},
-        std::size_t {24},
-        8ull * 1024ull * 1024ull
+        std::size_t {16},
+        6ull * 1024ull * 1024ull
     };
 #endif
 }

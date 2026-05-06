@@ -47,6 +47,10 @@ int contiguous_generation_ring_window() {
     return std::max(1, world_runtime_tuning().contiguous_generation_ring_window);
 }
 
+int keep_radius_extra_chunks() {
+    return std::max(0, world_runtime_tuning().keep_radius_extra_chunks);
+}
+
 bool adaptive_corridor_streaming_enabled() {
     return world_runtime_tuning().adaptive_corridor_streaming_enabled;
 }
@@ -125,6 +129,21 @@ float chunk_side_units(ChunkCoord origin, ChunkCoord coord, Vec3 direction) {
     return std::abs(dx * -direction.z + dz * direction.x);
 }
 
+bool load_area_chunk(ChunkCoord origin, ChunkCoord coord, int chunk_radius) {
+    const int dx = coord.x - origin.x;
+    const int dz = coord.z - origin.z;
+    return std::max(std::abs(dx), std::abs(dz)) <= chunk_radius;
+}
+
+bool keep_area_chunk(ChunkCoord origin, ChunkCoord coord, int chunk_radius) {
+    const int dx = coord.x - origin.x;
+    const int dz = coord.z - origin.z;
+    const int keep_radius = std::min(kMaxChunkRadius, chunk_radius + keep_radius_extra_chunks());
+    return std::max(std::abs(dx), std::abs(dz)) <= keep_radius;
+}
+
+// Compatibility helper: this is intentionally NOT a forward-corridor world mask.
+// It only answers whether a chunk belongs to the normal load area.
 bool corridor_candidate_chunk(
     ChunkCoord origin,
     ChunkCoord coord,
@@ -132,40 +151,9 @@ bool corridor_candidate_chunk(
     float speed_blocks_per_second,
     int chunk_radius
 ) {
-    const int dx = coord.x - origin.x;
-    const int dz = coord.z - origin.z;
-    const int chebyshev = std::max(std::abs(dx), std::abs(dz));
-
-    if (chebyshev <= corridor_safe_radius_chunks()) {
-        return true;
-    }
-
-    if (!corridor_mode_for_speed(speed_blocks_per_second)) {
-        return chebyshev <= chunk_radius;
-    }
-
-    const float forward = chunk_forward_units(origin, coord, direction);
-    const float side = chunk_side_units(origin, coord, direction);
-    const int forward_chunks = adaptive_corridor_forward_chunks(speed_blocks_per_second, chunk_radius);
-
-    if (forward < -static_cast<float>(corridor_rear_keep_chunks())) {
-        return false;
-    }
-
-    if (forward > static_cast<float>(forward_chunks)) {
-        return false;
-    }
-
-    const float forward_ratio = std::clamp(
-        forward / std::max(1.0f, static_cast<float>(forward_chunks)),
-        0.0f,
-        1.0f
-    );
-
-    const float width = static_cast<float>(corridor_inner_half_width_chunks()) +
-        (static_cast<float>(corridor_outer_half_width_chunks() - corridor_inner_half_width_chunks()) * forward_ratio);
-
-    return side <= width;
+    (void)direction;
+    (void)speed_blocks_per_second;
+    return load_area_chunk(origin, coord, chunk_radius);
 }
 
 float corridor_priority_score(
@@ -184,25 +172,35 @@ float corridor_priority_score(
     }
 
     if (chebyshev <= corridor_safe_radius_chunks()) {
-        return 10.0f + static_cast<float>(dist_sq);
+        return 5.0f + static_cast<float>(dist_sq);
     }
 
     const float forward = chunk_forward_units(origin, coord, direction);
     const float side = chunk_side_units(origin, coord, direction);
 
     if (!corridor_mode_for_speed(speed_blocks_per_second)) {
-        return 100.0f + static_cast<float>(dist_sq) + std::max(0.0f, -forward) * 50.0f;
+        const float behind = std::max(0.0f, -forward) * 8.0f;
+        const float look_bonus = std::max(0.0f, forward) * -1.5f;
+        return 80.0f + static_cast<float>(dist_sq) * 0.75f + side * 4.0f + behind + look_bonus;
     }
 
-    const float behind_penalty = forward < 0.0f ? 700.0f + std::abs(forward) * 50.0f : 0.0f;
-    return 100.0f +
-        std::max(0.0f, forward) * 4.0f +
-        side * 35.0f +
-        static_cast<float>(dist_sq) * 0.15f +
-        behind_penalty;
-}
+    const int forward_chunks = adaptive_corridor_forward_chunks(speed_blocks_per_second, kMaxChunkRadius);
+    const float clamped_forward = std::clamp(
+        forward,
+        0.0f,
+        static_cast<float>(forward_chunks)
+    );
 
-float completed_result_apply_budget_ms() {
+    const float behind_penalty = forward < -static_cast<float>(corridor_rear_keep_chunks())
+        ? 650.0f + std::abs(forward) * 45.0f
+        : std::max(0.0f, -forward) * 18.0f;
+
+    return 100.0f +
+        static_cast<float>(dist_sq) * 0.45f +
+        side * 22.0f +
+        behind_penalty -
+        clamped_forward * 10.0f;
+}float completed_result_apply_budget_ms() {
     return world_runtime_tuning().completed_result_apply_budget_ms;
 }
 
@@ -491,13 +489,16 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     const float move_distance_sq = move_dx * move_dx + move_dz * move_dz;
     const float required_distance_sq = streaming_distance * streaming_distance;
 
+    const bool changed_chunk =
+        !has_streaming_update_position_ ||
+        streaming_backlog_origin_.x != origin.x ||
+        streaming_backlog_origin_.z != origin.z;
+
     const bool should_rebuild_backlog =
         !has_streaming_update_position_ ||
         move_distance_sq >= required_distance_sq ||
         streaming_backlog_.empty() ||
-        streaming_backlog_origin_.x != origin.x ||
-        streaming_backlog_origin_.z != origin.z ||
-        corridor_mode;
+        changed_chunk;
 
     if (should_rebuild_backlog) {
         last_streaming_update_position_ = position;
@@ -511,13 +512,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
             for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
                 const ChunkCoord coord {origin.x + dx, origin.z + dz};
 
-                if (!corridor_candidate_chunk(
-                        origin,
-                        coord,
-                        stream_direction,
-                        observer_speed_blocks_per_second_,
-                        chunk_radius_
-                    )) {
+                if (!load_area_chunk(origin, coord, chunk_radius_)) {
                     continue;
                 }
 
@@ -560,7 +555,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
         );
     } else {
         for (auto& [coord, record] : chunks_) {
-            if (desired_chunk(origin, coord)) {
+            if (keep_area_chunk(origin, coord, chunk_radius_)) {
                 record.last_touched_frame = frame_counter_;
             }
         }
@@ -580,7 +575,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
             continue;
         }
 
-        if (!desired_chunk(origin, coord)) {
+        if (!load_area_chunk(origin, coord, chunk_radius_)) {
             continue;
         }
 
@@ -610,7 +605,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
         streaming_backlog_cursor_ = 0;
     }
 
-    {
+    if (requested_this_frame > 0 || should_rebuild_backlog) {
         std::lock_guard lock(mutex_);
         std::stable_sort(
             job_queue_.begin(),
@@ -647,7 +642,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     }
 
     for (auto it = chunks_.begin(); it != chunks_.end();) {
-        if (!desired_chunk(origin, it->first)) {
+        if (!keep_area_chunk(origin, it->first, chunk_radius_)) {
             const ChunkCoord unloaded_coord = it->first;
             if (world_save_ != nullptr && it->second.dirty_save && it->second.data.has_value()) {
                 world_save_->save_chunk(unloaded_coord, *it->second.data);
@@ -1105,19 +1100,24 @@ std::span<const ActiveChunk> WorldStreamer::visible_chunks() const {
 void WorldStreamer::refresh_visible_chunks() {
     visible_chunks_.clear();
 
-    const bool corridor_mode = corridor_mode_for_speed(observer_speed_blocks_per_second_);
-    const Vec3 stream_direction = normalized_horizontal_direction(observer_forward_);
-
     const auto center_it = chunks_.find(observer_chunk_);
     if (center_it == chunks_.end() || !center_it->second.uploaded_to_gpu) {
         return;
     }
 
-    std::deque<ChunkCoord> open;
-    std::unordered_set<ChunkCoord, ChunkCoordHasher> visited;
+    const Vec3 stream_direction = normalized_horizontal_direction(observer_forward_);
+
+    std::vector<ChunkCoord> open;
+    std::vector<ChunkCoord> visited;
+    open.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+    visited.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+
+    auto contains_coord = [](const std::vector<ChunkCoord>& list, ChunkCoord coord) {
+        return std::find(list.begin(), list.end(), coord) != list.end();
+    };
 
     open.push_back(observer_chunk_);
-    visited.insert(observer_chunk_);
+    visited.push_back(observer_chunk_);
 
     constexpr std::array<std::array<int, 2>, 4> neighbors {{
         {{ 1,  0}},
@@ -1126,24 +1126,14 @@ void WorldStreamer::refresh_visible_chunks() {
         {{ 0, -1}}
     }};
 
-    while (!open.empty()) {
-        const ChunkCoord current = open.front();
-        open.pop_front();
+    std::size_t cursor = 0;
+    while (cursor < open.size()) {
+        const ChunkCoord current = open[cursor++];
 
         const auto record_it = chunks_.find(current);
         if (record_it == chunks_.end() ||
             !record_it->second.uploaded_to_gpu ||
-            !desired_chunk(observer_chunk_, current)) {
-            continue;
-        }
-
-        if (!corridor_candidate_chunk(
-                observer_chunk_,
-                current,
-                stream_direction,
-                observer_speed_blocks_per_second_,
-                chunk_radius_
-            )) {
+            !load_area_chunk(observer_chunk_, current, chunk_radius_)) {
             continue;
         }
 
@@ -1151,21 +1141,11 @@ void WorldStreamer::refresh_visible_chunks() {
 
         for (const auto& offset : neighbors) {
             const ChunkCoord next {current.x + offset[0], current.z + offset[1]};
-            if (visited.contains(next)) {
+            if (contains_coord(visited, next)) {
                 continue;
             }
 
-            if (!desired_chunk(observer_chunk_, next)) {
-                continue;
-            }
-
-            if (!corridor_candidate_chunk(
-                    observer_chunk_,
-                    next,
-                    stream_direction,
-                    observer_speed_blocks_per_second_,
-                    chunk_radius_
-                )) {
+            if (!load_area_chunk(observer_chunk_, next, chunk_radius_)) {
                 continue;
             }
 
@@ -1174,7 +1154,7 @@ void WorldStreamer::refresh_visible_chunks() {
                 continue;
             }
 
-            visited.insert(next);
+            visited.push_back(next);
             open.push_back(next);
         }
     }
@@ -1324,16 +1304,28 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
     );
 
     std::size_t used_bytes = 0;
+    std::size_t take_count = 0;
 
-    while (!pending_uploads_.empty() && selected.size() < effective_max_count) {
-        const std::size_t upload_bytes = mesh_byte_count(pending_uploads_.front().mesh);
-        if (!selected.empty() && used_bytes + upload_bytes > effective_byte_budget) {
+    while (take_count < pending_uploads_.size() && take_count < effective_max_count) {
+        const std::size_t upload_bytes = mesh_byte_count(pending_uploads_[take_count].mesh);
+        if (take_count > 0 && used_bytes + upload_bytes > effective_byte_budget) {
             break;
         }
 
         used_bytes += upload_bytes;
-        selected.push_back(std::move(pending_uploads_.front()));
-        pending_uploads_.erase(pending_uploads_.begin());
+        ++take_count;
+    }
+
+    selected.reserve(take_count);
+    for (std::size_t index = 0; index < take_count; ++index) {
+        selected.push_back(std::move(pending_uploads_[index]));
+    }
+
+    if (take_count > 0) {
+        pending_uploads_.erase(
+            pending_uploads_.begin(),
+            pending_uploads_.begin() + static_cast<std::ptrdiff_t>(take_count)
+        );
     }
 
     return selected;
