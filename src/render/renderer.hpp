@@ -59,6 +59,9 @@ public:
         std::size_t drawn_sections {0};
         std::size_t frustum_culled_sections {0};
         std::size_t occlusion_culled_sections {0};
+        std::size_t portal_culled_sections {0};
+        std::size_t portal_visible_sections {0};
+        std::size_t portal_unknown_sections {0};
         std::size_t cave_culled_sections {0};
         std::size_t surface_culled_sections {0};
         std::size_t mixed_sections {0};
@@ -133,10 +136,12 @@ private:
         bool has_geometry {false};
         bool has_opaque_geometry {false};
         ChunkSectionVisibility visibility {};
+        SectionOcclusionMetadata occlusion {};
     };
 
     struct ChunkRenderData {
         std::array<RenderSection, kChunkSectionCount> sections {};
+        std::size_t gpu_buffer_bytes {0};
     };
 
     struct DeferredChunkBuffers {
@@ -238,6 +243,7 @@ private:
     void update_debug_hud_buffer();
     void draw_debug_hud(const FrameResources& frame);
     void update_startup_splash_buffers(float time_seconds, float fade_multiplier);
+    void update_menu_panorama_background_buffers(float time_seconds, bool use_night_panorama);
     void update_main_menu_buffers(float time_seconds, bool use_night_panorama, int hovered_button);
     void update_pause_menu_buffers(int hovered_button);
     void draw_textured_buffer(const FrameResources& frame, const GpuBuffer& buffer, std::uint32_t vertex_count, VkDescriptorSet descriptor_set);

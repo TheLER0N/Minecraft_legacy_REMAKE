@@ -112,8 +112,15 @@ struct ChunkSectionVisibility {
     bool near_surface_band {false};
 };
 
+struct SectionOcclusionMetadata {
+    bool known {false};
+    std::uint8_t open_sides {0};
+    std::array<std::uint8_t, 6> side_connections {};
+};
+
 struct ChunkVisibilityMetadata {
     std::array<ChunkSectionVisibility, kChunkSectionCount> sections {};
+    std::array<SectionOcclusionMetadata, kChunkSectionCount> occlusion {};
 };
 
 struct ChunkLight {

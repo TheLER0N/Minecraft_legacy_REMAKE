@@ -394,6 +394,131 @@ bool mesh_has_geometry(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) > 0 || mesh_index_count(mesh) > 0;
 }
 
+constexpr std::uint8_t section_side_bit(int side) {
+    return static_cast<std::uint8_t>(1u << static_cast<unsigned>(side));
+}
+
+bool block_allows_visibility_portal(BlockId block, const BlockRegistry& block_registry) {
+    return !block_registry.is_opaque(block);
+}
+
+SectionOcclusionMetadata build_section_occlusion_metadata(
+    const ChunkData& chunk,
+    const BlockRegistry& block_registry,
+    int section_index
+) {
+    SectionOcclusionMetadata metadata {};
+    metadata.known = true;
+
+    constexpr int kSectionVolume = kChunkWidth * kChunkDepth * kChunkSectionHeight;
+    std::array<std::uint8_t, static_cast<std::size_t>(kSectionVolume)> visited {};
+    std::array<int, static_cast<std::size_t>(kSectionVolume)> queue {};
+
+    const int section_base_y = section_index * kChunkSectionHeight;
+    const auto local_index = [](int x, int y, int z) {
+        return x + z * kChunkWidth + y * kChunkWidth * kChunkDepth;
+    };
+    const auto side_mask_for_cell = [](int x, int y, int z) {
+        std::uint8_t mask = 0;
+        if (y == kChunkSectionHeight - 1) {
+            mask |= section_side_bit(0);
+        }
+        if (y == 0) {
+            mask |= section_side_bit(1);
+        }
+        if (x == kChunkWidth - 1) {
+            mask |= section_side_bit(2);
+        }
+        if (x == 0) {
+            mask |= section_side_bit(3);
+        }
+        if (z == 0) {
+            mask |= section_side_bit(4);
+        }
+        if (z == kChunkDepth - 1) {
+            mask |= section_side_bit(5);
+        }
+        return mask;
+    };
+
+    for (int z = 0; z < kChunkDepth; ++z) {
+        for (int y = 0; y < kChunkSectionHeight; ++y) {
+            for (int x = 0; x < kChunkWidth; ++x) {
+                const int index = local_index(x, y, z);
+                if (visited[static_cast<std::size_t>(index)] != 0) {
+                    continue;
+                }
+
+                const BlockId block = chunk.get(x, section_base_y + y, z);
+                if (!block_allows_visibility_portal(block, block_registry)) {
+                    visited[static_cast<std::size_t>(index)] = 1;
+                    continue;
+                }
+
+                std::uint8_t component_sides = 0;
+                std::size_t head = 0;
+                std::size_t tail = 0;
+                visited[static_cast<std::size_t>(index)] = 1;
+                queue[tail++] = index;
+
+                while (head < tail) {
+                    const int current = queue[head++];
+                    const int cx = current % kChunkWidth;
+                    const int cz = (current / kChunkWidth) % kChunkDepth;
+                    const int cy = current / (kChunkWidth * kChunkDepth);
+                    component_sides |= side_mask_for_cell(cx, cy, cz);
+
+                    constexpr std::array<std::array<int, 3>, 6> neighbors {{
+                        {{0, 1, 0}},
+                        {{0, -1, 0}},
+                        {{1, 0, 0}},
+                        {{-1, 0, 0}},
+                        {{0, 0, -1}},
+                        {{0, 0, 1}}
+                    }};
+
+                    for (const auto& offset : neighbors) {
+                        const int nx = cx + offset[0];
+                        const int ny = cy + offset[1];
+                        const int nz = cz + offset[2];
+                        if (nx < 0 || nx >= kChunkWidth ||
+                            ny < 0 || ny >= kChunkSectionHeight ||
+                            nz < 0 || nz >= kChunkDepth) {
+                            continue;
+                        }
+
+                        const int next = local_index(nx, ny, nz);
+                        if (visited[static_cast<std::size_t>(next)] != 0) {
+                            continue;
+                        }
+
+                        const BlockId next_block = chunk.get(nx, section_base_y + ny, nz);
+                        if (!block_allows_visibility_portal(next_block, block_registry)) {
+                            visited[static_cast<std::size_t>(next)] = 1;
+                            continue;
+                        }
+
+                        visited[static_cast<std::size_t>(next)] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+
+                metadata.open_sides = static_cast<std::uint8_t>(metadata.open_sides | component_sides);
+                for (int side = 0; side < 6; ++side) {
+                    if ((component_sides & section_side_bit(side)) != 0) {
+                        metadata.side_connections[static_cast<std::size_t>(side)] =
+                            static_cast<std::uint8_t>(
+                                metadata.side_connections[static_cast<std::size_t>(side)] | component_sides
+                            );
+                    }
+                }
+            }
+        }
+    }
+
+    return metadata;
+}
+
 ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const BlockRegistry& block_registry) {
     ChunkVisibilityMetadata metadata {};
     std::array<int, static_cast<std::size_t>(kChunkWidth * kChunkDepth)> surface_y {};
@@ -469,6 +594,8 @@ ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const 
             section.has_cave_geometry = !section.has_sky_access;
             section.has_surface_geometry = section.has_sky_access;
         }
+        metadata.occlusion[static_cast<std::size_t>(section_index)] =
+            build_section_occlusion_metadata(chunk, block_registry, section_index);
     }
 
     return metadata;

@@ -99,6 +99,9 @@ void PerfRecorder::record_frame(const FrameSample& sample) {
         << sample.draw.cave_culled_sections << ','
         << sample.draw.surface_culled_sections << ','
         << sample.draw.occlusion_culled_sections << ','
+        << sample.draw.portal_culled_sections << ','
+        << sample.draw.portal_visible_sections << ','
+        << sample.draw.portal_unknown_sections << ','
         << sample.draw.draw_calls << ','
         << sample.draw.drawn_vertices << ','
         << sample.draw.drawn_indices << ','
@@ -124,7 +127,7 @@ void PerfRecorder::write_header() {
         "queued_generates,queued_decorates,queued_lights,queued_meshes,queued_fast_meshes,queued_final_meshes,"
         "stale_results,stale_uploads,light_stale_results,edge_fixups,deduped_uploads,deferred_rebuilds,final_light_jobs,pending_upload_unique_chunks,provisional_uploads,"
         "provisional_lifetime_frames,missing_light_borders,urgent_edit_chunks,urgent_edit_uploads,edit_upload_latency_frames,renderer_upload_failures,"
-        "drawn_chunks,visible_sections,drawn_sections,frustum_culled_sections,cave_culled_sections,surface_culled_sections,occlusion_culled_sections,draw_calls,drawn_vertices,drawn_indices,"
+        "drawn_chunks,visible_sections,drawn_sections,frustum_culled_sections,cave_culled_sections,surface_culled_sections,occlusion_culled_sections,portal_culled_sections,portal_visible_sections,portal_unknown_sections,draw_calls,drawn_vertices,drawn_indices,"
         "new_gpu_buffers,pooled_gpu_buffers\n";
 }
 

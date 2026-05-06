@@ -23,6 +23,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 #ifdef _WIN32
@@ -176,6 +177,21 @@ struct DrawSectionView {
     std::uint32_t vertex_count {0};
 };
 
+struct RenderSectionKey {
+    ChunkCoord coord {};
+    int section {0};
+
+    bool operator==(const RenderSectionKey&) const = default;
+};
+
+struct RenderSectionKeyHasher {
+    std::size_t operator()(const RenderSectionKey& key) const {
+        std::size_t seed = ChunkCoordHasher {}(key.coord);
+        seed = hash_combine(seed, key.section);
+        return seed;
+    }
+};
+
 ClipPoint transform_point_clip(const Mat4& matrix, const Vec3& point);
 
 constexpr int kRenderSectionHeight = 16;
@@ -194,14 +210,14 @@ constexpr std::size_t kOcclusionWarningLogLimit = 8;
 constexpr int kOcclusionEdgeGuardCells = 3;
 constexpr int kOcclusionCandidatePaddingCells = 3;
 constexpr int kOcclusionOccluderInsetCells = 1;
-constexpr float kOcclusionMinDistanceSq = 36.0f * 36.0f;
+constexpr float kOcclusionMinDistanceSq = 96.0f * 96.0f;
 // Surface sections are visually fragile: a coarse section AABB can be
 // considered hidden while a sliver of terrain is still visible at grazing
 // angles. Keep underground/cave occlusion aggressive, but protect risky
 // surface/horizon sections from false positives.
 constexpr int kMaxSurfaceOcclusionCullGridArea = 260;
 constexpr int kMaxGrazingSurfaceOcclusionCullGridArea = 96;
-constexpr float kSurfaceOcclusionMinDistanceSq = 72.0f * 72.0f;
+constexpr float kSurfaceOcclusionMinDistanceSq = 160.0f * 160.0f;
 constexpr float kGrazingSurfaceViewAbsY = 0.28f;
 
 // Cave/surface metadata must not be used as a hard visibility filter.
@@ -212,9 +228,12 @@ constexpr bool kEnableCaveSurfaceHardCulling = false;
 
 // Sections close to the camera must never be removed by heuristic culling.
 // Frustum culling and real occlusion culling may still work.
-constexpr float kNearSectionSafetyRadiusBlocks = 32.0f;
+constexpr float kNearSectionSafetyRadiusBlocks = 96.0f;
 constexpr float kNearSectionSafetyRadiusSq =
     kNearSectionSafetyRadiusBlocks * kNearSectionSafetyRadiusBlocks;
+constexpr float kPortalSectionSafetyRadiusBlocks = 24.0f;
+constexpr float kPortalSectionSafetyRadiusSq =
+    kPortalSectionSafetyRadiusBlocks * kPortalSectionSafetyRadiusBlocks;
 
 constexpr int kCaveSurfaceVisibleDepth = 32;
 constexpr int kCaveUndergroundChunkRadius = 3;
@@ -223,6 +242,15 @@ constexpr std::size_t kCaveCullingWarningLogLimit = 8;
 constexpr std::size_t kNearRenderSectionBudget = 640;
 constexpr std::size_t kMaxRenderSectionBudget = 1400;
 constexpr float kSurfaceFarSectionMinY = 48.0f;
+
+constexpr std::uint8_t portal_side_bit(int side) {
+    return static_cast<std::uint8_t>(1u << static_cast<unsigned>(side));
+}
+
+int opposite_portal_side(int side) {
+    constexpr std::array<int, 6> opposites {{1, 0, 3, 2, 5, 4}};
+    return opposites[static_cast<std::size_t>(side)];
+}
 
 int render_section_index_for_y(float y) {
     const int section = static_cast<int>(std::floor((y - static_cast<float>(kWorldMinY)) / static_cast<float>(kRenderSectionHeight)));
@@ -1195,6 +1223,12 @@ bool Renderer::upload_chunk_mesh(ChunkCoord coord, const ChunkMesh& mesh, const 
         section.has_geometry = section.has_opaque_geometry || section.cutout_index_count > 0 || section.transparent_index_count > 0;
         section.visibility = visibility.sections[section_index];
         section.visibility.has_geometry = section.has_geometry;
+        section.occlusion = visibility.occlusion[section_index];
+        render_data.gpu_buffer_bytes += static_cast<std::size_t>(
+            section.opaque_vertex_buffer.size + section.opaque_index_buffer.size +
+            section.cutout_vertex_buffer.size + section.cutout_index_buffer.size +
+            section.transparent_vertex_buffer.size + section.transparent_index_buffer.size
+        );
     }
 
     if (!upload_ok) {
@@ -1247,14 +1281,7 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
         return;
     }
 
-    update_main_menu_buffers(time_seconds, use_night_panorama, -1);
-
-    menu_logo_vertex_count_ = 0;
-    menu_button_vertex_count_ = 0;
-    menu_button_highlight_vertex_count_ = 0;
-    menu_overlay_vertex_count_ = 0;
-    menu_text_vertex_count_ = 0;
-    menu_font_vertex_count_ = 0;
+    update_menu_panorama_background_buffers(time_seconds, use_night_panorama);
 
     const FrameResources& frame = frames_[current_frame_];
     const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
@@ -1304,6 +1331,41 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
         }
     }
 }
+
+void Renderer::update_menu_panorama_background_buffers(float time_seconds, bool use_night_panorama) {
+    menu_panorama_vertex_count_ = 0;
+    menu_logo_vertex_count_ = 0;
+    menu_button_vertex_count_ = 0;
+    menu_button_highlight_vertex_count_ = 0;
+    menu_overlay_vertex_count_ = 0;
+    menu_text_vertex_count_ = 0;
+    menu_font_vertex_count_ = 0;
+
+    const VkExtent2D extent = logical_extent();
+    if (extent.width == 0 || extent.height == 0) {
+        return;
+    }
+
+    const float width = static_cast<float>(extent.width);
+    const float height = static_cast<float>(extent.height);
+    const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
+
+    std::vector<Vertex> panorama_vertices;
+    panorama_vertices.reserve(6);
+    const float view_ratio = width / height;
+    const float image_ratio = panorama.height > 0
+        ? static_cast<float>(panorama.width) / static_cast<float>(panorama.height)
+        : view_ratio;
+    const float visible_u = clamp(view_ratio / std::max(image_ratio, 0.001f), 0.0f, 1.0f);
+    const float travel = std::max(0.0f, 1.0f - visible_u);
+    constexpr float kPanoramaScrollUvPerSecond = 0.006f;
+    const float u0 = ping_pong_offset(time_seconds, kPanoramaScrollUvPerSecond, travel, travel * 0.5f);
+    const float u1 = std::min(1.0f, u0 + visible_u);
+    append_hud_textured_quad(panorama_vertices, 0.0f, 0.0f, width, height, width, height, u0, 0.0f, u1, 1.0f);
+    menu_panorama_vertex_count_ = static_cast<std::uint32_t>(panorama_vertices.size());
+    upload_dynamic_buffer(menu_panorama_vertex_buffer_, panorama_vertices);
+}
+
 void Renderer::draw_pause_menu(int hovered_button) {
     if (!frame_started_) {
         return;
@@ -1394,6 +1456,7 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
         ChunkCoord coord {};
         RenderSection* section {nullptr};
         int section_index {0};
+        std::size_t matrix_index {0};
         Aabb bounds {};
         float distance_sq {0.0f};
         int priority {0};
@@ -1401,6 +1464,8 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
     std::vector<RenderCandidate> candidates;
     candidates.reserve(visible_chunks.size() * kChunkSectionCount);
+    std::vector<Mat4> chunk_matrices;
+    chunk_matrices.reserve(visible_chunks.size());
     std::vector<ActiveChunk> outline_chunks;
     if (wireframe_enabled_) {
         outline_chunks.reserve(visible_chunks.size());
@@ -1412,7 +1477,134 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     std::size_t surface_culled_section_count = 0;
     std::size_t mixed_section_count = 0;
     std::size_t occlusion_culled_section_count = 0;
+    std::size_t portal_culled_section_count = 0;
+    std::size_t portal_visible_section_count = 0;
+    std::size_t portal_unknown_section_count = 0;
     std::size_t gpu_buffer_bytes = 0;
+
+    std::unordered_set<RenderSectionKey, RenderSectionKeyHasher> portal_visible_sections;
+    portal_visible_sections.reserve(chunk_buffers_.size() * kChunkSectionCount);
+    std::unordered_map<RenderSectionKey, std::uint8_t, RenderSectionKeyHasher> portal_reachable_sides;
+    portal_reachable_sides.reserve(chunk_buffers_.size() * kChunkSectionCount);
+
+    const auto floor_div = [](int value, int divisor) {
+        if (value >= 0) {
+            return value / divisor;
+        }
+        return -(((-value) + divisor - 1) / divisor);
+    };
+    const int camera_block_x = static_cast<int>(std::floor(current_camera_.camera_position.x));
+    const int camera_block_y = static_cast<int>(std::floor(current_camera_.camera_position.y));
+    const int camera_block_z = static_cast<int>(std::floor(current_camera_.camera_position.z));
+    const ChunkCoord camera_chunk {
+        floor_div(camera_block_x, kChunkWidth),
+        floor_div(camera_block_z, kChunkDepth)
+    };
+    const int camera_section = std::clamp(
+        render_section_index_for_y(static_cast<float>(camera_block_y)),
+        0,
+        kRenderSectionCount - 1
+    );
+
+    const bool portal_filter_enabled = chunk_buffers_.contains(camera_chunk);
+    if (portal_filter_enabled) {
+        std::vector<RenderSectionKey> open;
+        open.reserve(chunk_buffers_.size() * kChunkSectionCount);
+        const RenderSectionKey start {camera_chunk, camera_section};
+        portal_visible_sections.insert(start);
+        if (const auto start_chunk_it = chunk_buffers_.find(camera_chunk); start_chunk_it != chunk_buffers_.end()) {
+            portal_reachable_sides[start] =
+                start_chunk_it->second.sections[static_cast<std::size_t>(camera_section)].occlusion.open_sides;
+        }
+        open.push_back(start);
+
+        std::size_t cursor = 0;
+        while (cursor < open.size()) {
+            const RenderSectionKey current = open[cursor++];
+            const auto current_chunk_it = chunk_buffers_.find(current.coord);
+            if (current_chunk_it == chunk_buffers_.end()) {
+                continue;
+            }
+
+            const RenderSection& current_section =
+                current_chunk_it->second.sections[static_cast<std::size_t>(current.section)];
+            if (!current_section.occlusion.known) {
+                continue;
+            }
+
+            std::uint8_t exit_sides = 0;
+            if (const auto reachable_it = portal_reachable_sides.find(current);
+                reachable_it != portal_reachable_sides.end()) {
+                for (int entry_side = 0; entry_side < 6; ++entry_side) {
+                    if ((reachable_it->second & portal_side_bit(entry_side)) != 0) {
+                        exit_sides = static_cast<std::uint8_t>(
+                            exit_sides |
+                            current_section.occlusion.side_connections[static_cast<std::size_t>(entry_side)]
+                        );
+                    }
+                }
+            }
+            if (current == start) {
+                exit_sides = static_cast<std::uint8_t>(exit_sides | current_section.occlusion.open_sides);
+            }
+
+            for (int side = 0; side < 6; ++side) {
+                if ((exit_sides & portal_side_bit(side)) == 0) {
+                    continue;
+                }
+
+                ChunkCoord next_coord = current.coord;
+                int next_section = current.section;
+                switch (side) {
+                case 0:
+                    ++next_section;
+                    break;
+                case 1:
+                    --next_section;
+                    break;
+                case 2:
+                    ++next_coord.x;
+                    break;
+                case 3:
+                    --next_coord.x;
+                    break;
+                case 4:
+                    --next_coord.z;
+                    break;
+                case 5:
+                    ++next_coord.z;
+                    break;
+                default:
+                    break;
+                }
+
+                if (next_section < 0 || next_section >= kRenderSectionCount) {
+                    continue;
+                }
+
+                const auto next_chunk_it = chunk_buffers_.find(next_coord);
+                if (next_chunk_it == chunk_buffers_.end()) {
+                    continue;
+                }
+
+                const RenderSection& next_render_section =
+                    next_chunk_it->second.sections[static_cast<std::size_t>(next_section)];
+                if (!next_render_section.occlusion.known ||
+                    (next_render_section.occlusion.open_sides & portal_side_bit(opposite_portal_side(side))) == 0) {
+                    continue;
+                }
+
+                const RenderSectionKey next {next_coord, next_section};
+                const std::uint8_t next_entry_side = portal_side_bit(opposite_portal_side(side));
+                std::uint8_t& next_reachable = portal_reachable_sides[next];
+                const bool had_entry_side = (next_reachable & next_entry_side) != 0;
+                next_reachable = static_cast<std::uint8_t>(next_reachable | next_entry_side);
+                if (portal_visible_sections.insert(next).second || !had_entry_side) {
+                    open.push_back(next);
+                }
+            }
+        }
+    }
 
     for (const ActiveChunk& chunk : visible_chunks) {
         auto it = chunk_buffers_.find(chunk.coord);
@@ -1424,14 +1616,12 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             frustum_culled_section_count += kChunkSectionCount;
             continue;
         }
+        gpu_buffer_bytes += it->second.gpu_buffer_bytes;
+        const std::size_t matrix_index = chunk_matrices.size();
+        chunk_matrices.push_back(chunk_view_proj(chunk.coord));
 
         for (int section_index = 0; section_index < kChunkSectionCount; ++section_index) {
             RenderSection& section = it->second.sections[static_cast<std::size_t>(section_index)];
-            gpu_buffer_bytes += static_cast<std::size_t>(
-                section.opaque_vertex_buffer.size + section.opaque_index_buffer.size +
-                section.cutout_vertex_buffer.size + section.cutout_index_buffer.size +
-                section.transparent_vertex_buffer.size + section.transparent_index_buffer.size
-            );
             if (!section.has_geometry) {
                 continue;
             }
@@ -1441,6 +1631,25 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             if (section_culling_enabled_ && !aabb_visible_in_current_frustum(section_bounds)) {
                 ++frustum_culled_section_count;
                 continue;
+            }
+
+            const float section_distance_sq =
+                distance_sq_to_aabb(current_camera_.camera_position, section_bounds);
+            const bool portal_near_camera_section = section_distance_sq <= kPortalSectionSafetyRadiusSq ||
+                section_inside_near_safety_zone(current_camera_.camera_position, section_bounds);
+            if (!section.occlusion.known) {
+                ++portal_unknown_section_count;
+            } else if (portal_near_camera_section) {
+                ++portal_visible_section_count;
+            } else if (portal_filter_enabled) {
+                const RenderSectionKey section_key {chunk.coord, section_index};
+                if (!portal_visible_sections.contains(section_key)) {
+                    ++portal_culled_section_count;
+                    continue;
+                }
+                ++portal_visible_section_count;
+            } else {
+                ++portal_unknown_section_count;
             }
 
             const ChunkSectionVisibility& visibility = section.visibility;
@@ -1503,31 +1712,56 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
                 priority -= 8;
             }
 
-            const float section_distance_sq =
-                distance_sq_to_aabb(current_camera_.camera_position, section_bounds);
             if (section_distance_sq <= kNearSectionSafetyRadiusSq) {
                 priority -= 100;
             }
 
-            candidates.push_back({chunk.coord, &section, section_index, section_bounds, section_distance_sq, priority});
+            candidates.push_back({chunk.coord, &section, section_index, matrix_index, section_bounds, section_distance_sq, priority});
         }
     }
 
-    std::sort(candidates.begin(), candidates.end(), [](const RenderCandidate& lhs, const RenderCandidate& rhs) {
-        if (lhs.priority != rhs.priority) {
-            return lhs.priority < rhs.priority;
+    if (candidates.size() > 1) {
+        constexpr std::size_t kPriorityBucketCount = 16;
+        constexpr std::size_t kDistanceBucketCount = 6;
+        std::array<std::vector<RenderCandidate>, kPriorityBucketCount * kDistanceBucketCount> buckets {};
+        for (std::vector<RenderCandidate>& bucket : buckets) {
+            bucket.reserve(candidates.size() / buckets.size() + 1);
         }
-        if (lhs.distance_sq != rhs.distance_sq) {
-            return lhs.distance_sq < rhs.distance_sq;
+
+        const auto distance_bucket = [](float distance_sq) {
+            if (distance_sq <= 32.0f * 32.0f) {
+                return 0;
+            }
+            if (distance_sq <= 64.0f * 64.0f) {
+                return 1;
+            }
+            if (distance_sq <= 96.0f * 96.0f) {
+                return 2;
+            }
+            if (distance_sq <= 128.0f * 128.0f) {
+                return 3;
+            }
+            if (distance_sq <= 192.0f * 192.0f) {
+                return 4;
+            }
+            return 5;
+        };
+
+        for (RenderCandidate& candidate : candidates) {
+            const int priority_bucket = std::clamp((candidate.priority + 128) / 16, 0, static_cast<int>(kPriorityBucketCount) - 1);
+            const std::size_t bucket_index =
+                static_cast<std::size_t>(priority_bucket) * kDistanceBucketCount +
+                static_cast<std::size_t>(distance_bucket(candidate.distance_sq));
+            buckets[bucket_index].push_back(std::move(candidate));
         }
-        if (lhs.coord.x != rhs.coord.x) {
-            return lhs.coord.x < rhs.coord.x;
+
+        candidates.clear();
+        for (std::vector<RenderCandidate>& bucket : buckets) {
+            for (RenderCandidate& candidate : bucket) {
+                candidates.push_back(std::move(candidate));
+            }
         }
-        if (lhs.coord.z != rhs.coord.z) {
-            return lhs.coord.z < rhs.coord.z;
-        }
-        return lhs.section_index < rhs.section_index;
-    });
+    }
 
     std::vector<RenderCandidate> render_sections;
     render_sections.reserve(candidates.size());
@@ -1607,6 +1841,9 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     debug_hud_data_.drawn_sections = render_sections.size();
     debug_hud_data_.frustum_culled_sections = frustum_culled_section_count;
     debug_hud_data_.occlusion_culled_sections = occlusion_culled_section_count;
+    debug_hud_data_.portal_culled_sections = portal_culled_section_count;
+    debug_hud_data_.portal_visible_sections = portal_visible_section_count;
+    debug_hud_data_.portal_unknown_sections = portal_unknown_section_count;
     debug_hud_data_.cave_culled_sections = cave_culled_section_count;
     debug_hud_data_.surface_culled_sections = surface_culled_section_count;
     debug_hud_data_.mixed_sections = mixed_section_count;
@@ -1657,14 +1894,13 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             if (section.index_count == 0 || section.vertex_count == 0 || section.vertex_buffer == VK_NULL_HANDLE || section.index_buffer == VK_NULL_HANDLE) {
                 continue;
             }
-            const Mat4 chunk_matrix = chunk_view_proj(candidate.coord);
             vkCmdPushConstants(
                 frame.command_buffer,
                 layout,
                 VK_SHADER_STAGE_VERTEX_BIT,
                 0,
                 sizeof(Mat4),
-                chunk_matrix.m.data()
+                chunk_matrices[candidate.matrix_index].m.data()
             );
 
             const VkBuffer vertex_buffers[] = {section.vertex_buffer};
@@ -1970,6 +2206,9 @@ void Renderer::set_debug_hud(bool enabled, const DebugHudData& data) {
         debug_hud_data_.drawn_sections != data.drawn_sections ||
         debug_hud_data_.frustum_culled_sections != data.frustum_culled_sections ||
         debug_hud_data_.occlusion_culled_sections != data.occlusion_culled_sections ||
+        debug_hud_data_.portal_culled_sections != data.portal_culled_sections ||
+        debug_hud_data_.portal_visible_sections != data.portal_visible_sections ||
+        debug_hud_data_.portal_unknown_sections != data.portal_unknown_sections ||
         debug_hud_data_.cave_culled_sections != data.cave_culled_sections ||
         debug_hud_data_.surface_culled_sections != data.surface_culled_sections ||
         debug_hud_data_.mixed_sections != data.mixed_sections ||
@@ -3357,6 +3596,10 @@ void Renderer::update_debug_hud_buffer() {
     const std::string occ_culled = occlusion_culling_enabled_
         ? "OCC_CULLED:" + std::to_string(debug_hud_data_.occlusion_culled_sections)
         : "OCC_CULLED:OFF";
+    const std::string portal_culled = "PORTAL C/V/U:" +
+        std::to_string(debug_hud_data_.portal_culled_sections) + "/" +
+        std::to_string(debug_hud_data_.portal_visible_sections) + "/" +
+        std::to_string(debug_hud_data_.portal_unknown_sections);
     const std::string draw_calls = "CALLS:" + std::to_string(debug_hud_data_.draw_calls);
     const std::string geometry = "V/I:" + std::to_string(debug_hud_data_.drawn_vertices) + "/" + std::to_string(debug_hud_data_.drawn_indices);
     const std::string memory = "GPUKB:" + std::to_string(debug_hud_data_.gpu_buffer_bytes / 1024);
@@ -3402,7 +3645,7 @@ void Renderer::update_debug_hud_buffer() {
     vertices.reserve(
         (fps_stream.str().size() + xyz_stream.str().size() + mode.size() +
             chunks.size() + drawn.size() + sections.size() + culled.size() + draw_calls.size() +
-            occ_culled.size() + geometry.size() + memory.size() + uploads.size() + pending.size() + rebuilds.size() +
+            occ_culled.size() + portal_culled.size() + geometry.size() + memory.size() + uploads.size() + pending.size() + rebuilds.size() +
             queues.size() + queues2.size() + upload_queue.size() + scheduler.size() + provisional.size() + saves.size() + timings.size() + uploaded.size() +
             culling_modes.size() + cavevis.size() + cave_culled.size() + surface_culled.size() + mixed.size() +
             leaves.size() + world_y.size() + sea.size() + caves.size()) * 16
@@ -3420,29 +3663,30 @@ void Renderer::update_debug_hud_buffer() {
     append_left_text(sections, top - 100.0f);
     append_left_text(culled, top - 120.0f);
     append_left_text(occ_culled, top - 140.0f);
-    append_left_text(draw_calls, top - 160.0f);
-    append_left_text(geometry, top - 180.0f);
-    append_left_text(memory, top - 200.0f);
-    append_left_text(uploads, top - 220.0f);
-    append_left_text(pending, top - 240.0f);
-    append_left_text(rebuilds, top - 260.0f);
-    append_left_text(queues, top - 280.0f);
-    append_left_text(queues2, top - 300.0f);
-    append_left_text(upload_queue, top - 320.0f);
-    append_left_text(scheduler, top - 340.0f);
-    append_left_text(provisional, top - 360.0f);
-    append_left_text(saves, top - 380.0f);
-    append_left_text(timings, top - 400.0f);
-    append_left_text(uploaded, top - 420.0f);
-    append_left_text(culling_modes, top - 440.0f);
-    append_left_text(cavevis, top - 460.0f);
-    append_left_text(cave_culled, top - 480.0f);
-    append_left_text(surface_culled, top - 500.0f);
-    append_left_text(mixed, top - 520.0f);
-    append_left_text(leaves, top - 540.0f);
-    append_left_text(world_y, top - 560.0f);
-    append_left_text(sea, top - 580.0f);
-    append_left_text(caves, top - 600.0f);
+    append_left_text(portal_culled, top - 160.0f);
+    append_left_text(draw_calls, top - 180.0f);
+    append_left_text(geometry, top - 200.0f);
+    append_left_text(memory, top - 220.0f);
+    append_left_text(uploads, top - 240.0f);
+    append_left_text(pending, top - 260.0f);
+    append_left_text(rebuilds, top - 280.0f);
+    append_left_text(queues, top - 300.0f);
+    append_left_text(queues2, top - 320.0f);
+    append_left_text(upload_queue, top - 340.0f);
+    append_left_text(scheduler, top - 360.0f);
+    append_left_text(provisional, top - 380.0f);
+    append_left_text(saves, top - 400.0f);
+    append_left_text(timings, top - 420.0f);
+    append_left_text(uploaded, top - 440.0f);
+    append_left_text(culling_modes, top - 460.0f);
+    append_left_text(cavevis, top - 480.0f);
+    append_left_text(cave_culled, top - 500.0f);
+    append_left_text(surface_culled, top - 520.0f);
+    append_left_text(mixed, top - 540.0f);
+    append_left_text(leaves, top - 560.0f);
+    append_left_text(world_y, top - 580.0f);
+    append_left_text(sea, top - 600.0f);
+    append_left_text(caves, top - 620.0f);
 
     debug_hud_vertex_count_ = static_cast<std::uint32_t>(vertices.size());
     upload_dynamic_buffer(debug_hud_vertex_buffer_, vertices);
