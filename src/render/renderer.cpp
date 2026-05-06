@@ -23,6 +23,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -1253,6 +1254,7 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
     menu_button_highlight_vertex_count_ = 0;
     menu_overlay_vertex_count_ = 0;
     menu_text_vertex_count_ = 0;
+    menu_font_vertex_count_ = 0;
 
     const FrameResources& frame = frames_[current_frame_];
     const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
@@ -1400,7 +1402,9 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
     std::vector<RenderCandidate> candidates;
     candidates.reserve(visible_chunks.size() * kChunkSectionCount);
     std::vector<ActiveChunk> outline_chunks;
-    outline_chunks.reserve(visible_chunks.size());
+    if (wireframe_enabled_) {
+        outline_chunks.reserve(visible_chunks.size());
+    }
 
     std::size_t visible_section_count = 0;
     std::size_t frustum_culled_section_count = 0;
@@ -1445,26 +1449,30 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
                 ++mixed_section_count;
             }
             const bool far_chunk = chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > 4;
-            if (!cave_visibility_frame_.cave_mode && far_chunk && visibility.has_cave_geometry && !visibility.has_surface_geometry &&
-                section_bounds.max.y < kSurfaceFarSectionMinY) {
-                ++cave_culled_section_count;
-                continue;
+            if constexpr (kEnableCaveSurfaceHardCulling) {
+                if (!cave_visibility_frame_.cave_mode && far_chunk && visibility.has_cave_geometry && !visibility.has_surface_geometry &&
+                    section_bounds.max.y < kSurfaceFarSectionMinY) {
+                    ++cave_culled_section_count;
+                    continue;
+                }
             }
-            if (!mixed_section) {
-                if (!cave_visibility_frame_.cave_mode && visibility.has_cave_geometry && !visibility.has_surface_geometry) {
-                    const int depth_below_camera = cave_visibility_frame_.camera_world_y - visibility.max_world_y;
-                    const int depth_below_surface = visibility.nearest_surface_y - visibility.max_world_y;
-                    if (depth_below_camera > kCaveSurfaceVisibleDepth && depth_below_surface > kCaveSurfaceVisibleDepth) {
-                        ++cave_culled_section_count;
-                        continue;
-                    }
-                } else if (cave_visibility_frame_.cave_mode && visibility.has_surface_geometry && !visibility.has_cave_geometry) {
-                    const bool far_from_camera_chunk =
-                        chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > kCaveUndergroundChunkRadius;
-                    const bool above_camera = visibility.min_world_y > cave_visibility_frame_.camera_world_y;
-                    if ((far_from_camera_chunk || above_camera) && cave_visibility_frame_.roof_blocks >= 8) {
-                        ++surface_culled_section_count;
-                        continue;
+            if constexpr (kEnableCaveSurfaceHardCulling) {
+                if (!mixed_section) {
+                    if (!cave_visibility_frame_.cave_mode && visibility.has_cave_geometry && !visibility.has_surface_geometry) {
+                        const int depth_below_camera = cave_visibility_frame_.camera_world_y - visibility.max_world_y;
+                        const int depth_below_surface = visibility.nearest_surface_y - visibility.max_world_y;
+                        if (depth_below_camera > kCaveSurfaceVisibleDepth && depth_below_surface > kCaveSurfaceVisibleDepth) {
+                            ++cave_culled_section_count;
+                            continue;
+                        }
+                    } else if (cave_visibility_frame_.cave_mode && visibility.has_surface_geometry && !visibility.has_cave_geometry) {
+                        const bool far_from_camera_chunk =
+                            chunk_distance_chebyshev(chunk.coord, cave_visibility_frame_.camera_chunk_x, cave_visibility_frame_.camera_chunk_z) > kCaveUndergroundChunkRadius;
+                        const bool above_camera = visibility.min_world_y > cave_visibility_frame_.camera_world_y;
+                        if ((far_from_camera_chunk || above_camera) && cave_visibility_frame_.roof_blocks >= 8) {
+                            ++surface_culled_section_count;
+                            continue;
+                        }
                     }
                 }
             }
@@ -1523,6 +1531,9 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
 
     std::vector<RenderCandidate> render_sections;
     render_sections.reserve(candidates.size());
+    std::unordered_set<ChunkCoord, ChunkCoordHasher> rendered_chunk_coords;
+    rendered_chunk_coords.reserve(visible_chunks.size());
+    std::size_t drawn_chunk_count = 0;
     OcclusionGrid occlusion_grid;
     for (const RenderCandidate& candidate : candidates) {
         const bool near_camera_section =
@@ -1581,15 +1592,16 @@ void Renderer::draw_visible_chunks(std::span<const ActiveChunk> visible_chunks) 
             occlusion_grid.add_occluder(*occluder_projected);
         }
 
-        if (std::none_of(outline_chunks.begin(), outline_chunks.end(), [&](const ActiveChunk& active) {
-                return active.coord == candidate.coord;
-            })) {
-            outline_chunks.push_back({candidate.coord});
+        if (rendered_chunk_coords.insert(candidate.coord).second) {
+            ++drawn_chunk_count;
+            if (wireframe_enabled_) {
+                outline_chunks.push_back({candidate.coord});
+            }
         }
         render_sections.push_back(candidate);
     }
 
-    last_drawn_chunks_ = outline_chunks.size();
+    last_drawn_chunks_ = drawn_chunk_count;
     debug_hud_data_.drawn_chunks = last_drawn_chunks_;
     debug_hud_data_.visible_sections = visible_section_count;
     debug_hud_data_.drawn_sections = render_sections.size();

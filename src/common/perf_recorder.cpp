@@ -81,6 +81,10 @@ void PerfRecorder::record_frame(const FrameSample& sample) {
         << sample.streaming.stale_uploads << ','
         << sample.streaming.light_stale_results << ','
         << sample.streaming.edge_fixups << ','
+        << sample.streaming.deduped_uploads << ','
+        << sample.streaming.deferred_rebuilds << ','
+        << sample.streaming.final_light_jobs << ','
+        << sample.streaming.pending_upload_unique_chunks << ','
         << sample.streaming.provisional_uploads << ','
         << sample.streaming.provisional_lifetime_frames << ','
         << sample.streaming.missing_light_borders << ','
@@ -118,7 +122,7 @@ void PerfRecorder::write_header() {
         "pending_uploads,pending_upload_bytes,pending_upload_sections,"
         "uploads_this_frame,edit_uploads_this_frame,uploaded_bytes_this_frame,uploaded_sections_this_frame,"
         "queued_generates,queued_decorates,queued_lights,queued_meshes,queued_fast_meshes,queued_final_meshes,"
-        "stale_results,stale_uploads,light_stale_results,edge_fixups,provisional_uploads,"
+        "stale_results,stale_uploads,light_stale_results,edge_fixups,deduped_uploads,deferred_rebuilds,final_light_jobs,pending_upload_unique_chunks,provisional_uploads,"
         "provisional_lifetime_frames,missing_light_borders,urgent_edit_chunks,urgent_edit_uploads,edit_upload_latency_frames,renderer_upload_failures,"
         "drawn_chunks,visible_sections,drawn_sections,frustum_culled_sections,cave_culled_sections,surface_culled_sections,occlusion_culled_sections,draw_calls,drawn_vertices,drawn_indices,"
         "new_gpu_buffers,pooled_gpu_buffers\n";

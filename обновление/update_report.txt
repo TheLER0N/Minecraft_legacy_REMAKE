@@ -1,0 +1,31 @@
+Patch report
+Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260507_011315
+Time: 2026-05-07 01:13:15
+
+OK: inserted chunk bucket helpers
+OK: replaced full function WorldStreamer::update_observer bucketed
+OK: replaced full function WorldStreamer::request_spawn_preload bucketed
+OK: src/game/world_streamer.cpp written
+
+Changed files:
+- src/game/world_streamer.cpp
+
+What changed:
+- Added coarse chunk priority buckets.
+- Rewrote update_observer as a full function to avoid fragile partial replacements.
+- Replaced streaming_backlog_ sort with bucket reorder.
+- Replaced update_observer job_queue_ stable_sort with bucket move.
+- Rewrote request_spawn_preload as a full function.
+- Kept ordered_chunks ring sort for safe spawn preload.
+- Did not change graphics, textures, shaders, lighting, block geometry, render distance, or mesh generation.
+
+Expected result:
+- Lower CPU spikes during movement and chunk generation.
+- Less micro-freeze from sorting large queues.
+- Chunk loading still prioritizes player/safety/forward areas.
+
+Next step:
+1. Run build.bat.
+2. Test standing, walking, and fast flight.
+3. If build fails, send the first compiler error and 30 lines after it.

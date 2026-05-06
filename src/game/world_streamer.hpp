@@ -46,6 +46,10 @@ public:
         std::size_t light_stale_results {0};
         std::size_t edge_fixups {0};
         std::size_t dropped_jobs {0};
+        std::size_t deduped_uploads {0};
+        std::size_t deferred_rebuilds {0};
+        std::size_t final_light_jobs {0};
+        std::size_t pending_upload_unique_chunks {0};
         std::size_t dirty_save_chunks {0};
         std::size_t missing_light_borders {0};
         std::size_t urgent_edit_chunks {0};
@@ -160,6 +164,7 @@ private:
         std::optional<ChunkData> chunk_data {};
         std::optional<ChunkLight> light {};
         ChunkMesh mesh {};
+        ChunkVisibilityMetadata visibility {};
         std::uint64_t border_signature {0};
         bool borders_ready {false};
         bool provisional {false};
@@ -214,6 +219,7 @@ private:
     bool desired_chunk(const ChunkCoord& origin, const ChunkCoord& candidate) const;
     float chunk_priority_score(ChunkCoord coord, Vec3 observer_position, Vec3 observer_forward) const;
     float job_priority_score_locked(const ChunkJob& job) const;
+    void rebuild_job_queue_priority_locked(ChunkCoord origin, Vec3 direction, float speed_blocks_per_second);
     void push_job_locked(ChunkJob&& job);
     void queue_generate_job(ChunkCoord coord, std::uint64_t version);
     void queue_stage_job_locked(ChunkCoord coord, std::uint64_t version, ChunkJobType type, std::optional<ChunkData>&& chunk_data);
@@ -223,6 +229,12 @@ private:
     void queue_rebuild_job_if_loaded(ChunkCoord coord);
     void queue_rebuild_job_if_loaded_locked(ChunkCoord coord);
     void queue_rebuild_self_and_neighbors_if_loaded_locked(ChunkCoord coord, bool include_diagonals);
+    bool has_pending_upload_locked(ChunkCoord coord) const;
+    void add_pending_upload_stats_locked(const PendingChunkUpload& upload);
+    void subtract_pending_upload_stats_locked(const PendingChunkUpload& upload);
+    void reset_pending_upload_stats_locked();
+    void erase_pending_upload_at_locked(std::size_t index);
+    void enqueue_pending_upload_locked(PendingChunkUpload&& upload);
     void tick_grass_updates_locked();
     void queue_delayed_grass_update_locked(Int3 block, std::uint64_t delay_frames);
     bool apply_grass_lifecycle_at_locked(int x, int y, int z);
@@ -248,11 +260,17 @@ private:
     std::queue<JobResult> completed_;
     std::unordered_map<ChunkCoord, RebuildState, ChunkCoordHasher> rebuild_states_;
     bool stop_requested_ {false};
+    bool job_queue_priority_dirty_ {false};
     std::vector<std::thread> workers_;
 
     std::unordered_map<ChunkCoord, ChunkRecord, ChunkCoordHasher> chunks_;
     std::vector<ActiveChunk> visible_chunks_;
+    bool visible_chunks_dirty_ {true};
     std::vector<PendingChunkUpload> pending_uploads_;
+    std::unordered_set<ChunkCoord, ChunkCoordHasher> pending_upload_coords_;
+    std::size_t pending_upload_bytes_ {0};
+    std::size_t pending_upload_sections_ {0};
+    std::size_t pending_upload_provisional_count_ {0};
     std::vector<ChunkCoord> pending_unloads_;
     ChunkCoord observer_chunk_ {};
     Vec3 observer_position_ {};
@@ -281,9 +299,13 @@ private:
     std::size_t logged_ready_chunk_count_ {0};
     std::size_t logged_rebuild_lifecycle_count_ {0};
     std::size_t logged_stale_upload_count_ {0};
+    std::size_t deduped_uploads_ {0};
+    std::size_t deferred_rebuilds_ {0};
+    std::size_t final_light_jobs_ {0};
     float last_generate_ms_ {0.0f};
     float last_light_ms_ {0.0f};
     float last_mesh_ms_ {0.0f};
+    float last_apply_ms_ {0.0f};
     std::deque<ChunkCoord> dirty_save_queue_;
     std::unordered_set<ChunkCoord, ChunkCoordHasher> dirty_save_set_;
 };

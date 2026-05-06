@@ -282,6 +282,81 @@ float corridor_priority_score(
 }
 
 
+
+int chunk_streaming_bucket(
+    ChunkCoord origin,
+    ChunkCoord coord,
+    Vec3 direction,
+    float speed_blocks_per_second
+) {
+    const int dx = coord.x - origin.x;
+    const int dz = coord.z - origin.z;
+    const int chebyshev = std::max(std::abs(dx), std::abs(dz));
+
+    if (chebyshev == 0) {
+        return 0;
+    }
+
+    if (chebyshev <= corridor_safe_radius_chunks()) {
+        return 0;
+    }
+
+    if (chebyshev <= corridor_safe_radius_chunks() + 2) {
+        return 1;
+    }
+
+    const float forward = chunk_forward_units(origin, coord, direction);
+    const float side = chunk_side_units(origin, coord, direction);
+
+    if (corridor_mode_for_speed(speed_blocks_per_second)) {
+        const int forward_limit = adaptive_corridor_forward_chunks(speed_blocks_per_second, target_chunk_radius());
+        if (forward >= 0.0f &&
+            forward <= static_cast<float>(forward_limit) &&
+            side <= static_cast<float>(corridor_outer_half_width_chunks())) {
+            return 2;
+        }
+    } else if (forward >= 0.0f && side <= static_cast<float>(corridor_outer_half_width_chunks())) {
+        return 2;
+    }
+
+    if (side <= static_cast<float>(corridor_outer_half_width_chunks() + 2)) {
+        return 3;
+    }
+
+    return 4;
+}
+
+void reorder_chunk_coords_by_buckets(
+    std::vector<ChunkCoord>& coords,
+    ChunkCoord origin,
+    Vec3 direction,
+    float speed_blocks_per_second
+) {
+    if (coords.size() < 2) {
+        return;
+    }
+
+    std::array<std::vector<ChunkCoord>, 5> buckets {};
+    for (std::vector<ChunkCoord>& bucket : buckets) {
+        bucket.reserve(coords.size() / buckets.size() + 1);
+    }
+
+    for (const ChunkCoord& coord : coords) {
+        const int bucket = std::clamp(
+            chunk_streaming_bucket(origin, coord, direction, speed_blocks_per_second),
+            0,
+            static_cast<int>(buckets.size()) - 1
+        );
+        buckets[static_cast<std::size_t>(bucket)].push_back(coord);
+    }
+
+    coords.clear();
+    for (std::vector<ChunkCoord>& bucket : buckets) {
+        for (const ChunkCoord& coord : bucket) {
+            coords.push_back(coord);
+        }
+    }
+}
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 #ifdef __ANDROID__
@@ -313,6 +388,10 @@ std::size_t mesh_index_count(const ChunkMesh& mesh) {
 
 std::size_t mesh_byte_count(const ChunkMesh& mesh) {
     return mesh_vertex_count(mesh) * sizeof(Vertex) + mesh_index_count(mesh) * sizeof(std::uint32_t);
+}
+
+bool mesh_has_geometry(const ChunkMesh& mesh) {
+    return mesh_vertex_count(mesh) > 0 || mesh_index_count(mesh) > 0;
 }
 
 ChunkVisibilityMetadata build_visibility_metadata(const ChunkData& chunk, const BlockRegistry& block_registry) {
@@ -446,6 +525,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 
 void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_seconds) {
     const ChunkCoord origin = world_to_chunk(position);
+    const bool observer_chunk_changed = origin.x != observer_chunk_.x || origin.z != observer_chunk_.z;
     ++frame_counter_;
     observer_position_ = position;
 
@@ -482,6 +562,9 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     previous_observer_position_ = position;
     has_previous_observer_position_ = true;
     observer_chunk_ = origin;
+    if (observer_chunk_changed) {
+        visible_chunks_dirty_ = true;
+    }
 
     const float streaming_distance = streaming_update_distance_blocks();
     const float move_dx = position.x - last_streaming_update_position_.x;
@@ -525,33 +608,11 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
             }
         }
 
-        std::sort(
-            streaming_backlog_.begin(),
-            streaming_backlog_.end(),
-            [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
-                const float lhs_score = corridor_priority_score(
-                    origin,
-                    lhs,
-                    stream_direction,
-                    observer_speed_blocks_per_second_
-                );
-                const float rhs_score = corridor_priority_score(
-                    origin,
-                    rhs,
-                    stream_direction,
-                    observer_speed_blocks_per_second_
-                );
-
-                if (lhs_score != rhs_score) {
-                    return lhs_score < rhs_score;
-                }
-
-                if (lhs.x != rhs.x) {
-                    return lhs.x < rhs.x;
-                }
-
-                return lhs.z < rhs.z;
-            }
+        reorder_chunk_coords_by_buckets(
+            streaming_backlog_,
+            origin,
+            stream_direction,
+            observer_speed_blocks_per_second_
         );
     } else {
         for (auto& [coord, record] : chunks_) {
@@ -607,38 +668,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
 
     if (requested_this_frame > 0 || should_rebuild_backlog) {
         std::lock_guard lock(mutex_);
-        std::stable_sort(
-            job_queue_.begin(),
-            job_queue_.end(),
-            [&](const ChunkJob& lhs, const ChunkJob& rhs) {
-                const float lhs_score = corridor_priority_score(
-                    origin,
-                    lhs.coord,
-                    stream_direction,
-                    observer_speed_blocks_per_second_
-                );
-                const float rhs_score = corridor_priority_score(
-                    origin,
-                    rhs.coord,
-                    stream_direction,
-                    observer_speed_blocks_per_second_
-                );
-
-                if (lhs_score != rhs_score) {
-                    return lhs_score < rhs_score;
-                }
-
-                if (lhs.type != rhs.type) {
-                    return static_cast<int>(lhs.type) < static_cast<int>(rhs.type);
-                }
-
-                if (lhs.coord.x != rhs.coord.x) {
-                    return lhs.coord.x < rhs.coord.x;
-                }
-
-                return lhs.coord.z < rhs.coord.z;
-            }
-        );
+        rebuild_job_queue_priority_locked(origin, stream_direction, observer_speed_blocks_per_second_);
     }
 
     for (auto it = chunks_.begin(); it != chunks_.end();) {
@@ -653,10 +683,17 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
                 std::erase_if(job_queue_, [&](const ChunkJob& job) {
                     return job.coord == unloaded_coord;
                 });
+                for (std::size_t upload_index = pending_uploads_.size(); upload_index > 0; --upload_index) {
+                    const std::size_t index = upload_index - 1;
+                    if (pending_uploads_[index].coord == unloaded_coord) {
+                        erase_pending_upload_at_locked(index);
+                    }
+                }
                 queued_light_jobs_.erase(unloaded_coord);
                 dropped_jobs_ += before - job_queue_.size();
             }
             pending_unloads_.push_back(unloaded_coord);
+            visible_chunks_dirty_ = true;
             rebuild_states_.erase(unloaded_coord);
             dirty_save_set_.erase(unloaded_coord);
             if (logged_rebuild_lifecycle_count_ < 16) {
@@ -676,7 +713,6 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     refresh_visible_chunks();
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
-
 int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) const {
     const ChunkCoord center = world_to_chunk(position);
     const int clamped_radius = std::clamp(max_radius, 0, chunk_radius_);
@@ -845,46 +881,13 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
 
     if (requested > 0) {
         std::lock_guard lock(mutex_);
-        std::stable_sort(
-            job_queue_.begin(),
-            job_queue_.end(),
-            [&](const ChunkJob& lhs, const ChunkJob& rhs) {
-                const int lhs_dx = lhs.coord.x - center.x;
-                const int lhs_dz = lhs.coord.z - center.z;
-                const int rhs_dx = rhs.coord.x - center.x;
-                const int rhs_dz = rhs.coord.z - center.z;
-
-                const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
-                const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
-
-                if (lhs_ring != rhs_ring) {
-                    return lhs_ring < rhs_ring;
-                }
-
-                const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
-                const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
-
-                if (lhs_dist != rhs_dist) {
-                    return lhs_dist < rhs_dist;
-                }
-
-                if (lhs.type != rhs.type) {
-                    return static_cast<int>(lhs.type) < static_cast<int>(rhs.type);
-                }
-
-                if (lhs.coord.x != rhs.coord.x) {
-                    return lhs.coord.x < rhs.coord.x;
-                }
-
-                return lhs.coord.z < rhs.coord.z;
-            }
-        );
+        const Vec3 preload_direction = normalized_horizontal_direction(observer_forward_);
+        rebuild_job_queue_priority_locked(center, preload_direction, 0.0f);
     }
 
     refresh_visible_chunks();
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
-
 void WorldStreamer::tick_generation_jobs() {
     std::lock_guard lock(mutex_);
     std::size_t processed = 0;
@@ -932,6 +935,9 @@ void WorldStreamer::tick_generation_jobs() {
             }
 
             last_light_ms_ = result.light_ms;
+            if (!result.provisional) {
+                ++final_light_jobs_;
+            }
             const bool had_ready = record.light.has_value() && record.light->borders_ready;
             const std::uint64_t old_signature = record.border_signature;
 
@@ -1029,36 +1035,18 @@ void WorldStreamer::tick_generation_jobs() {
                 );
                 ++logged_ready_chunk_count_;
             }
-            const ChunkVisibilityMetadata visibility = it->second.data.has_value()
-                ? build_visibility_metadata(*it->second.data, block_registry_)
-                : ChunkVisibilityMetadata {};
-            std::size_t replaced_stale_uploads = 0;
-            const auto old_end = std::remove_if(
-                pending_uploads_.begin(),
-                pending_uploads_.end(),
-                [&](const PendingChunkUpload& upload) {
-                    if (upload.coord == result.coord && (!upload.provisional || result.provisional)) {
-                        ++replaced_stale_uploads;
-                    }
-                    return upload.coord == result.coord;
-                }
-            );
-            for (std::size_t i = 0; i < replaced_stale_uploads; ++i) {
-                record_stale_upload_drop(result.coord);
-            }
-            pending_uploads_.erase(old_end, pending_uploads_.end());
             it->second.provisional_mesh = result.provisional;
             const std::uint64_t upload_token = next_upload_token_++;
             it->second.latest_upload_token = upload_token;
             it->second.mesh_version = result.version;
-            pending_uploads_.push_back({
+            enqueue_pending_upload_locked({
                 result.coord,
                 result.version,
                 result.rebuild_serial,
                 upload_token,
                 result.provisional,
                 std::move(result.mesh),
-                visibility
+                result.visibility
             });
             continue;
         }
@@ -1081,7 +1069,7 @@ void WorldStreamer::tick_generation_jobs() {
             it->second.data = *result.chunk_data;
             it->second.dirty_light = true;
             it->second.needs_final_light = true;
-            queue_light_self_and_neighbors_if_loaded_locked(result.coord, true);
+            queue_light_self_and_neighbors_if_loaded_locked(result.coord, false);
             continue;
         }
 
@@ -1089,6 +1077,11 @@ void WorldStreamer::tick_generation_jobs() {
 
     tick_grass_updates_locked();
 
+    rebuild_job_queue_priority_locked(observer_chunk_, observer_forward_, observer_speed_blocks_per_second_);
+
+    last_apply_ms_ = std::chrono::duration<float, std::milli>(
+        std::chrono::steady_clock::now() - apply_start
+    ).count();
 }
 
 std::span<const ActiveChunk> WorldStreamer::visible_chunks() const {
@@ -1097,94 +1090,50 @@ std::span<const ActiveChunk> WorldStreamer::visible_chunks() const {
 
 
 void WorldStreamer::refresh_visible_chunks() {
-    visible_chunks_.clear();
-
-    const auto center_it = chunks_.find(observer_chunk_);
-    if (center_it == chunks_.end() || !center_it->second.uploaded_to_gpu) {
+    if (!visible_chunks_dirty_) {
         return;
     }
 
+    visible_chunks_.clear();
+
     const Vec3 stream_direction = normalized_horizontal_direction(observer_forward_);
 
-    std::vector<ChunkCoord> open;
-    std::unordered_set<ChunkCoord, ChunkCoordHasher> visited;
-
-    const std::size_t reserve_count = static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1));
-    open.reserve(reserve_count);
-    visited.reserve(reserve_count);
-
-    open.push_back(observer_chunk_);
-    visited.insert(observer_chunk_);
-
-    constexpr std::array<std::array<int, 2>, 4> neighbors {{
-        {{ 1,  0}},
-        {{-1,  0}},
-        {{ 0,  1}},
-        {{ 0, -1}}
-    }};
-
-    std::size_t cursor = 0;
-    while (cursor < open.size()) {
-        const ChunkCoord current = open[cursor++];
-
-        const auto record_it = chunks_.find(current);
-        if (record_it == chunks_.end() ||
-            !record_it->second.uploaded_to_gpu ||
-            !load_area_chunk(observer_chunk_, current, chunk_radius_)) {
-            continue;
-        }
-
-        visible_chunks_.push_back({current});
-
-        for (const auto& offset : neighbors) {
-            const ChunkCoord next {current.x + offset[0], current.z + offset[1]};
-
-            if (visited.contains(next)) {
-                continue;
-            }
-
-            if (!load_area_chunk(observer_chunk_, next, chunk_radius_)) {
-                continue;
-            }
-
-            const auto next_it = chunks_.find(next);
-            if (next_it == chunks_.end() || !next_it->second.uploaded_to_gpu) {
-                continue;
-            }
-
-            visited.insert(next);
-            open.push_back(next);
+    visible_chunks_.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+    for (const auto& [coord, record] : chunks_) {
+        if (record.uploaded_to_gpu && load_area_chunk(observer_chunk_, coord, chunk_radius_)) {
+            visible_chunks_.push_back({coord});
         }
     }
 
-    std::sort(
-        visible_chunks_.begin(),
-        visible_chunks_.end(),
-        [&](const ActiveChunk& lhs, const ActiveChunk& rhs) {
-            const float lhs_score = corridor_priority_score(
-                observer_chunk_,
-                lhs.coord,
-                stream_direction,
-                observer_speed_blocks_per_second_
-            );
-            const float rhs_score = corridor_priority_score(
-                observer_chunk_,
-                rhs.coord,
-                stream_direction,
-                observer_speed_blocks_per_second_
-            );
-
-            if (lhs_score != rhs_score) {
-                return lhs_score < rhs_score;
-            }
-
-            if (lhs.coord.x != rhs.coord.x) {
-                return lhs.coord.x < rhs.coord.x;
-            }
-
-            return lhs.coord.z < rhs.coord.z;
+    if (visible_chunks_.size() > 1) {
+        std::array<std::vector<ActiveChunk>, 5> buckets {};
+        for (std::vector<ActiveChunk>& bucket : buckets) {
+            bucket.reserve(visible_chunks_.size() / buckets.size() + 1);
         }
-    );
+
+        for (const ActiveChunk& chunk : visible_chunks_) {
+            const int bucket = std::clamp(
+                chunk_streaming_bucket(
+                    observer_chunk_,
+                    chunk.coord,
+                    stream_direction,
+                    observer_speed_blocks_per_second_
+                ),
+                0,
+                static_cast<int>(buckets.size()) - 1
+            );
+            buckets[static_cast<std::size_t>(bucket)].push_back(chunk);
+        }
+
+        visible_chunks_.clear();
+        for (std::vector<ActiveChunk>& bucket : buckets) {
+            for (const ActiveChunk& chunk : bucket) {
+                visible_chunks_.push_back(chunk);
+            }
+        }
+    }
+
+    visible_chunks_dirty_ = false;
 }
 std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads() {
     std::vector<PendingChunkUpload> uploads;
@@ -1201,6 +1150,8 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads() {
         uploads.push_back(std::move(upload));
     }
     pending_uploads_.clear();
+    pending_upload_coords_.clear();
+    reset_pending_upload_stats_locked();
     return uploads;
 }
 
@@ -1244,6 +1195,10 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads(std::size_t
         uploads.push_back(std::move(pending));
         ++consumed_count;
     }
+    for (std::size_t index = 0; index < consumed_count; ++index) {
+        subtract_pending_upload_stats_locked(pending_uploads_[index]);
+        pending_upload_coords_.erase(pending_uploads_[index].coord);
+    }
     pending_uploads_.erase(pending_uploads_.begin(), pending_uploads_.begin() + static_cast<std::ptrdiff_t>(consumed_count));
     return uploads;
 }
@@ -1272,58 +1227,59 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
         ? std::min(byte_budget, corridor_upload_byte_budget())
         : byte_budget;
 
-    std::stable_sort(
-        pending_uploads_.begin(),
-        pending_uploads_.end(),
-        [&](const PendingChunkUpload& lhs, const PendingChunkUpload& rhs) {
-            const float lhs_score = corridor_priority_score(
-                origin,
-                lhs.coord,
-                stream_direction,
-                observer_speed_blocks_per_second_
-            );
-            const float rhs_score = corridor_priority_score(
-                origin,
-                rhs.coord,
-                stream_direction,
-                observer_speed_blocks_per_second_
-            );
-
-            if (lhs_score != rhs_score) {
-                return lhs_score < rhs_score;
-            }
-
-            if (lhs.coord.x != rhs.coord.x) {
-                return lhs.coord.x < rhs.coord.x;
-            }
-
-            return lhs.coord.z < rhs.coord.z;
-        }
-    );
-
     std::size_t used_bytes = 0;
-    std::size_t take_count = 0;
+    selected.reserve(effective_max_count);
 
-    while (take_count < pending_uploads_.size() && take_count < effective_max_count) {
-        const std::size_t upload_bytes = mesh_byte_count(pending_uploads_[take_count].mesh);
-        if (take_count > 0 && used_bytes + upload_bytes > effective_byte_budget) {
+    const auto upload_is_current = [this](const PendingChunkUpload& upload) {
+        const auto it = chunks_.find(upload.coord);
+        return it != chunks_.end() &&
+            it->second.generation_version == upload.version &&
+            it->second.latest_rebuild_serial == upload.rebuild_serial &&
+            it->second.latest_upload_token == upload.upload_token;
+    };
+
+    while (!pending_uploads_.empty() && selected.size() < effective_max_count) {
+        std::optional<std::size_t> best_index {};
+        float best_score = std::numeric_limits<float>::max();
+
+        for (std::size_t index = 0; index < pending_uploads_.size(); ++index) {
+            const PendingChunkUpload& upload = pending_uploads_[index];
+            if (!upload_is_current(upload)) {
+                record_stale_upload_drop(upload.coord);
+                erase_pending_upload_at_locked(index);
+                best_index.reset();
+                best_score = std::numeric_limits<float>::max();
+                index = static_cast<std::size_t>(-1);
+                continue;
+            }
+
+            const std::size_t upload_bytes = mesh_byte_count(upload.mesh);
+            if (!selected.empty() && used_bytes + upload_bytes > effective_byte_budget) {
+                continue;
+            }
+
+            const float score = corridor_priority_score(
+                origin,
+                upload.coord,
+                stream_direction,
+                observer_speed_blocks_per_second_
+            );
+            if (!best_index.has_value() ||
+                score < best_score ||
+                (score == best_score && (upload.coord.x < pending_uploads_[*best_index].coord.x ||
+                    (upload.coord.x == pending_uploads_[*best_index].coord.x && upload.coord.z < pending_uploads_[*best_index].coord.z)))) {
+                best_index = index;
+                best_score = score;
+            }
+        }
+
+        if (!best_index.has_value()) {
             break;
         }
 
-        used_bytes += upload_bytes;
-        ++take_count;
-    }
-
-    selected.reserve(take_count);
-    for (std::size_t index = 0; index < take_count; ++index) {
-        selected.push_back(std::move(pending_uploads_[index]));
-    }
-
-    if (take_count > 0) {
-        pending_uploads_.erase(
-            pending_uploads_.begin(),
-            pending_uploads_.begin() + static_cast<std::ptrdiff_t>(take_count)
-        );
+        used_bytes += mesh_byte_count(pending_uploads_[*best_index].mesh);
+        selected.push_back(std::move(pending_uploads_[*best_index]));
+        erase_pending_upload_at_locked(*best_index);
     }
 
     return selected;
@@ -1345,6 +1301,11 @@ bool WorldStreamer::confirm_chunk_uploaded(
 
     it->second.state = ChunkState::UploadedToGPU;
     it->second.uploaded_to_gpu = true;
+    visible_chunks_dirty_ = true;
+    if (auto rebuild_it = rebuild_states_.find(coord);
+        rebuild_it != rebuild_states_.end() && rebuild_it->second.dirty && !rebuild_it->second.queued) {
+        queue_rebuild_job_if_loaded_locked(coord);
+    }
     return true;
 }
 
@@ -1352,6 +1313,68 @@ std::vector<ChunkCoord> WorldStreamer::drain_pending_unloads() {
     std::vector<ChunkCoord> unloads;
     unloads.swap(pending_unloads_);
     return unloads;
+}
+
+bool WorldStreamer::has_pending_upload_locked(ChunkCoord coord) const {
+    return pending_upload_coords_.contains(coord);
+}
+
+void WorldStreamer::add_pending_upload_stats_locked(const PendingChunkUpload& upload) {
+    pending_upload_bytes_ += mesh_byte_count(upload.mesh);
+    if (mesh_has_geometry(upload.mesh)) {
+        ++pending_upload_sections_;
+    }
+    if (upload.provisional) {
+        ++pending_upload_provisional_count_;
+    }
+}
+
+void WorldStreamer::subtract_pending_upload_stats_locked(const PendingChunkUpload& upload) {
+    const std::size_t bytes = mesh_byte_count(upload.mesh);
+    pending_upload_bytes_ = bytes <= pending_upload_bytes_ ? pending_upload_bytes_ - bytes : 0;
+    if (mesh_has_geometry(upload.mesh) && pending_upload_sections_ > 0) {
+        --pending_upload_sections_;
+    }
+    if (upload.provisional && pending_upload_provisional_count_ > 0) {
+        --pending_upload_provisional_count_;
+    }
+}
+
+void WorldStreamer::reset_pending_upload_stats_locked() {
+    pending_upload_bytes_ = 0;
+    pending_upload_sections_ = 0;
+    pending_upload_provisional_count_ = 0;
+}
+
+void WorldStreamer::erase_pending_upload_at_locked(std::size_t index) {
+    if (index >= pending_uploads_.size()) {
+        return;
+    }
+
+    subtract_pending_upload_stats_locked(pending_uploads_[index]);
+    pending_upload_coords_.erase(pending_uploads_[index].coord);
+    pending_uploads_.erase(pending_uploads_.begin() + static_cast<std::ptrdiff_t>(index));
+}
+
+void WorldStreamer::enqueue_pending_upload_locked(PendingChunkUpload&& upload) {
+    if (pending_upload_coords_.contains(upload.coord)) {
+        for (PendingChunkUpload& pending : pending_uploads_) {
+            if (pending.coord != upload.coord) {
+                continue;
+            }
+
+            record_stale_upload_drop(pending.coord);
+            subtract_pending_upload_stats_locked(pending);
+            pending = std::move(upload);
+            add_pending_upload_stats_locked(pending);
+            ++deduped_uploads_;
+            return;
+        }
+    }
+
+    pending_upload_coords_.insert(upload.coord);
+    add_pending_upload_stats_locked(upload);
+    pending_uploads_.push_back(std::move(upload));
 }
 
 WorldStreamer::StreamingStats WorldStreamer::stats() const {
@@ -1362,6 +1385,9 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
     stats.visible_chunks = visible_chunks_.size();
     stats.loaded_chunks = chunks_.size();
     stats.pending_uploads = pending_uploads_.size();
+    stats.pending_upload_bytes = pending_upload_bytes_;
+    stats.pending_upload_sections = pending_upload_sections_;
+    stats.provisional_uploads = pending_upload_provisional_count_;
     stats.pending_unloads = pending_unloads_.size();
     stats.completed_results = completed_.size();
     stats.streaming_backlog_size = streaming_backlog_.size();
@@ -1369,17 +1395,6 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
         streaming_backlog_cursor_ < streaming_backlog_.size()
             ? streaming_backlog_.size() - streaming_backlog_cursor_
             : 0;
-
-    for (const PendingChunkUpload& upload : pending_uploads_) {
-        stats.pending_upload_bytes += mesh_byte_count(upload.mesh);
-        if (mesh_vertex_count(upload.mesh) > 0 || mesh_index_count(upload.mesh) > 0) {
-            ++stats.pending_upload_sections;
-        }
-        if (upload.provisional) {
-            ++stats.provisional_uploads;
-        }
-    }
-
     for (const ChunkJob& job : job_queue_) {
         switch (job.type) {
         case ChunkJobType::GenerateTerrain:
@@ -1414,11 +1429,15 @@ WorldStreamer::StreamingStats WorldStreamer::stats() const {
     stats.light_stale_results = light_stale_results_;
     stats.edge_fixups = edge_fixups_;
     stats.dropped_jobs = dropped_jobs_;
+    stats.deduped_uploads = deduped_uploads_;
+    stats.deferred_rebuilds = deferred_rebuilds_;
+    stats.final_light_jobs = final_light_jobs_;
+    stats.pending_upload_unique_chunks = pending_upload_coords_.size();
     stats.dirty_save_chunks = dirty_save_set_.size();
     stats.last_generate_ms = last_generate_ms_;
     stats.last_light_ms = last_light_ms_;
     stats.last_mesh_ms = last_mesh_ms_;
-    stats.last_apply_ms = 0.0f;
+    stats.last_apply_ms = last_apply_ms_;
 
     stats.observer_light_borders_ready = true;
     stats.observer_light_border_status = 0;
@@ -1687,14 +1706,7 @@ bool WorldStreamer::apply_grass_lifecycle_at_locked(int x, int y, int z) {
         return false;
     }
 
-    const bool chunk_waiting_for_upload = std::any_of(
-        pending_uploads_.begin(),
-        pending_uploads_.end(),
-        [&](const PendingChunkUpload& upload) {
-            return upload.coord == coord;
-        }
-    );
-    if (chunk_waiting_for_upload) {
+    if (has_pending_upload_locked(coord)) {
         return false;
     }
 
@@ -1783,13 +1795,6 @@ void WorldStreamer::tick_grass_updates_locked() {
         return;
     }
 
-    std::sort(loaded_coords.begin(), loaded_coords.end(), [](const ChunkCoord& lhs, const ChunkCoord& rhs) {
-        if (lhs.x != rhs.x) {
-            return lhs.x < rhs.x;
-        }
-        return lhs.z < rhs.z;
-    });
-
     if (grass_update_chunk_cursor_ >= loaded_coords.size()) {
         grass_update_chunk_cursor_ = 0;
     }
@@ -1807,14 +1812,7 @@ void WorldStreamer::tick_grass_updates_locked() {
             continue;
         }
 
-        const bool chunk_waiting_for_upload = std::any_of(
-            pending_uploads_.begin(),
-            pending_uploads_.end(),
-            [&](const PendingChunkUpload& upload) {
-                return upload.coord == coord;
-            }
-        );
-        if (chunk_waiting_for_upload) {
+        if (has_pending_upload_locked(coord)) {
             continue;
         }
 
@@ -1902,6 +1900,7 @@ void WorldStreamer::set_chunk_radius(int radius) {
 
     chunk_radius_ = clamped_radius;
     observer_chunk_ = {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+    visible_chunks_dirty_ = true;
     log_message(LogLevel::Info, std::string("WorldStreamer: render distance set to ") + std::to_string(chunk_radius_));
     update_observer(observer_position_, observer_forward_);
 }
@@ -2005,6 +2004,7 @@ void WorldStreamer::worker_loop() {
                 const ChunkMeshSnapshot& snapshot = *job.snapshot;
                 const auto start = std::chrono::steady_clock::now();
                 result.mesh = build_chunk_mesh(snapshot.chunk, job.coord, block_registry_, neighbors_from_snapshot(snapshot), light_from_snapshot(snapshot), snapshot.leaves_mode);
+                result.visibility = build_visibility_metadata(snapshot.chunk, block_registry_);
                 result.provisional = snapshot.provisional;
                 const auto end = std::chrono::steady_clock::now();
                 result.mesh_ms = std::chrono::duration<float, std::milli>(end - start).count();
@@ -2134,10 +2134,44 @@ float WorldStreamer::job_priority_score_locked(const ChunkJob& job) const {
     return score;
 }
 
-void WorldStreamer::push_job_locked(ChunkJob&& job) {
-    constexpr std::size_t kMaxQueuedChunkJobs = 4096;
+void WorldStreamer::rebuild_job_queue_priority_locked(
+    ChunkCoord origin,
+    Vec3 direction,
+    float speed_blocks_per_second
+) {
+    if (!job_queue_priority_dirty_ || job_queue_.size() < 2) {
+        job_queue_priority_dirty_ = false;
+        return;
+    }
 
-    if (job_queue_.size() >= kMaxQueuedChunkJobs) {
+    std::array<std::vector<ChunkJob>, 5> job_buckets {};
+    for (std::vector<ChunkJob>& bucket : job_buckets) {
+        bucket.reserve(job_queue_.size() / job_buckets.size() + 1);
+    }
+
+    for (ChunkJob& job : job_queue_) {
+        const int bucket = std::clamp(
+            chunk_streaming_bucket(origin, job.coord, direction, speed_blocks_per_second),
+            0,
+            static_cast<int>(job_buckets.size()) - 1
+        );
+        job_buckets[static_cast<std::size_t>(bucket)].push_back(std::move(job));
+    }
+
+    job_queue_.clear();
+    for (std::vector<ChunkJob>& bucket : job_buckets) {
+        for (ChunkJob& job : bucket) {
+            job_queue_.push_back(std::move(job));
+        }
+    }
+
+    job_queue_priority_dirty_ = false;
+}
+
+void WorldStreamer::push_job_locked(ChunkJob&& job) {
+    const std::size_t max_queued_chunk_jobs = max_job_queue_size();
+
+    if (job_queue_.size() >= max_queued_chunk_jobs) {
         const auto worst_it = std::max_element(
             job_queue_.begin(),
             job_queue_.end(),
@@ -2148,21 +2182,15 @@ void WorldStreamer::push_job_locked(ChunkJob&& job) {
 
         if (worst_it != job_queue_.end() && job_priority_score_locked(*worst_it) > job_priority_score_locked(job)) {
             *worst_it = std::move(job);
+            job_queue_priority_dirty_ = true;
         } else {
             ++dropped_jobs_;
             return;
         }
     } else {
         job_queue_.push_back(std::move(job));
+        job_queue_priority_dirty_ = true;
     }
-
-    std::stable_sort(
-        job_queue_.begin(),
-        job_queue_.end(),
-        [this](const ChunkJob& lhs, const ChunkJob& rhs) {
-            return job_priority_score_locked(lhs) < job_priority_score_locked(rhs);
-        }
-    );
 
     cv_.notify_one();
 }
@@ -2268,6 +2296,16 @@ void WorldStreamer::queue_rebuild_job_if_loaded_locked(ChunkCoord coord) {
             );
             ++logged_rebuild_lifecycle_count_;
         }
+        return;
+    }
+
+    if (has_pending_upload_locked(coord)) {
+        RebuildState& state = rebuild_states_[coord];
+        if (!state.dirty) {
+            ++deferred_rebuilds_;
+        }
+        state.dirty = true;
+        state.serial = next_rebuild_serial_++;
         return;
     }
 
