@@ -24,7 +24,11 @@ class WorldStreamer {
 public:
     struct StreamingStats {
         std::size_t visible_chunks {0};
+        std::size_t loaded_chunks {0};
         std::size_t pending_uploads {0};
+        std::size_t pending_upload_bytes {0};
+        std::size_t pending_upload_sections {0};
+        std::size_t pending_unloads {0};
         std::size_t queued_rebuilds {0};
         std::size_t queued_generates {0};
         std::size_t queued_decorates {0};
@@ -32,19 +36,28 @@ public:
         std::size_t queued_meshes {0};
         std::size_t queued_fast_meshes {0};
         std::size_t queued_final_meshes {0};
-        std::size_t pending_upload_bytes {0};
+        std::size_t completed_results {0};
+        std::size_t streaming_backlog_size {0};
+        std::size_t streaming_backlog_remaining {0};
         std::size_t stale_results {0};
         std::size_t stale_uploads {0};
         std::size_t provisional_uploads {0};
+        std::size_t provisional_lifetime_frames {0};
         std::size_t light_stale_results {0};
         std::size_t edge_fixups {0};
         std::size_t dropped_jobs {0};
         std::size_t dirty_save_chunks {0};
+        std::size_t missing_light_borders {0};
+        std::size_t urgent_edit_chunks {0};
+        std::size_t urgent_edit_uploads {0};
+        std::size_t edit_upload_latency_frames {0};
+        std::size_t renderer_upload_failures {0};
         bool observer_light_borders_ready {false};
         int observer_light_border_status {0};
         float last_generate_ms {0.0f};
         float last_light_ms {0.0f};
         float last_mesh_ms {0.0f};
+        float last_apply_ms {0.0f};
     };
 
     WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry, int chunk_radius = 6);

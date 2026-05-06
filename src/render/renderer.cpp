@@ -1362,6 +1362,19 @@ void Renderer::unload_chunk_mesh(ChunkCoord coord) {
     chunk_buffers_.erase(existing);
 }
 
+
+Renderer::DebugHudData Renderer::last_draw_stats() const {
+    return debug_hud_data_;
+}
+
+Renderer::BufferStats Renderer::buffer_stats() const {
+    BufferStats stats {};
+    stats.resident_chunk_meshes = chunk_buffers_.size();
+    stats.pooled_gpu_buffers = chunk_buffer_pool_.size();
+    stats.deferred_chunk_meshes = deferred_chunk_buffers_.size();
+    stats.new_gpu_buffers = chunk_buffers_.size();
+    return stats;
+}
 void Renderer::set_cave_visibility_frame(const CaveVisibilityFrame& frame) {
     cave_visibility_frame_ = frame;
 }

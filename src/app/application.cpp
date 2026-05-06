@@ -188,7 +188,7 @@ bool Application::initialize() {
         log_message(LogLevel::Error, "Renderer initialization failed");
         return false;
     }
-    renderer_.debug_log_draw_stats = false;
+    renderer_.debug_log_draw_stats = true;
 
     std::random_device random_device;
     std::mt19937 rng(random_device());

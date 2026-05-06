@@ -1355,101 +1355,75 @@ std::vector<ChunkCoord> WorldStreamer::drain_pending_unloads() {
 }
 
 WorldStreamer::StreamingStats WorldStreamer::stats() const {
+    StreamingStats stats {};
+
     std::lock_guard lock(mutex_);
-    std::size_t queued_rebuilds = 0;
-    for (const auto& [coord, state] : rebuild_states_) {
-        (void)coord;
-        if (state.queued) {
-            ++queued_rebuilds;
-        }
-    }
-    std::size_t queued_generates = 0;
-    std::size_t queued_decorates = 0;
-    std::size_t queued_lights = 0;
-    std::size_t queued_meshes = 0;
-    std::size_t queued_fast_meshes = 0;
-    std::size_t queued_final_meshes = 0;
-    for (const ChunkJob& job : job_queue_) {
-        if (job.type == ChunkJobType::GenerateTerrain) {
-            ++queued_generates;
-        } else if (job.type == ChunkJobType::Decorate) {
-            ++queued_decorates;
-        } else if (job.type == ChunkJobType::CalculateLight) {
-            ++queued_lights;
-        } else if (job.type == ChunkJobType::BuildMesh) {
-            ++queued_meshes;
-            if (job.snapshot != nullptr && job.snapshot->provisional) {
-                ++queued_fast_meshes;
-            } else {
-                ++queued_final_meshes;
-            }
-        }
-    }
-    std::size_t pending_upload_bytes = 0;
-    std::size_t provisional_uploads = 0;
+
+    stats.visible_chunks = visible_chunks_.size();
+    stats.loaded_chunks = chunks_.size();
+    stats.pending_uploads = pending_uploads_.size();
+    stats.pending_unloads = pending_unloads_.size();
+    stats.completed_results = completed_.size();
+    stats.streaming_backlog_size = streaming_backlog_.size();
+    stats.streaming_backlog_remaining =
+        streaming_backlog_cursor_ < streaming_backlog_.size()
+            ? streaming_backlog_.size() - streaming_backlog_cursor_
+            : 0;
+
     for (const PendingChunkUpload& upload : pending_uploads_) {
-        pending_upload_bytes += mesh_byte_count(upload.mesh);
-        if (upload.provisional) {
-            ++provisional_uploads;
+        stats.pending_upload_bytes += mesh_byte_count(upload.mesh);
+        if (mesh_vertex_count(upload.mesh) > 0 || mesh_index_count(upload.mesh) > 0) {
+            ++stats.pending_upload_sections;
         }
-    }
-    bool observer_light_borders_ready = false;
-    int observer_light_border_status = 0;
-    if (const auto observer_it = chunks_.find(observer_chunk_);
-        observer_it != chunks_.end() && observer_it->second.light.has_value()) {
-        observer_light_borders_ready = observer_it->second.light->borders_ready;
-        observer_light_border_status = observer_light_borders_ready ? 1 : 0;
-        const std::array<ChunkCoord, 4> cardinal_neighbors {
-            ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z},
-            ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z},
-            ChunkCoord {observer_chunk_.x, observer_chunk_.z - 1},
-            ChunkCoord {observer_chunk_.x, observer_chunk_.z + 1}
-        };
-        const std::array<ChunkCoord, 4> diagonal_neighbors {
-            ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z - 1},
-            ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z - 1},
-            ChunkCoord {observer_chunk_.x - 1, observer_chunk_.z + 1},
-            ChunkCoord {observer_chunk_.x + 1, observer_chunk_.z + 1}
-        };
-        const auto has_final_light = [this](ChunkCoord coord) {
-            const auto it = chunks_.find(coord);
-            return it != chunks_.end() &&
-                it->second.light.has_value() &&
-                it->second.light->borders_ready;
-        };
-        const bool cardinal_ready = std::all_of(cardinal_neighbors.begin(), cardinal_neighbors.end(), has_final_light);
-        const bool diagonal_ready = std::all_of(diagonal_neighbors.begin(), diagonal_neighbors.end(), has_final_light);
-        if (cardinal_ready && diagonal_ready) {
-            observer_light_border_status = 2;
-        } else if (cardinal_ready) {
-            observer_light_border_status = 1;
+        if (upload.provisional) {
+            ++stats.provisional_uploads;
         }
     }
 
-    return {
-        visible_chunks_.size(),
-        pending_uploads_.size(),
-        queued_rebuilds,
-        queued_generates,
-        queued_decorates,
-        queued_lights,
-        queued_meshes,
-        queued_fast_meshes,
-        queued_final_meshes,
-        pending_upload_bytes,
-        stale_results_,
-        stale_uploads_dropped_,
-        provisional_uploads,
-        light_stale_results_,
-        edge_fixups_,
-        dropped_jobs_,
-        dirty_save_set_.size(),
-        observer_light_borders_ready,
-        observer_light_border_status,
-        last_generate_ms_,
-        last_light_ms_,
-        last_mesh_ms_
-    };
+    for (const ChunkJob& job : job_queue_) {
+        switch (job.type) {
+        case ChunkJobType::GenerateTerrain:
+            ++stats.queued_generates;
+            break;
+        case ChunkJobType::Decorate:
+            ++stats.queued_decorates;
+            break;
+        case ChunkJobType::CalculateLight:
+            ++stats.queued_lights;
+            break;
+        case ChunkJobType::BuildMesh:
+            ++stats.queued_meshes;
+            if (job.snapshot != nullptr && job.snapshot->provisional) {
+                ++stats.queued_fast_meshes;
+            } else {
+                ++stats.queued_final_meshes;
+            }
+            break;
+        }
+    }
+
+    for (const auto& [coord, rebuild] : rebuild_states_) {
+        (void)coord;
+        if (rebuild.queued || rebuild.dirty) {
+            ++stats.queued_rebuilds;
+        }
+    }
+
+    stats.stale_results = stale_results_;
+    stats.stale_uploads = stale_uploads_dropped_;
+    stats.light_stale_results = light_stale_results_;
+    stats.edge_fixups = edge_fixups_;
+    stats.dropped_jobs = dropped_jobs_;
+    stats.dirty_save_chunks = dirty_save_set_.size();
+    stats.last_generate_ms = last_generate_ms_;
+    stats.last_light_ms = last_light_ms_;
+    stats.last_mesh_ms = last_mesh_ms_;
+    stats.last_apply_ms = 0.0f;
+
+    stats.observer_light_borders_ready = true;
+    stats.observer_light_border_status = 0;
+
+    return stats;
 }
 
 BlockQueryResult WorldStreamer::query_block_at_world(int x, int y, int z) const {

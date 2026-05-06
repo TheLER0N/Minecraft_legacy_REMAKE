@@ -71,6 +71,13 @@ public:
         bool fancy_leaves {true};
     };
 
+
+    struct BufferStats {
+        std::size_t resident_chunk_meshes {0};
+        std::size_t pooled_gpu_buffers {0};
+        std::size_t deferred_chunk_meshes {0};
+        std::size_t new_gpu_buffers {0};
+    };
     ~Renderer();
 
     bool debug_disable_culling {false};
@@ -86,6 +93,8 @@ public:
     void unload_chunk_mesh(ChunkCoord coord);
     void unload_all_chunk_meshes();
     std::size_t resident_chunk_mesh_count() const;
+    DebugHudData last_draw_stats() const;
+    BufferStats buffer_stats() const;
     void set_cave_visibility_frame(const CaveVisibilityFrame& frame);
     void draw_visible_chunks(std::span<const ActiveChunk> visible_chunks);
     void end_frame();
