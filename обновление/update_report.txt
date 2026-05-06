@@ -1,0 +1,30 @@
+Patch report
+Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_221829
+Time: 2026-05-06 22:18:29
+
+OK: renderer.hpp draw_menu_panorama_message declaration already exists
+OK: renderer.cpp draw_menu_panorama_message implementation already exists
+OK: application.hpp render_world_transition_frames declaration already exists
+OK: replaced Application transition helpers
+OK: replaced Application::unload_world_for_menu
+OK: src/app/application.cpp written
+
+Changed files:
+- src/render/renderer.hpp
+- src/render/renderer.cpp
+- src/app/application.hpp
+- src/app/application.cpp
+
+What changed:
+- Loading and exit screens now use the lobby panorama.
+- Loading text: Загрузка мира.
+- Exit text: Выход из мира.
+- Existing world preload/save/unload logic remains in Application.
+- Fixed PowerShell variable naming: all paths use *Path variables, all file text uses *Text variables.
+
+Next step:
+1. Run build_release.bat.
+2. Enter the world and check the panorama loading screen.
+3. Exit the world and check the panorama exit screen.
+4. If build fails, send the first compiler error and 30 lines after it.
