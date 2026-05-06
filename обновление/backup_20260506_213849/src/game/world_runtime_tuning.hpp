@@ -28,6 +28,10 @@ struct WorldRuntimeTuning {
     float forward_buffer_safety_blocks {24.0f};
     float fast_flight_speed_threshold {25.0f};
     float very_fast_flight_speed_threshold {45.0f};
+    std::size_t spawn_preload_min_visible_chunks {9};
+    int spawn_preload_max_frames {900};
+    std::size_t spawn_preload_upload_max_count {16};
+    int transition_black_frames {2};
 };
 
 inline WorldRuntimeTuning world_runtime_tuning() {
@@ -62,7 +66,11 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         0.75f,
         20.0f,
         18.0f,
-        35.0f
+        35.0f,
+        std::size_t {4},
+        600,
+        std::size_t {8},
+        2
     };
 #else
     const std::size_t reserved_threads = hardware_threads >= 8 ? 2 : 1;
@@ -96,7 +104,11 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         0.75f,
         24.0f,
         25.0f,
-        45.0f
+        45.0f,
+        std::size_t {9},
+        900,
+        std::size_t {16},
+        2
     };
 #endif
 }

@@ -102,23 +102,25 @@ Add-Log $Log ("Backup dir: " + $BackupDir)
 Add-Log $Log ("Time: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
 Add-Log $Log ""
 
-$ApplicationHpp = Join-Path $ProjectRoot "src\app\application.hpp"
-$ApplicationCpp = Join-Path $ProjectRoot "src\app\application.cpp"
 $RuntimeTuning = Join-Path $ProjectRoot "src\game\world_runtime_tuning.hpp"
+$WorldStreamerHpp = Join-Path $ProjectRoot "src\game\world_streamer.hpp"
+$WorldStreamerCpp = Join-Path $ProjectRoot "src\game\world_streamer.cpp"
+$ApplicationCpp = Join-Path $ProjectRoot "src\app\application.cpp"
 
-$RequiredFiles = @($ApplicationHpp, $ApplicationCpp, $RuntimeTuning)
+$RequiredFiles = @($RuntimeTuning, $WorldStreamerHpp, $WorldStreamerCpp, $ApplicationCpp)
 foreach ($file in $RequiredFiles) {
     if (-not (Test-Path $file)) {
         throw "Required file not found: $file"
     }
 }
 
-Backup-File $ApplicationHpp
-Backup-File $ApplicationCpp
 Backup-File $RuntimeTuning
+Backup-File $WorldStreamerHpp
+Backup-File $WorldStreamerCpp
+Backup-File $ApplicationCpp
 
 # ----------------------------------------------------------------------
-# 1. Runtime tuning target: keep all optimization fields and add spawn preload.
+# 1. Runtime tuning: spawn preload nearest-first + visible black transition.
 # ----------------------------------------------------------------------
 
 $runtimeTuningText = @'
@@ -152,10 +154,12 @@ struct WorldRuntimeTuning {
     float forward_buffer_safety_blocks {24.0f};
     float fast_flight_speed_threshold {25.0f};
     float very_fast_flight_speed_threshold {45.0f};
+    int spawn_preload_radius {1};
     std::size_t spawn_preload_min_visible_chunks {9};
     int spawn_preload_max_frames {900};
+    std::size_t spawn_preload_requests_per_frame {16};
     std::size_t spawn_preload_upload_max_count {16};
-    int transition_black_frames {2};
+    int transition_black_frames {30};
 };
 
 inline WorldRuntimeTuning world_runtime_tuning() {
@@ -191,10 +195,12 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         20.0f,
         18.0f,
         35.0f,
+        1,
         std::size_t {4},
         600,
         std::size_t {8},
-        2
+        std::size_t {8},
+        30
     };
 #else
     const std::size_t reserved_threads = hardware_threads >= 8 ? 2 : 1;
@@ -229,10 +235,12 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         24.0f,
         25.0f,
         45.0f,
+        1,
         std::size_t {9},
         900,
         std::size_t {16},
-        2
+        std::size_t {16},
+        30
     };
 #endif
 }
@@ -241,133 +249,226 @@ inline WorldRuntimeTuning world_runtime_tuning() {
 '@
 
 Write-Utf8NoBom $RuntimeTuning $runtimeTuningText
-Add-Log $Log "OK: src/game/world_runtime_tuning.hpp rewritten"
-Add-Log $Log "    - keeps 16 chunk target"
-Add-Log $Log "    - keeps adaptive forward corridor settings"
-Add-Log $Log "    - adds spawn preload settings"
+Add-Log $Log "OK: world_runtime_tuning.hpp rewritten"
+Add-Log $Log "    - spawn_preload_radius = 1"
+Add-Log $Log "    - spawn_preload_requests_per_frame = 16"
+Add-Log $Log "    - transition_black_frames = 30"
 
 # ----------------------------------------------------------------------
-# 2. application.hpp: add helper declarations.
+# 2. world_streamer.hpp: add request_spawn_preload public API.
 # ----------------------------------------------------------------------
 
-$hpp = Read-Utf8Text $ApplicationHpp
+$hpp = Read-Utf8Text $WorldStreamerHpp
 $hppChanged = $false
 
-if (-not $hpp.Contains("bool preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward);")) {
-    $oldDeclBlock = @'
-    void start_world();
-    Renderer::CaveVisibilityFrame update_cave_visibility_frame(Vec3 observer_position);
-'@
-    $newDeclBlock = @'
-    void start_world();
-    bool preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward);
-    void render_black_transition_frames(int frame_count);
-    void unload_world_for_menu();
-    Renderer::CaveVisibilityFrame update_cave_visibility_frame(Vec3 observer_position);
+if (-not $hpp.Contains("void request_spawn_preload(Vec3 position, int radius, std::size_t max_requests);")) {
+    $oldDecl = '    void tick_generation_jobs();'
+    $newDecl = @'
+    void request_spawn_preload(Vec3 position, int radius, std::size_t max_requests);
+    void tick_generation_jobs();
 '@
 
-    if ($hpp.Contains($oldDeclBlock)) {
-        $hpp = $hpp.Replace($oldDeclBlock, $newDeclBlock)
+    if ($hpp.Contains($oldDecl)) {
+        $hpp = $hpp.Replace($oldDecl, $newDecl.TrimEnd())
         $hppChanged = $true
-        Add-Log $Log "OK: application.hpp added preload/transition/unload helper declarations"
+        Add-Log $Log "OK: world_streamer.hpp added request_spawn_preload declaration"
     } else {
-        throw "Cannot patch application.hpp: helper declaration anchor not found"
+        throw "Cannot patch world_streamer.hpp: tick_generation_jobs declaration anchor not found"
     }
 } else {
-    Add-Log $Log "OK: application.hpp helper declarations already exist"
+    Add-Log $Log "OK: request_spawn_preload declaration already exists"
 }
 
 if ($hppChanged) {
-    Write-Utf8NoBom $ApplicationHpp $hpp
-    Add-Log $Log "OK: src/app/application.hpp written"
+    Write-Utf8NoBom $WorldStreamerHpp $hpp
+    Add-Log $Log "OK: src/game/world_streamer.hpp written"
 }
 
 # ----------------------------------------------------------------------
-# 3. application.cpp: replace start_world block with preload helpers.
+# 3. world_streamer.cpp: add nearest-first spawn preload.
+# ----------------------------------------------------------------------
+
+$cpp = Read-Utf8Text $WorldStreamerCpp
+$cppChanged = $false
+
+$spawnPreloadMethod = @'
+void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests) {
+    if (max_requests == 0) {
+        return;
+    }
+
+    const ChunkCoord center = world_to_chunk(position);
+    ++frame_counter_;
+    observer_position_ = position;
+    observer_chunk_ = center;
+    last_streaming_update_position_ = position;
+    has_streaming_update_position_ = true;
+    previous_observer_position_ = position;
+    has_previous_observer_position_ = true;
+    observer_speed_blocks_per_second_ = 0.0f;
+
+    const int preload_radius = std::clamp(radius, 0, chunk_radius_);
+    std::vector<ChunkCoord> ordered_chunks;
+    ordered_chunks.reserve(static_cast<std::size_t>((preload_radius * 2 + 1) * (preload_radius * 2 + 1)));
+
+    for (int ring = 0; ring <= preload_radius; ++ring) {
+        for (int dz = -ring; dz <= ring; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                    continue;
+                }
+
+                ordered_chunks.push_back({center.x + dx, center.z + dz});
+            }
+        }
+    }
+
+    std::stable_sort(
+        ordered_chunks.begin(),
+        ordered_chunks.end(),
+        [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
+            const int lhs_dx = lhs.x - center.x;
+            const int lhs_dz = lhs.z - center.z;
+            const int rhs_dx = rhs.x - center.x;
+            const int rhs_dz = rhs.z - center.z;
+
+            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+
+            if (lhs_ring != rhs_ring) {
+                return lhs_ring < rhs_ring;
+            }
+
+            const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+            const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+
+            if (lhs_dist != rhs_dist) {
+                return lhs_dist < rhs_dist;
+            }
+
+            if (lhs.x != rhs.x) {
+                return lhs.x < rhs.x;
+            }
+
+            return lhs.z < rhs.z;
+        }
+    );
+
+    std::size_t requested = 0;
+
+    for (const ChunkCoord& coord : ordered_chunks) {
+        auto it = chunks_.find(coord);
+        if (it != chunks_.end()) {
+            it->second.last_touched_frame = frame_counter_;
+            continue;
+        }
+
+        if (requested >= max_requests) {
+            break;
+        }
+
+        {
+            std::lock_guard lock(mutex_);
+            if (job_queue_.size() >= max_job_queue_size()) {
+                break;
+            }
+        }
+
+        ChunkRecord record {};
+        record.generation_version = next_chunk_version_++;
+        record.mesh_version = 0;
+        record.last_touched_frame = frame_counter_;
+        const std::uint64_t version = record.generation_version;
+
+        chunks_.emplace(coord, std::move(record));
+        queue_generate_job(coord, version);
+        ++requested;
+    }
+
+    {
+        std::lock_guard lock(mutex_);
+        std::stable_sort(
+            job_queue_.begin(),
+            job_queue_.end(),
+            [&](const ChunkJob& lhs, const ChunkJob& rhs) {
+                const int lhs_dx = lhs.coord.x - center.x;
+                const int lhs_dz = lhs.coord.z - center.z;
+                const int rhs_dx = rhs.coord.x - center.x;
+                const int rhs_dz = rhs.coord.z - center.z;
+
+                const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+                const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+
+                if (lhs_ring != rhs_ring) {
+                    return lhs_ring < rhs_ring;
+                }
+
+                const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+                const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+
+                if (lhs_dist != rhs_dist) {
+                    return lhs_dist < rhs_dist;
+                }
+
+                if (lhs.type != rhs.type) {
+                    return static_cast<int>(lhs.type) < static_cast<int>(rhs.type);
+                }
+
+                if (lhs.coord.x != rhs.coord.x) {
+                    return lhs.coord.x < rhs.coord.x;
+                }
+
+                return lhs.coord.z < rhs.coord.z;
+            }
+        );
+    }
+
+    refresh_visible_chunks();
+    flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
+}
+
+'@
+
+if (-not $cpp.Contains("void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests)")) {
+    $marker = "void WorldStreamer::tick_generation_jobs() {"
+    $idx = $cpp.IndexOf($marker)
+    if ($idx -lt 0) {
+        throw "Cannot insert request_spawn_preload: tick_generation_jobs marker not found"
+    }
+
+    $cpp = $cpp.Substring(0, $idx) + $spawnPreloadMethod + $cpp.Substring($idx)
+    $cppChanged = $true
+    Add-Log $Log "OK: world_streamer.cpp inserted nearest-first request_spawn_preload"
+} else {
+    $cpp = Replace-BetweenMarkers `
+        $cpp `
+        "void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests) {" `
+        "void WorldStreamer::tick_generation_jobs() {" `
+        $spawnPreloadMethod `
+        "WorldStreamer::request_spawn_preload" `
+        ([ref]$cppChanged) `
+        $Log
+}
+
+if ($cppChanged) {
+    Write-Utf8NoBom $WorldStreamerCpp $cpp
+    Add-Log $Log "OK: src/game/world_streamer.cpp written"
+}
+
+# ----------------------------------------------------------------------
+# 4. application.cpp: replace preload_world_spawn so start uses center-out order.
 # ----------------------------------------------------------------------
 
 $app = Read-Utf8Text $ApplicationCpp
 $appChanged = $false
 
-$startAndHelperBlock = @'
-void Application::start_world() {
-    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
-
-    if (world_streamer_ == nullptr) {
-        try {
-            const std::filesystem::path save_root = platform_.save_root_directory() / "default";
-            log_message(LogLevel::Info, "Application: start_world save_root='" + path_to_utf8(save_root) + "'");
-
-            world_save_ = std::make_unique<WorldSave>(save_root);
-            const WorldMetadata metadata = world_save_->load_or_create_metadata();
-            log_message(LogLevel::Info, "Application: world metadata loaded seed=" + std::to_string(metadata.world_seed));
-
-            world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, kInitialChunkRadius, world_save_.get());
-            world_streamer_->set_leaves_render_mode(leaves_render_mode_);
-
-            const WorldGenerator spawn_generator {block_registry_};
-            const int spawn_x = 32;
-            const int spawn_z = 80;
-            const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, metadata.world_seed);
-            const float spawn_y = static_cast<float>(std::max(surface_y, kSeaLevel) + 2);
-
-            player_.set_body_position({static_cast<float>(spawn_x), spawn_y, static_cast<float>(spawn_z)});
-            camera_.set_pose({static_cast<float>(spawn_x), spawn_y + kPlayerEyeHeight, static_cast<float>(spawn_z)}, -90.0f, -22.0f);
-            player_.set_view_from_forward(camera_.forward());
-
-            if (!preload_world_spawn(player_.position(), player_.forward())) {
-                world_streamer_.reset();
-                world_save_.reset();
-                platform_.set_mouse_capture(false);
-                app_state_ = AppState::MainMenu;
-                return;
-            }
-
-            log_message(LogLevel::Info, "Application: world streamer created seed=" + std::to_string(metadata.world_seed));
-        } catch (const std::exception& exception) {
-            log_message(LogLevel::Error, std::string("Application: failed to start world: ") + exception.what());
-            world_streamer_.reset();
-            world_save_.reset();
-            platform_.set_mouse_capture(false);
-            app_state_ = AppState::MainMenu;
-            return;
-        } catch (...) {
-            log_message(LogLevel::Error, "Application: failed to start world: unknown exception");
-            world_streamer_.reset();
-            world_save_.reset();
-            platform_.set_mouse_capture(false);
-            app_state_ = AppState::MainMenu;
-            return;
-        }
-    }
-
-    platform_.set_mouse_capture(true);
-    platform_.enter_world_music();
-    app_state_ = AppState::InWorld;
-}
-
-void Application::render_black_transition_frames(int frame_count) {
-    const CameraFrameData loading_camera {
-        Mat4::identity(),
-        Mat4::identity(),
-        Mat4::identity(),
-        {},
-        {0.0f, 0.0f, -1.0f},
-        {1.0f, 0.0f, 0.0f},
-        {0.0f, 1.0f, 0.0f}
-    };
-
-    for (int i = 0; i < frame_count && !platform_.should_close(); ++i) {
-        platform_.pump_events();
-        renderer_.begin_frame(loading_camera);
-        renderer_.end_frame();
-    }
-}
-
+$preloadFunction = @'
 bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     if (world_streamer_ == nullptr) {
         return false;
     }
+
+    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
 
     const int spawn_block_x = static_cast<int>(std::floor(spawn_position.x));
     const int spawn_block_z = static_cast<int>(std::floor(spawn_position.z));
@@ -390,22 +491,28 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     }};
 
     const int max_frames = world_runtime_tuning().spawn_preload_max_frames;
+    const int preload_radius = world_runtime_tuning().spawn_preload_radius;
     const std::size_t min_visible_chunks = world_runtime_tuning().spawn_preload_min_visible_chunks;
+    const std::size_t requests_per_frame = world_runtime_tuning().spawn_preload_requests_per_frame;
     const std::size_t upload_max_count = world_runtime_tuning().spawn_preload_upload_max_count;
     bool spawn_column_loaded_once = false;
 
     log_message(
         LogLevel::Info,
-        std::string("Application: preload spawn chunks begin [min_visible=") +
-            std::to_string(min_visible_chunks) +
+        std::string("Application: preload spawn chunks begin [radius=") +
+            std::to_string(preload_radius) +
+            ", min_visible=" + std::to_string(min_visible_chunks) +
             ", max_frames=" + std::to_string(max_frames) + "]"
     );
 
     for (int frame = 0; frame < max_frames && !platform_.should_close(); ++frame) {
         platform_.pump_events();
 
-        world_streamer_->update_observer(spawn_position, spawn_forward);
-        world_streamer_->tick_generation_jobs();
+        world_streamer_->request_spawn_preload(spawn_position, preload_radius, requests_per_frame);
+
+        for (int apply_tick = 0; apply_tick < 4; ++apply_tick) {
+            world_streamer_->tick_generation_jobs();
+        }
 
         for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
             renderer_.unload_chunk_mesh(coord);
@@ -464,6 +571,8 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
                     ", visible=" + std::to_string(stats.visible_chunks) +
                     ", probes=" + std::to_string(loaded_probe_columns) + "]"
             );
+
+            render_black_transition_frames(world_runtime_tuning().transition_black_frames);
             return true;
         }
 
@@ -485,43 +594,18 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     return spawn_column_loaded_once;
 }
 
-void Application::unload_world_for_menu() {
-    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
-
-    if (world_streamer_ != nullptr) {
-        world_streamer_->flush_all_dirty_chunks();
-
-        for (const ActiveChunk& chunk : world_streamer_->visible_chunks()) {
-            renderer_.unload_chunk_mesh(chunk.coord);
-        }
-
-        for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
-            renderer_.unload_chunk_mesh(coord);
-        }
-
-        world_streamer_.reset();
-        world_save_.reset();
-    }
-
-    hovered_block_.reset();
-    block_break_.target.reset();
-    block_break_.repeat_seconds = 0.0f;
-
-    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
-}
-
 '@
 
 $app = Replace-BetweenMarkers `
     $app `
-    "void Application::start_world() {" `
-    "Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame" `
-    $startAndHelperBlock `
-    "Application::start_world/preload/unload helper block" `
+    "bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {" `
+    "void Application::unload_world_for_menu() {" `
+    $preloadFunction `
+    "Application::preload_world_spawn" `
     ([ref]$appChanged) `
     $Log
 
-# Patch PauseMenu exit branch robustly after replacing start_world block.
+# Ensure pause exit still unloads before menu.
 $pauseStart = $app.IndexOf("if (app_state_ == AppState::PauseMenu)")
 if ($pauseStart -lt 0) {
     throw "Cannot find PauseMenu block"
@@ -539,9 +623,10 @@ if ($continueIndex -lt 0) {
 }
 
 $exitEnd = $continueIndex + $continueMarker.Length
-$oldExitBlock = $app.Substring($exitStart, $exitEnd - $exitStart)
+$exitBlock = $app.Substring($exitStart, $exitEnd - $exitStart)
 
-$newExitBlock = @'
+if (-not $exitBlock.Contains("unload_world_for_menu();")) {
+    $newExitBlock = @'
 } else if (activated_button == kExitGameButtonIndex) {
                 platform_.play_ui_press_sound();
                 unload_world_for_menu();
@@ -557,13 +642,11 @@ $newExitBlock = @'
                 block_break_.repeat_seconds = 0.0f;
                 continue;
 '@
-
-if (-not $oldExitBlock.Contains("unload_world_for_menu();")) {
     $app = $app.Substring(0, $exitStart) + $newExitBlock + $app.Substring($exitEnd)
     $appChanged = $true
-    Add-Log $Log "OK: PauseMenu Exit branch now unloads world through unload_world_for_menu()"
+    Add-Log $Log "OK: PauseMenu exit now calls unload_world_for_menu"
 } else {
-    Add-Log $Log "OK: PauseMenu Exit branch already uses unload_world_for_menu()"
+    Add-Log $Log "OK: PauseMenu exit already calls unload_world_for_menu"
 }
 
 if ($appChanged) {
@@ -572,47 +655,44 @@ if ($appChanged) {
 }
 
 # ----------------------------------------------------------------------
-# 4. Validation.
+# 5. Validation.
 # ----------------------------------------------------------------------
 
 $rtAfter = Read-Utf8Text $RuntimeTuning
-$hppAfter = Read-Utf8Text $ApplicationHpp
+$hppAfter = Read-Utf8Text $WorldStreamerHpp
+$cppAfter = Read-Utf8Text $WorldStreamerCpp
 $appAfter = Read-Utf8Text $ApplicationCpp
 
-if (-not $rtAfter.Contains("spawn_preload_min_visible_chunks")) {
-    throw "Validation failed: spawn preload tuning fields missing"
+if (-not $rtAfter.Contains("int spawn_preload_radius {1};")) {
+    throw "Validation failed: spawn_preload_radius missing"
 }
 
-if (-not $hppAfter.Contains("bool preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward);")) {
-    throw "Validation failed: preload_world_spawn declaration missing"
+if (-not $rtAfter.Contains("std::size_t spawn_preload_requests_per_frame {16};")) {
+    throw "Validation failed: spawn_preload_requests_per_frame missing"
 }
 
-if (-not $hppAfter.Contains("void render_black_transition_frames(int frame_count);")) {
-    throw "Validation failed: render_black_transition_frames declaration missing"
+if (-not $rtAfter.Contains("int transition_black_frames {30};")) {
+    throw "Validation failed: transition_black_frames is not 30"
 }
 
-if (-not $hppAfter.Contains("void unload_world_for_menu();")) {
-    throw "Validation failed: unload_world_for_menu declaration missing"
+if (-not $hppAfter.Contains("void request_spawn_preload(Vec3 position, int radius, std::size_t max_requests);")) {
+    throw "Validation failed: request_spawn_preload declaration missing"
 }
 
-if (-not $appAfter.Contains("bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward)")) {
-    throw "Validation failed: preload_world_spawn implementation missing"
+if (-not $cppAfter.Contains("void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests)")) {
+    throw "Validation failed: request_spawn_preload implementation missing"
 }
 
-if (-not $appAfter.Contains("void Application::render_black_transition_frames(int frame_count)")) {
-    throw "Validation failed: render_black_transition_frames implementation missing"
+if (-not $cppAfter.Contains("ordered_chunks.push_back({center.x + dx, center.z + dz});")) {
+    throw "Validation failed: center-out spawn preload order missing"
 }
 
-if (-not $appAfter.Contains("void Application::unload_world_for_menu()")) {
-    throw "Validation failed: unload_world_for_menu implementation missing"
+if (-not $appAfter.Contains("world_streamer_->request_spawn_preload(spawn_position, preload_radius, requests_per_frame);")) {
+    throw "Validation failed: application preload does not use request_spawn_preload"
 }
 
-if (-not $appAfter.Contains("loaded_probe_columns >= 5")) {
-    throw "Validation failed: spawn probe loading check missing"
-}
-
-if (-not $appAfter.Contains("renderer_.upload_chunk_mesh(upload.coord, upload.mesh, upload.visibility)")) {
-    throw "Validation failed: preload upload path missing"
+if (-not $appAfter.Contains("render_black_transition_frames(world_runtime_tuning().transition_black_frames);")) {
+    throw "Validation failed: black transition call missing"
 }
 
 $pauseStartAfter = $appAfter.IndexOf("if (app_state_ == AppState::PauseMenu)")
@@ -629,20 +709,22 @@ if (-not $patchedExitBlock.Contains("unload_world_for_menu();")) {
 Add-Log $Log ""
 Add-Log $Log "Changed files:"
 Add-Log $Log "- src/game/world_runtime_tuning.hpp"
-Add-Log $Log "- src/app/application.hpp"
+Add-Log $Log "- src/game/world_streamer.hpp"
+Add-Log $Log "- src/game/world_streamer.cpp"
 Add-Log $Log "- src/app/application.cpp"
 Add-Log $Log ""
 Add-Log $Log "What changed:"
-Add-Log $Log "- Adds transition frames before entering and leaving the world."
-Add-Log $Log "- Adds spawn preload before AppState::InWorld."
-Add-Log $Log "- Forces spawn chunk/near columns to load before player control."
-Add-Log $Log "- Uploads spawn-area chunk meshes before entering the world."
-Add-Log $Log "- PauseMenu Exit now unloads world meshes and resets world_streamer/world_save."
+Add-Log $Log "- Spawn preload no longer uses normal directional chunk priority."
+Add-Log $Log "- Spawn preload requests chunks strictly center-out: player chunk first, then nearest ring."
+Add-Log $Log "- The black transition now lasts 30 frames instead of 2."
+Add-Log $Log "- During the black transition, the spawn area is generated, meshed and uploaded before InWorld control."
+Add-Log $Log "- PauseMenu exit still saves/unloads world before returning to MainMenu."
 Add-Log $Log ""
 Add-Log $Log "Next step:"
 Add-Log $Log "1. Run build_release.bat."
-Add-Log $Log "2. Start a world and check that the player does not fall before chunks appear."
-Add-Log $Log "3. If build fails, send the first compiler error and 30 lines after it."
+Add-Log $Log "2. Start a world and check logs for: Application: preload spawn chunks done."
+Add-Log $Log "3. Confirm the player no longer falls before spawn chunks appear."
+Add-Log $Log "4. If build fails, send the first compiler error and 30 lines after it."
 
 Write-Utf8NoBom $ReportPath (($Log -join [Environment]::NewLine) + [Environment]::NewLine)
 

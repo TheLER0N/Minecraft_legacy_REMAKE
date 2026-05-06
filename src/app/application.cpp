@@ -283,6 +283,8 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
         return false;
     }
 
+    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+
     const int spawn_block_x = static_cast<int>(std::floor(spawn_position.x));
     const int spawn_block_z = static_cast<int>(std::floor(spawn_position.z));
     const int probe_y = std::clamp(
@@ -304,22 +306,28 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
     }};
 
     const int max_frames = world_runtime_tuning().spawn_preload_max_frames;
+    const int preload_radius = world_runtime_tuning().spawn_preload_radius;
     const std::size_t min_visible_chunks = world_runtime_tuning().spawn_preload_min_visible_chunks;
+    const std::size_t requests_per_frame = world_runtime_tuning().spawn_preload_requests_per_frame;
     const std::size_t upload_max_count = world_runtime_tuning().spawn_preload_upload_max_count;
     bool spawn_column_loaded_once = false;
 
     log_message(
         LogLevel::Info,
-        std::string("Application: preload spawn chunks begin [min_visible=") +
-            std::to_string(min_visible_chunks) +
+        std::string("Application: preload spawn chunks begin [radius=") +
+            std::to_string(preload_radius) +
+            ", min_visible=" + std::to_string(min_visible_chunks) +
             ", max_frames=" + std::to_string(max_frames) + "]"
     );
 
     for (int frame = 0; frame < max_frames && !platform_.should_close(); ++frame) {
         platform_.pump_events();
 
-        world_streamer_->update_observer(spawn_position, spawn_forward);
-        world_streamer_->tick_generation_jobs();
+        world_streamer_->request_spawn_preload(spawn_position, preload_radius, requests_per_frame);
+
+        for (int apply_tick = 0; apply_tick < 4; ++apply_tick) {
+            world_streamer_->tick_generation_jobs();
+        }
 
         for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
             renderer_.unload_chunk_mesh(coord);
@@ -378,6 +386,8 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
                     ", visible=" + std::to_string(stats.visible_chunks) +
                     ", probes=" + std::to_string(loaded_probe_columns) + "]"
             );
+
+            render_black_transition_frames(world_runtime_tuning().transition_black_frames);
             return true;
         }
 
@@ -398,7 +408,6 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
 
     return spawn_column_loaded_once;
 }
-
 void Application::unload_world_for_menu() {
     render_black_transition_frames(world_runtime_tuning().transition_black_frames);
 

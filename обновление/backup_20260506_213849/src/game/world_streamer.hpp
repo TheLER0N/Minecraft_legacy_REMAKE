@@ -55,7 +55,6 @@ public:
     void update_observer(Vec3 position);
     void update_observer(Vec3 position, Vec3 forward);
     void update_observer(Vec3 position, Vec3 forward, float dt_seconds);
-    void request_spawn_preload(Vec3 position, int radius, std::size_t max_requests);
     void tick_generation_jobs();
     std::span<const ActiveChunk> visible_chunks() const;
     void refresh_visible_chunks();
