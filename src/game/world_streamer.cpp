@@ -1,4 +1,6 @@
-﻿#include "game/world_streamer.hpp"
+#include "game/world_streamer.hpp"
+
+#include "game/world_runtime_tuning.hpp"
 
 #include "common/log.hpp"
 
@@ -20,15 +22,21 @@ constexpr float kRaycastTieEpsilon = 0.00001f;
 constexpr int kMinChunkRadius = 2;
 #ifdef __ANDROID__
 constexpr int kMaxChunkRadius = 6;
-constexpr std::size_t kMaxNewChunkRequestsPerFrame = 2;
-constexpr std::size_t kMaxResultsPerTick = 10;
 #else
 constexpr int kMaxChunkRadius = 100;
-constexpr std::size_t kMaxNewChunkRequestsPerFrame = 12;
-constexpr std::size_t kMaxResultsPerTick = 48;
 #endif
 
-constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
+std::size_t max_new_chunk_requests_per_frame() {
+    return world_runtime_tuning().max_new_chunk_requests_per_frame;
+}
+
+std::size_t max_completed_results_per_tick() {
+    return world_runtime_tuning().max_completed_results_per_tick;
+}
+
+std::size_t max_job_queue_size() {
+    return world_runtime_tuning().max_job_queue_size;
+}constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 
 #ifdef __ANDROID__
@@ -154,20 +162,12 @@ WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry
     , block_registry_(block_registry)
     , generator_(block_registry)
     , chunk_radius_(std::clamp(chunk_radius, kMinChunkRadius, kMaxChunkRadius)) {
-    
-    
-    const std::size_t hardware_threads = std::max<std::size_t>(2, std::thread::hardware_concurrency());
+    const std::size_t worker_count = world_runtime_tuning().worker_count;
 
-    const std::size_t reserved_threads = hardware_threads >= 8 ? 2 : 1;
-
-    const std::size_t available_workers =
-        hardware_threads > reserved_threads ? hardware_threads - reserved_threads : 2;
-
-#ifdef __ANDROID__
-    const std::size_t worker_count = std::clamp<std::size_t>(available_workers, std::size_t {1}, std::size_t {2});
-#else
-    const std::size_t worker_count = std::clamp<std::size_t>(available_workers, std::size_t {2}, std::size_t {8});
-#endif
+    log_message(
+        LogLevel::Info,
+        std::string("WorldStreamer: worker threads=") + std::to_string(worker_count)
+    );
 
     workers_.reserve(worker_count);
     for (std::size_t i = 0; i < worker_count; ++i) {
@@ -237,7 +237,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 
     for (const std::vector<ChunkCoord>& ring_chunks : missing_by_ring) {
         for (const ChunkCoord& coord : ring_chunks) {
-            if (requested_this_frame >= kMaxNewChunkRequestsPerFrame) {
+            if (requested_this_frame >= max_new_chunk_requests_per_frame()) {
                 break;
             }
 
@@ -252,7 +252,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
             ++requested_this_frame;
         }
 
-        if (requested_this_frame >= kMaxNewChunkRequestsPerFrame) {
+        if (requested_this_frame >= max_new_chunk_requests_per_frame()) {
             break;
         }
     }
@@ -310,7 +310,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 void WorldStreamer::tick_generation_jobs() {
     std::lock_guard lock(mutex_);
     std::size_t processed = 0;
-    while (!completed_.empty() && processed < kMaxResultsPerTick) {
+    while (!completed_.empty() && processed < max_completed_results_per_tick()) {
         JobResult result = std::move(completed_.front());
         completed_.pop();
         ++processed;

@@ -2,6 +2,7 @@
 
 #include "common/log.hpp"
 #include "game/world_generator.hpp"
+#include "game/world_runtime_tuning.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -27,16 +28,22 @@ constexpr float kBreakRepeatInitialDelaySeconds = 0.35f;
 constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 
 #ifdef __ANDROID__
-constexpr std::size_t kChunkUploadByteBudgetPerFrame = 512ull * 1024ull;
-constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 512ull * 1024ull;
-constexpr std::size_t kChunkUploadMaxCountPerFrame = 1;
 constexpr int kInitialChunkRadius = 8;
 #else
-constexpr std::size_t kChunkUploadByteBudgetPerFrame = 2ull * 1024ull * 1024ull;
-constexpr std::size_t kChunkUploadBacklogBudgetPerFrame = 2ull * 1024ull * 1024ull;
-constexpr std::size_t kChunkUploadMaxCountPerFrame = 2;
 constexpr int kInitialChunkRadius = 10;
 #endif
+
+std::size_t chunk_upload_byte_budget_per_frame() {
+    return world_runtime_tuning().chunk_upload_byte_budget_per_frame;
+}
+
+std::size_t chunk_upload_backlog_budget_per_frame() {
+    return world_runtime_tuning().chunk_upload_backlog_budget_per_frame;
+}
+
+std::size_t chunk_upload_max_count_per_frame() {
+    return world_runtime_tuning().chunk_upload_max_count_per_frame;
+}
 
 constexpr int kPlayGameButtonIndex = 0;
 constexpr int kExitGameButtonIndex = 5;
@@ -618,11 +625,11 @@ int Application::run() {
 
         const WorldStreamer::StreamingStats pre_upload_stats = world_streamer_->stats();
         const std::size_t upload_budget = pre_upload_stats.pending_uploads > 4
-            ? kChunkUploadBacklogBudgetPerFrame
-            : kChunkUploadByteBudgetPerFrame;
+            ? chunk_upload_backlog_budget_per_frame()
+            : chunk_upload_byte_budget_per_frame();
         auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(
             upload_budget,
-            kChunkUploadMaxCountPerFrame,
+            chunk_upload_max_count_per_frame(),
             observer_position,
             observer_forward
         );
