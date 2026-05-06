@@ -1,0 +1,18 @@
+Patch report
+Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260507_003657
+Time: 2026-05-07 00:36:57
+
+Changed files:
+- src/game/world_streamer.cpp
+
+What changed:
+- Removed duplicated kMaxDirtyChunkSavesPerTick declarations.
+- Inserted exactly one kMaxDirtyChunkSavesPerTick declaration before grass update constants.
+- Fixed glued helper/function boundaries left by previous marker replacement.
+- Declarations before fix: 4
+- Declarations after fix: 1
+
+Next step:
+1. Run build.bat or build_release.bat again.
+2. If compilation fails again, send the first compiler error and 30 lines after it.

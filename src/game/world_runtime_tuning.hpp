@@ -36,8 +36,8 @@ struct WorldRuntimeTuning {
     int spawn_preload_radius {0};
     std::size_t spawn_preload_min_visible_chunks {0};
     int spawn_preload_max_frames {1200};
-    std::size_t spawn_preload_requests_per_frame {20};
-    std::size_t spawn_preload_upload_max_count {20};
+    std::size_t spawn_preload_requests_per_frame {18};
+    std::size_t spawn_preload_upload_max_count {14};
 
     std::size_t streaming_backlog_requests_per_frame {8};
     std::size_t world_exit_mesh_unload_budget_per_step {128};
@@ -48,7 +48,7 @@ struct WorldRuntimeTuning {
     float world_leaving_min_seconds {2.0f};
     int transition_black_frames {30};
 
-    // Fast-flight priority tuning. This must not be used as a hard visibility mask.
+    // Fast-flight priority tuning. These values affect priority only, not world visibility mask.
     bool adaptive_corridor_streaming_enabled {true};
     float corridor_speed_threshold_blocks_per_second {30.0f};
     float elytra_expected_speed_blocks_per_second {78.4f};
@@ -57,16 +57,16 @@ struct WorldRuntimeTuning {
     float corridor_look_weight {0.25f};
 
     int corridor_safe_radius_chunks {2};
-    int corridor_rear_keep_chunks {3};
+    int corridor_rear_keep_chunks {4};
     int corridor_min_forward_chunks {8};
     int corridor_max_forward_chunks {16};
     int corridor_inner_half_width_chunks {3};
     int corridor_outer_half_width_chunks {5};
     int corridor_generation_ahead_chunks {4};
 
-    std::size_t corridor_requests_per_frame {24};
-    std::size_t corridor_uploads_per_frame {16};
-    std::size_t corridor_upload_byte_budget {6ull * 1024ull * 1024ull};
+    std::size_t corridor_requests_per_frame {20};
+    std::size_t corridor_uploads_per_frame {12};
+    std::size_t corridor_upload_byte_budget {5ull * 1024ull * 1024ull};
 };
 
 inline WorldRuntimeTuning world_runtime_tuning() {
@@ -155,11 +155,11 @@ inline WorldRuntimeTuning world_runtime_tuning() {
     return WorldRuntimeTuning {
         worker_count,
         std::clamp<std::size_t>(worker_count * 3, std::size_t {8}, std::size_t {24}),
-        std::clamp<std::size_t>(worker_count * 12, std::size_t {48}, std::size_t {144}),
+        std::clamp<std::size_t>(worker_count * 10, std::size_t {48}, std::size_t {128}),
         std::clamp<std::size_t>(worker_count * 96, std::size_t {384}, std::size_t {1536}),
         3ull * 1024ull * 1024ull,
-        6ull * 1024ull * 1024ull,
-        std::clamp<std::size_t>(worker_count / 2, std::size_t {2}, std::size_t {6}),
+        5ull * 1024ull * 1024ull,
+        std::clamp<std::size_t>(worker_count / 2, std::size_t {2}, std::size_t {5}),
         1.5f,
 
         16,
@@ -182,8 +182,8 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         0,
         std::size_t {0},
         1200,
-        std::size_t {20},
-        std::size_t {20},
+        std::size_t {18},
+        std::size_t {14},
 
         std::size_t {8},
         std::size_t {128},
@@ -209,9 +209,9 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         5,
         4,
 
-        std::size_t {24},
-        std::size_t {16},
-        6ull * 1024ull * 1024ull
+        std::size_t {20},
+        std::size_t {12},
+        5ull * 1024ull * 1024ull
     };
 #endif
 }

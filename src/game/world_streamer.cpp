@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ml {
 
@@ -43,42 +44,6 @@ std::size_t streaming_backlog_requests_per_frame() {
     return world_runtime_tuning().streaming_backlog_requests_per_frame;
 }
 
-int contiguous_generation_ring_window() {
-    return std::max(1, world_runtime_tuning().contiguous_generation_ring_window);
-}
-
-int keep_radius_extra_chunks() {
-    return std::max(0, world_runtime_tuning().keep_radius_extra_chunks);
-}
-
-bool adaptive_corridor_streaming_enabled() {
-    return world_runtime_tuning().adaptive_corridor_streaming_enabled;
-}
-
-float corridor_speed_threshold_blocks_per_second() {
-    return world_runtime_tuning().corridor_speed_threshold_blocks_per_second;
-}
-
-int corridor_safe_radius_chunks() {
-    return std::max(1, world_runtime_tuning().corridor_safe_radius_chunks);
-}
-
-int corridor_rear_keep_chunks() {
-    return std::max(0, world_runtime_tuning().corridor_rear_keep_chunks);
-}
-
-int corridor_inner_half_width_chunks() {
-    return std::max(1, world_runtime_tuning().corridor_inner_half_width_chunks);
-}
-
-int corridor_outer_half_width_chunks() {
-    return std::max(corridor_inner_half_width_chunks(), world_runtime_tuning().corridor_outer_half_width_chunks);
-}
-
-int corridor_generation_ahead_chunks() {
-    return std::max(1, world_runtime_tuning().corridor_generation_ahead_chunks);
-}
-
 std::size_t corridor_requests_per_frame() {
     return world_runtime_tuning().corridor_requests_per_frame;
 }
@@ -91,116 +56,15 @@ std::size_t corridor_upload_byte_budget() {
     return world_runtime_tuning().corridor_upload_byte_budget;
 }
 
-bool corridor_mode_for_speed(float speed_blocks_per_second) {
-    return adaptive_corridor_streaming_enabled() &&
-        speed_blocks_per_second >= corridor_speed_threshold_blocks_per_second();
+int contiguous_generation_ring_window() {
+    return std::max(1, world_runtime_tuning().contiguous_generation_ring_window);
 }
 
-int adaptive_corridor_forward_chunks(float speed_blocks_per_second, int chunk_radius) {
-    const float chunks_per_second = speed_blocks_per_second / static_cast<float>(kChunkWidth);
-    const int calculated = static_cast<int>(
-        std::ceil(chunks_per_second * world_runtime_tuning().corridor_lookahead_seconds + 2.0f)
-    );
-
-    return std::clamp(
-        calculated,
-        std::max(1, world_runtime_tuning().corridor_min_forward_chunks),
-        std::min(chunk_radius, world_runtime_tuning().corridor_max_forward_chunks)
-    );
+int keep_radius_extra_chunks() {
+    return std::max(0, world_runtime_tuning().keep_radius_extra_chunks);
 }
 
-Vec3 normalized_horizontal_direction(Vec3 direction) {
-    direction.y = 0.0f;
-    if (length(direction) <= 0.00001f) {
-        return {0.0f, 0.0f, -1.0f};
-    }
-    return normalize(direction);
-}
-
-float chunk_forward_units(ChunkCoord origin, ChunkCoord coord, Vec3 direction) {
-    const float dx = static_cast<float>(coord.x - origin.x);
-    const float dz = static_cast<float>(coord.z - origin.z);
-    return dx * direction.x + dz * direction.z;
-}
-
-float chunk_side_units(ChunkCoord origin, ChunkCoord coord, Vec3 direction) {
-    const float dx = static_cast<float>(coord.x - origin.x);
-    const float dz = static_cast<float>(coord.z - origin.z);
-    return std::abs(dx * -direction.z + dz * direction.x);
-}
-
-bool load_area_chunk(ChunkCoord origin, ChunkCoord coord, int chunk_radius) {
-    const int dx = coord.x - origin.x;
-    const int dz = coord.z - origin.z;
-    return std::max(std::abs(dx), std::abs(dz)) <= chunk_radius;
-}
-
-bool keep_area_chunk(ChunkCoord origin, ChunkCoord coord, int chunk_radius) {
-    const int dx = coord.x - origin.x;
-    const int dz = coord.z - origin.z;
-    const int keep_radius = std::min(kMaxChunkRadius, chunk_radius + keep_radius_extra_chunks());
-    return std::max(std::abs(dx), std::abs(dz)) <= keep_radius;
-}
-
-// Compatibility helper: this is intentionally NOT a forward-corridor world mask.
-// It only answers whether a chunk belongs to the normal load area.
-bool corridor_candidate_chunk(
-    ChunkCoord origin,
-    ChunkCoord coord,
-    Vec3 direction,
-    float speed_blocks_per_second,
-    int chunk_radius
-) {
-    (void)direction;
-    (void)speed_blocks_per_second;
-    return load_area_chunk(origin, coord, chunk_radius);
-}
-
-float corridor_priority_score(
-    ChunkCoord origin,
-    ChunkCoord coord,
-    Vec3 direction,
-    float speed_blocks_per_second
-) {
-    const int dx = coord.x - origin.x;
-    const int dz = coord.z - origin.z;
-    const int chebyshev = std::max(std::abs(dx), std::abs(dz));
-    const int dist_sq = dx * dx + dz * dz;
-
-    if (chebyshev == 0) {
-        return 0.0f;
-    }
-
-    if (chebyshev <= corridor_safe_radius_chunks()) {
-        return 5.0f + static_cast<float>(dist_sq);
-    }
-
-    const float forward = chunk_forward_units(origin, coord, direction);
-    const float side = chunk_side_units(origin, coord, direction);
-
-    if (!corridor_mode_for_speed(speed_blocks_per_second)) {
-        const float behind = std::max(0.0f, -forward) * 8.0f;
-        const float look_bonus = std::max(0.0f, forward) * -1.5f;
-        return 80.0f + static_cast<float>(dist_sq) * 0.75f + side * 4.0f + behind + look_bonus;
-    }
-
-    const int forward_chunks = adaptive_corridor_forward_chunks(speed_blocks_per_second, kMaxChunkRadius);
-    const float clamped_forward = std::clamp(
-        forward,
-        0.0f,
-        static_cast<float>(forward_chunks)
-    );
-
-    const float behind_penalty = forward < -static_cast<float>(corridor_rear_keep_chunks())
-        ? 650.0f + std::abs(forward) * 45.0f
-        : std::max(0.0f, -forward) * 18.0f;
-
-    return 100.0f +
-        static_cast<float>(dist_sq) * 0.45f +
-        side * 22.0f +
-        behind_penalty -
-        clamped_forward * 10.0f;
-}float completed_result_apply_budget_ms() {
+float completed_result_apply_budget_ms() {
     return world_runtime_tuning().completed_result_apply_budget_ms;
 }
 
@@ -256,6 +120,48 @@ float very_fast_flight_speed_threshold() {
     return world_runtime_tuning().very_fast_flight_speed_threshold;
 }
 
+bool adaptive_corridor_streaming_enabled() {
+    return world_runtime_tuning().adaptive_corridor_streaming_enabled;
+}
+
+float corridor_speed_threshold_blocks_per_second() {
+    return world_runtime_tuning().corridor_speed_threshold_blocks_per_second;
+}
+
+int corridor_safe_radius_chunks() {
+    return std::max(1, world_runtime_tuning().corridor_safe_radius_chunks);
+}
+
+int corridor_rear_keep_chunks() {
+    return std::max(0, world_runtime_tuning().corridor_rear_keep_chunks);
+}
+
+int corridor_inner_half_width_chunks() {
+    return std::max(1, world_runtime_tuning().corridor_inner_half_width_chunks);
+}
+
+int corridor_outer_half_width_chunks() {
+    return std::max(corridor_inner_half_width_chunks(), world_runtime_tuning().corridor_outer_half_width_chunks);
+}
+
+bool corridor_mode_for_speed(float speed_blocks_per_second) {
+    return adaptive_corridor_streaming_enabled() &&
+        speed_blocks_per_second >= corridor_speed_threshold_blocks_per_second();
+}
+
+int adaptive_corridor_forward_chunks(float speed_blocks_per_second, int chunk_radius) {
+    const float chunks_per_second = speed_blocks_per_second / static_cast<float>(kChunkWidth);
+    const int calculated = static_cast<int>(
+        std::ceil(chunks_per_second * world_runtime_tuning().corridor_lookahead_seconds + 2.0f)
+    );
+
+    return std::clamp(
+        calculated,
+        std::max(1, world_runtime_tuning().corridor_min_forward_chunks),
+        std::min(chunk_radius, world_runtime_tuning().corridor_max_forward_chunks)
+    );
+}
+
 int adaptive_forward_buffer_chunks(float speed_blocks_per_second) {
     const float needed_blocks =
         speed_blocks_per_second * forward_buffer_pipeline_seconds() +
@@ -281,8 +187,101 @@ int adaptive_forward_width_chunks(float speed_blocks_per_second) {
     return std::clamp(width, min_forward_width_chunks(), max_forward_width_chunks());
 }
 
-constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
+Vec3 normalized_horizontal_direction(Vec3 direction) {
+    direction.y = 0.0f;
+    if (length(direction) <= 0.00001f) {
+        return {0.0f, 0.0f, -1.0f};
+    }
+    return normalize(direction);
+}
 
+float chunk_forward_units(ChunkCoord origin, ChunkCoord coord, Vec3 direction) {
+    const float dx = static_cast<float>(coord.x - origin.x);
+    const float dz = static_cast<float>(coord.z - origin.z);
+    return dx * direction.x + dz * direction.z;
+}
+
+float chunk_side_units(ChunkCoord origin, ChunkCoord coord, Vec3 direction) {
+    const float dx = static_cast<float>(coord.x - origin.x);
+    const float dz = static_cast<float>(coord.z - origin.z);
+    return std::abs(dx * -direction.z + dz * direction.x);
+}
+
+bool load_area_chunk(ChunkCoord origin, ChunkCoord coord, int chunk_radius) {
+    const int dx = coord.x - origin.x;
+    const int dz = coord.z - origin.z;
+    return std::max(std::abs(dx), std::abs(dz)) <= chunk_radius;
+}
+
+bool keep_area_chunk(ChunkCoord origin, ChunkCoord coord, int chunk_radius) {
+    const int dx = coord.x - origin.x;
+    const int dz = coord.z - origin.z;
+    const int keep_radius = std::min(kMaxChunkRadius, chunk_radius + keep_radius_extra_chunks());
+    return std::max(std::abs(dx), std::abs(dz)) <= keep_radius;
+}
+
+// Compatibility helper. This is NOT a forward-corridor world mask.
+// Corridor logic must affect priority only.
+bool corridor_candidate_chunk(
+    ChunkCoord origin,
+    ChunkCoord coord,
+    Vec3 direction,
+    float speed_blocks_per_second,
+    int chunk_radius
+) {
+    (void)direction;
+    (void)speed_blocks_per_second;
+    return load_area_chunk(origin, coord, chunk_radius);
+}
+
+float corridor_priority_score(
+    ChunkCoord origin,
+    ChunkCoord coord,
+    Vec3 direction,
+    float speed_blocks_per_second
+) {
+    const int dx = coord.x - origin.x;
+    const int dz = coord.z - origin.z;
+    const int chebyshev = std::max(std::abs(dx), std::abs(dz));
+    const int dist_sq = dx * dx + dz * dz;
+
+    if (chebyshev == 0) {
+        return 0.0f;
+    }
+
+    if (chebyshev <= corridor_safe_radius_chunks()) {
+        return 5.0f + static_cast<float>(dist_sq);
+    }
+
+    const float forward = chunk_forward_units(origin, coord, direction);
+    const float side = chunk_side_units(origin, coord, direction);
+
+    if (!corridor_mode_for_speed(speed_blocks_per_second)) {
+        const float behind = std::max(0.0f, -forward) * 8.0f;
+        const float look_bonus = std::max(0.0f, forward) * -1.5f;
+        return 80.0f + static_cast<float>(dist_sq) * 0.75f + side * 4.0f + behind + look_bonus;
+    }
+
+    const int forward_chunks = adaptive_corridor_forward_chunks(speed_blocks_per_second, world_runtime_tuning().target_chunk_radius);
+    const float clamped_forward = std::clamp(
+        forward,
+        0.0f,
+        static_cast<float>(forward_chunks)
+    );
+
+    const float behind_penalty = forward < -static_cast<float>(corridor_rear_keep_chunks())
+        ? 650.0f + std::abs(forward) * 45.0f
+        : std::max(0.0f, -forward) * 18.0f;
+
+    return 100.0f +
+        static_cast<float>(dist_sq) * 0.45f +
+        side * 22.0f +
+        behind_penalty -
+        clamped_forward * 10.0f;
+}
+
+
+constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 #ifdef __ANDROID__
 constexpr std::uint64_t kGrassUpdateIntervalFrames = 30;
@@ -676,11 +675,10 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     refresh_visible_chunks();
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
+
 int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) const {
     const ChunkCoord center = world_to_chunk(position);
     const int clamped_radius = std::clamp(max_radius, 0, chunk_radius_);
-
-    std::lock_guard lock(mutex_);
 
     int continuous_radius = -1;
     for (int ring = 0; ring <= clamped_radius; ++ring) {
@@ -714,6 +712,7 @@ int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) con
 bool WorldStreamer::all_chunks_uploaded_in_radius(Vec3 position, int radius) const {
     return continuous_uploaded_radius(position, radius) >= radius;
 }
+
 void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests) {
     if (max_requests == 0) {
         return;
@@ -771,7 +770,6 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
     );
 
     std::vector<ChunkCoord> ordered_chunks;
-
     for (int ring = first_incomplete_ring; ring <= max_schedule_ring; ++ring) {
         for (int dz = -ring; dz <= ring; ++dz) {
             for (int dx = -ring; dx <= ring; ++dx) {
@@ -821,7 +819,6 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
     );
 
     std::size_t requested = 0;
-
     for (const ChunkCoord& coord : ordered_chunks) {
         if (requested >= max_requests) {
             break;
@@ -845,7 +842,7 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
         ++requested;
     }
 
-    {
+    if (requested > 0) {
         std::lock_guard lock(mutex_);
         std::stable_sort(
             job_queue_.begin(),
@@ -886,6 +883,7 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
     refresh_visible_chunks();
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
+
 void WorldStreamer::tick_generation_jobs() {
     std::lock_guard lock(mutex_);
     std::size_t processed = 0;
