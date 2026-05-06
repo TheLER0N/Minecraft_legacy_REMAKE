@@ -137,7 +137,8 @@ Backup-File $RendererCppPath
 Backup-File $ApplicationCppPath
 
 # ----------------------------------------------------------------------
-# 1. Runtime tuning: half selected distance, 2 sec loading/exit, contiguous rings.
+# 1. Runtime tuning:
+#    keep no-gap visible radius, but generate/upload several rings ahead.
 # ----------------------------------------------------------------------
 
 $RuntimeTuningText = @'
@@ -178,6 +179,7 @@ struct WorldRuntimeTuning {
     std::size_t spawn_preload_upload_max_count {20};
     std::size_t streaming_backlog_requests_per_frame {8};
     std::size_t world_exit_mesh_unload_budget_per_step {128};
+    int contiguous_generation_ring_window {3};
     float preload_required_fraction {0.5f};
     float world_loading_min_seconds {2.0f};
     float world_leaving_min_seconds {2.0f};
@@ -224,6 +226,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         std::size_t {8},
         std::size_t {4},
         std::size_t {64},
+        2,
         0.5f,
         2.0f,
         2.0f,
@@ -269,6 +272,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         std::size_t {20},
         std::size_t {8},
         std::size_t {128},
+        3,
         0.5f,
         2.0f,
         2.0f,
@@ -284,7 +288,7 @@ Write-Utf8NoBom $RuntimeTuningPath $RuntimeTuningText
 Add-Log $Log "OK: world_runtime_tuning.hpp rewritten"
 
 # ----------------------------------------------------------------------
-# 2. WorldStreamer API: contiguous uploaded radius.
+# 2. WorldStreamer header: keep continuous uploaded radius API.
 # ----------------------------------------------------------------------
 
 $WorldStreamerHppText = Read-Utf8Text $WorldStreamerHppPath
@@ -313,13 +317,35 @@ if ($WorldStreamerHppChanged) {
 
 # ----------------------------------------------------------------------
 # 3. WorldStreamer implementation:
-#    - update_observer queues only the first incomplete ring
-#    - request_spawn_preload queues only the first incomplete ring
-#    - refresh_visible_chunks hides chunks outside the continuous uploaded radius
+#    generate/upload several rings ahead, but show only continuous rings.
 # ----------------------------------------------------------------------
 
 $WorldStreamerCppText = Read-Utf8Text $WorldStreamerCppPath
 $WorldStreamerCppChanged = $false
+
+if (-not $WorldStreamerCppText.Contains("int contiguous_generation_ring_window()")) {
+    $anchor = @'
+std::size_t streaming_backlog_requests_per_frame() {
+    return world_runtime_tuning().streaming_backlog_requests_per_frame;
+}
+'@
+    $insert = @'
+std::size_t streaming_backlog_requests_per_frame() {
+    return world_runtime_tuning().streaming_backlog_requests_per_frame;
+}
+
+int contiguous_generation_ring_window() {
+    return std::max(1, world_runtime_tuning().contiguous_generation_ring_window);
+}
+'@
+    if ($WorldStreamerCppText.Contains($anchor)) {
+        $WorldStreamerCppText = $WorldStreamerCppText.Replace($anchor, $insert)
+        $WorldStreamerCppChanged = $true
+        Add-Log $Log "OK: world_streamer.cpp added contiguous_generation_ring_window helper"
+    } else {
+        throw "Cannot add contiguous_generation_ring_window helper: streaming_backlog_requests_per_frame anchor not found"
+    }
+}
 
 $ContinuousMethods = @'
 int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) const {
@@ -412,7 +438,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     streaming_backlog_.clear();
     streaming_backlog_cursor_ = 0;
 
-    int active_ring = -1;
+    int first_incomplete_ring = -1;
     for (int ring = 0; ring <= chunk_radius_; ++ring) {
         bool ring_ready = true;
 
@@ -432,28 +458,33 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
         }
 
         if (!ring_ready) {
-            active_ring = ring;
+            first_incomplete_ring = ring;
             break;
         }
     }
 
-    if (active_ring >= 0) {
-        streaming_backlog_.reserve(static_cast<std::size_t>(active_ring == 0 ? 1 : active_ring * 8));
+    if (first_incomplete_ring >= 0) {
+        const int max_schedule_ring = std::min(
+            chunk_radius_,
+            first_incomplete_ring + contiguous_generation_ring_window() - 1
+        );
 
-        for (int dz = -active_ring; dz <= active_ring; ++dz) {
-            for (int dx = -active_ring; dx <= active_ring; ++dx) {
-                if (std::max(std::abs(dx), std::abs(dz)) != active_ring) {
-                    continue;
+        for (int ring = first_incomplete_ring; ring <= max_schedule_ring; ++ring) {
+            for (int dz = -ring; dz <= ring; ++dz) {
+                for (int dx = -ring; dx <= ring; ++dx) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                        continue;
+                    }
+
+                    const ChunkCoord coord {origin.x + dx, origin.z + dz};
+                    auto it = chunks_.find(coord);
+                    if (it != chunks_.end()) {
+                        it->second.last_touched_frame = frame_counter_;
+                        continue;
+                    }
+
+                    streaming_backlog_.push_back(coord);
                 }
-
-                const ChunkCoord coord {origin.x + dx, origin.z + dz};
-                auto it = chunks_.find(coord);
-                if (it != chunks_.end()) {
-                    it->second.last_touched_frame = frame_counter_;
-                    continue;
-                }
-
-                streaming_backlog_.push_back(coord);
             }
         }
 
@@ -465,6 +496,12 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
                 const int lhs_dz = lhs.z - origin.z;
                 const int rhs_dx = rhs.x - origin.x;
                 const int rhs_dz = rhs.z - origin.z;
+
+                const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+                const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+                if (lhs_ring != rhs_ring) {
+                    return lhs_ring < rhs_ring;
+                }
 
                 const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
                 const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
@@ -605,7 +642,7 @@ $WorldStreamerCppText = Replace-BetweenMarkers `
     "void WorldStreamer::update_observer(Vec3 position) {" `
     "int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) const" `
     $UpdateObserverBlock `
-    "WorldStreamer::update_observer contiguous ring-first" `
+    "WorldStreamer::update_observer ring-window generation" `
     ([ref]$WorldStreamerCppChanged) `
     $Log
 
@@ -630,7 +667,7 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
 
     const int preload_radius = std::clamp(radius, 0, chunk_radius_);
 
-    int active_ring = -1;
+    int first_incomplete_ring = -1;
     for (int ring = 0; ring <= preload_radius; ++ring) {
         bool ring_ready = true;
 
@@ -650,34 +687,40 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
         }
 
         if (!ring_ready) {
-            active_ring = ring;
+            first_incomplete_ring = ring;
             break;
         }
     }
 
-    if (active_ring < 0) {
+    if (first_incomplete_ring < 0) {
         refresh_visible_chunks();
         flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
         return;
     }
 
+    const int max_schedule_ring = std::min(
+        preload_radius,
+        first_incomplete_ring + contiguous_generation_ring_window() - 1
+    );
+
     std::vector<ChunkCoord> ordered_chunks;
-    ordered_chunks.reserve(static_cast<std::size_t>(active_ring == 0 ? 1 : active_ring * 8));
 
-    for (int dz = -active_ring; dz <= active_ring; ++dz) {
-        for (int dx = -active_ring; dx <= active_ring; ++dx) {
-            if (std::max(std::abs(dx), std::abs(dz)) != active_ring) {
-                continue;
+    for (int ring = first_incomplete_ring; ring <= max_schedule_ring; ++ring) {
+        for (int dz = -ring; dz <= ring; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                    continue;
+                }
+
+                const ChunkCoord coord {center.x + dx, center.z + dz};
+                auto it = chunks_.find(coord);
+                if (it != chunks_.end()) {
+                    it->second.last_touched_frame = frame_counter_;
+                    continue;
+                }
+
+                ordered_chunks.push_back(coord);
             }
-
-            const ChunkCoord coord {center.x + dx, center.z + dz};
-            auto it = chunks_.find(coord);
-            if (it != chunks_.end()) {
-                it->second.last_touched_frame = frame_counter_;
-                continue;
-            }
-
-            ordered_chunks.push_back(coord);
         }
     }
 
@@ -689,6 +732,12 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
             const int lhs_dz = lhs.z - center.z;
             const int rhs_dx = rhs.x - center.x;
             const int rhs_dz = rhs.z - center.z;
+
+            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+            if (lhs_ring != rhs_ring) {
+                return lhs_ring < rhs_ring;
+            }
 
             const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
             const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
@@ -778,10 +827,11 @@ $WorldStreamerCppText = Replace-BetweenMarkers `
     "void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests) {" `
     "void WorldStreamer::tick_generation_jobs() {" `
     $RequestSpawnPreloadBlock `
-    "WorldStreamer::request_spawn_preload contiguous ring-only" `
+    "WorldStreamer::request_spawn_preload ring-window generation" `
     ([ref]$WorldStreamerCppChanged) `
     $Log
 
+# Visibility: no gaps, only continuous uploaded radius is shown.
 $RefreshVisibleChunksBlock = @'
 void WorldStreamer::refresh_visible_chunks() {
     visible_chunks_.clear();
@@ -836,14 +886,12 @@ void WorldStreamer::refresh_visible_chunks() {
 
             const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
             const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
-
             if (lhs_ring != rhs_ring) {
                 return lhs_ring < rhs_ring;
             }
 
             const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
             const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
-
             if (lhs_dist != rhs_dist) {
                 return lhs_dist < rhs_dist;
             }
@@ -868,13 +916,89 @@ $WorldStreamerCppText = Replace-BetweenMarkers `
     ([ref]$WorldStreamerCppChanged) `
     $Log
 
+$DrainBudgetBlock = @'
+std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
+    std::size_t byte_budget,
+    std::size_t max_count,
+    Vec3 observer_position,
+    Vec3 observer_forward
+) {
+    (void)observer_forward;
+
+    std::vector<PendingChunkUpload> selected;
+    if (max_count == 0 || pending_uploads_.empty()) {
+        return selected;
+    }
+
+    const ChunkCoord origin = world_to_chunk(observer_position);
+
+    std::stable_sort(
+        pending_uploads_.begin(),
+        pending_uploads_.end(),
+        [&](const PendingChunkUpload& lhs, const PendingChunkUpload& rhs) {
+            const int lhs_dx = lhs.coord.x - origin.x;
+            const int lhs_dz = lhs.coord.z - origin.z;
+            const int rhs_dx = rhs.coord.x - origin.x;
+            const int rhs_dz = rhs.coord.z - origin.z;
+
+            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+            if (lhs_ring != rhs_ring) {
+                return lhs_ring < rhs_ring;
+            }
+
+            const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+            const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+            if (lhs_dist != rhs_dist) {
+                return lhs_dist < rhs_dist;
+            }
+
+            if (lhs.coord.x != rhs.coord.x) {
+                return lhs.coord.x < rhs.coord.x;
+            }
+
+            return lhs.coord.z < rhs.coord.z;
+        }
+    );
+
+    std::size_t used_bytes = 0;
+
+    while (!pending_uploads_.empty() && selected.size() < max_count) {
+        const std::size_t upload_bytes = mesh_byte_count(pending_uploads_.front().mesh);
+        if (!selected.empty() && used_bytes + upload_bytes > byte_budget) {
+            break;
+        }
+
+        used_bytes += upload_bytes;
+        selected.push_back(std::move(pending_uploads_.front()));
+        pending_uploads_.erase(pending_uploads_.begin());
+    }
+
+    return selected;
+}
+
+'@
+
+if ($WorldStreamerCppText.Contains("std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(")) {
+    $WorldStreamerCppText = Replace-BetweenMarkers `
+        $WorldStreamerCppText `
+        "std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(" `
+        "bool WorldStreamer::confirm_chunk_uploaded" `
+        $DrainBudgetBlock `
+        "WorldStreamer::drain_pending_uploads_by_budget ring-first upload" `
+        ([ref]$WorldStreamerCppChanged) `
+        $Log
+} else {
+    Add-Log $Log "WARN: drain_pending_uploads_by_budget marker not found; upload order not changed"
+}
+
 if ($WorldStreamerCppChanged) {
     Write-Utf8NoBom $WorldStreamerCppPath $WorldStreamerCppText
     Add-Log $Log "OK: src/game/world_streamer.cpp written"
 }
 
 # ----------------------------------------------------------------------
-# 4. Renderer: no black cube and no menu buttons during loading/exit.
+# 4. Renderer: transition must draw panorama + text only, no buttons/black cube.
 # ----------------------------------------------------------------------
 
 $RendererHppText = Read-Utf8Text $RendererHppPath
@@ -926,6 +1050,12 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
     }
 
     update_main_menu_buffers(time_seconds, use_night_panorama, -1);
+
+    menu_logo_vertex_count_ = 0;
+    menu_button_vertex_count_ = 0;
+    menu_button_highlight_vertex_count_ = 0;
+    menu_overlay_vertex_count_ = 0;
+    menu_text_vertex_count_ = 0;
 
     const FrameResources& frame = frames_[current_frame_];
     const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
@@ -1042,7 +1172,7 @@ if ($RendererCppChanged) {
 }
 
 # ----------------------------------------------------------------------
-# 5. Application: half-distance contiguous loading and 2 sec exit.
+# 5. Application: keep half-distance no-gap loading and 2 sec exit.
 # ----------------------------------------------------------------------
 
 $ApplicationCppText = Read-Utf8Text $ApplicationCppPath
@@ -1120,9 +1250,10 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
 
     log_message(
         LogLevel::Info,
-        std::string("Application: contiguous half-distance preload begin [selected_radius=") +
+        std::string("Application: optimized no-gap preload begin [selected_radius=") +
             std::to_string(selected_radius) +
             ", required_radius=" + std::to_string(required_preload_radius) +
+            ", ring_window=" + std::to_string(world_runtime_tuning().contiguous_generation_ring_window) +
             ", min_seconds=" + std::to_string(world_runtime_tuning().world_loading_min_seconds) + "]"
     );
 
@@ -1171,7 +1302,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
             elapsed_seconds >= world_runtime_tuning().world_loading_min_seconds) {
             log_message(
                 LogLevel::Info,
-                std::string("Application: contiguous half-distance preload done [frame=") +
+                std::string("Application: optimized no-gap preload done [frame=") +
                     std::to_string(frame) +
                     ", elapsed=" + std::to_string(elapsed_seconds) +
                     ", selected_radius=" + std::to_string(selected_radius) +
@@ -1186,7 +1317,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
             warning_logged = true;
             log_message(
                 LogLevel::Warning,
-                std::string("Application: contiguous preload is taking longer than expected [frame=") +
+                std::string("Application: optimized no-gap preload is taking longer than expected [frame=") +
                     std::to_string(frame) +
                     ", continuous_radius=" + std::to_string(continuous_radius) +
                     ", required_radius=" + std::to_string(required_preload_radius) + "]"
@@ -1206,7 +1337,7 @@ $ApplicationCppText = Replace-BetweenMarkers `
     "bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {" `
     "void Application::unload_world_for_menu() {" `
     $PreloadWorldSpawnFunction `
-    "Application::preload_world_spawn contiguous half distance" `
+    "Application::preload_world_spawn optimized no-gap half distance" `
     ([ref]$ApplicationCppChanged) `
     $Log
 
@@ -1278,6 +1409,10 @@ $RendererHppAfter = Read-Utf8Text $RendererHppPath
 $RendererCppAfter = Read-Utf8Text $RendererCppPath
 $ApplicationCppAfter = Read-Utf8Text $ApplicationCppPath
 
+if (-not $RuntimeTuningAfter.Contains("int contiguous_generation_ring_window {3};")) {
+    throw "Validation failed: contiguous_generation_ring_window missing"
+}
+
 if (-not $RuntimeTuningAfter.Contains("float preload_required_fraction {0.5f};")) {
     throw "Validation failed: preload_required_fraction missing"
 }
@@ -1286,24 +1421,47 @@ if (-not $WorldStreamerHppAfter.Contains("int continuous_uploaded_radius(Vec3 po
     throw "Validation failed: continuous_uploaded_radius declaration missing"
 }
 
-if (-not $WorldStreamerCppAfter.Contains("int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) const")) {
-    throw "Validation failed: continuous_uploaded_radius implementation missing"
+if (-not $WorldStreamerCppAfter.Contains("int contiguous_generation_ring_window()")) {
+    throw "Validation failed: contiguous_generation_ring_window helper missing"
 }
 
-if (-not $WorldStreamerCppAfter.Contains("active_ring = ring;")) {
-    throw "Validation failed: active ring generation missing"
+if (-not $WorldStreamerCppAfter.Contains("first_incomplete_ring + contiguous_generation_ring_window() - 1")) {
+    throw "Validation failed: ring window pre-generation missing"
 }
 
 if (-not $WorldStreamerCppAfter.Contains("ring <= continuous_radius")) {
     throw "Validation failed: visible chunks are not limited to continuous radius"
 }
 
-if ($RendererCppAfter.Contains("height * 0.42f") -and $RendererCppAfter.Contains("draw_menu_panorama_message")) {
-    throw "Validation failed: black overlay/cube still appears in panorama transition method"
+if (-not $WorldStreamerCppAfter.Contains("WorldStreamer::drain_pending_uploads_by_budget")) {
+    throw "Validation failed: pending upload budget function missing"
 }
 
-if (-not $RendererCppAfter.Contains("text_x + 2.0f")) {
+if (-not $WorldStreamerCppAfter.Contains("lhs_ring != rhs_ring")) {
+    throw "Validation failed: ring-first sorting missing"
+}
+
+$PanoramaMethodStart = $RendererCppAfter.IndexOf("void Renderer::draw_menu_panorama_message")
+$PanoramaMethodEnd = $RendererCppAfter.IndexOf("void Renderer::draw_pause_menu", $PanoramaMethodStart)
+if ($PanoramaMethodStart -lt 0 -or $PanoramaMethodEnd -lt 0) {
+    throw "Validation failed: panorama transition method markers missing"
+}
+
+$PanoramaMethod = $RendererCppAfter.Substring($PanoramaMethodStart, $PanoramaMethodEnd - $PanoramaMethodStart)
+if ($PanoramaMethod.Contains("append_hud_rect_fill")) {
+    throw "Validation failed: black cube/overlay still exists in panorama transition method"
+}
+
+if (-not $PanoramaMethod.Contains("menu_button_vertex_count_ = 0;")) {
+    throw "Validation failed: menu button counts are not cleared during transition"
+}
+
+if (-not $PanoramaMethod.Contains("text_x + 2.0f")) {
     throw "Validation failed: text shadow missing"
+}
+
+if (-not $ApplicationCppAfter.Contains("optimized no-gap preload begin")) {
+    throw "Validation failed: optimized preload function missing"
 }
 
 if (-not $ApplicationCppAfter.Contains("continuous_uploaded_radius(spawn_position, required_preload_radius)")) {
@@ -1336,19 +1494,19 @@ Add-Log $Log "- src/render/renderer.cpp"
 Add-Log $Log "- src/app/application.cpp"
 Add-Log $Log ""
 Add-Log $Log "What changed:"
-Add-Log $Log "- Chunk generation is now contiguous ring-first from the player."
-Add-Log $Log "- Loading waits for continuous uploaded radius = ceil(selected_chunk_radius * 0.5)."
-Add-Log $Log "- Far chunks are hidden until all rings between player and that chunk are uploaded."
-Add-Log $Log "- The normal in-world streamer queues only the first incomplete ring."
-Add-Log $Log "- Loading/exit screens use panorama + text, no black cube."
-Add-Log $Log "- Menu buttons are not drawn by the transition method."
-Add-Log $Log "- Exit waits at least 2 seconds and checks renderer/world cleanup."
+Add-Log $Log "- Keeps no-gap visual output: only continuous uploaded rings are visible."
+Add-Log $Log "- Restores optimization: generation/upload may run up to 3 rings ahead."
+Add-Log $Log "- Pending uploads are sorted ring-first to fill near holes before far chunks."
+Add-Log $Log "- Loading still waits for half selected chunk radius and at least 2 seconds."
+Add-Log $Log "- If half radius is ready early, preload continues farther until the 2 second gate ends."
+Add-Log $Log "- Transition renderer clears menu button/logo counts and draws only panorama plus text."
+Add-Log $Log "- Exit keeps the 2 second gate and waits for renderer/world cleanup."
 Add-Log $Log ""
 Add-Log $Log "Next step:"
 Add-Log $Log "1. Run build_release.bat."
-Add-Log $Log "2. Start world with radius 16 and verify log required_radius=8."
-Add-Log $Log "3. Confirm terrain appears as a solid carpet from player outward, not as islands."
-Add-Log $Log "4. Confirm menu buttons do not flicker during loading/exit."
+Add-Log $Log "2. With radius 16, check log: required_radius=8, ring_window=3."
+Add-Log $Log "3. Confirm terrain appears without holes, but generation no longer stalls one ring at a time."
+Add-Log $Log "4. Confirm buttons do not flicker during loading/exit."
 Add-Log $Log "5. If build fails, send the first compiler error and 30 lines after it."
 
 Write-Utf8NoBom $ReportPath (($Log -join [Environment]::NewLine) + [Environment]::NewLine)

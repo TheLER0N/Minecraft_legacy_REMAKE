@@ -309,33 +309,50 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     previous_observer_position_ = position;
     has_previous_observer_position_ = true;
     observer_chunk_ = origin;
+    last_streaming_update_position_ = position;
+    has_streaming_update_position_ = true;
 
-    const float streaming_distance = streaming_update_distance_blocks();
-    const float move_dx = position.x - last_streaming_update_position_.x;
-    const float move_dz = position.z - last_streaming_update_position_.z;
-    const float move_distance_sq = move_dx * move_dx + move_dz * move_dz;
-    const float required_distance_sq = streaming_distance * streaming_distance;
+    streaming_backlog_origin_ = origin;
+    streaming_backlog_.clear();
+    streaming_backlog_cursor_ = 0;
 
-    const bool should_rebuild_backlog =
-        !has_streaming_update_position_ ||
-        move_distance_sq >= required_distance_sq ||
-        streaming_backlog_.empty() ||
-        streaming_backlog_origin_.x != origin.x ||
-        streaming_backlog_origin_.z != origin.z;
+    int active_ring = -1;
+    for (int ring = 0; ring <= chunk_radius_; ++ring) {
+        bool ring_ready = true;
 
-    if (should_rebuild_backlog) {
-        last_streaming_update_position_ = position;
-        has_streaming_update_position_ = true;
-        streaming_backlog_origin_ = origin;
-        streaming_backlog_.clear();
-        streaming_backlog_cursor_ = 0;
-        streaming_backlog_.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+        for (int dz = -ring; dz <= ring && ring_ready; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                    continue;
+                }
 
-        for (int dz = -chunk_radius_; dz <= chunk_radius_; ++dz) {
-            for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
                 const ChunkCoord coord {origin.x + dx, origin.z + dz};
+                const auto it = chunks_.find(coord);
+                if (it == chunks_.end() || !it->second.uploaded_to_gpu) {
+                    ring_ready = false;
+                    break;
+                }
+            }
+        }
 
-                if (auto it = chunks_.find(coord); it != chunks_.end()) {
+        if (!ring_ready) {
+            active_ring = ring;
+            break;
+        }
+    }
+
+    if (active_ring >= 0) {
+        streaming_backlog_.reserve(static_cast<std::size_t>(active_ring == 0 ? 1 : active_ring * 8));
+
+        for (int dz = -active_ring; dz <= active_ring; ++dz) {
+            for (int dx = -active_ring; dx <= active_ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != active_ring) {
+                    continue;
+                }
+
+                const ChunkCoord coord {origin.x + dx, origin.z + dz};
+                auto it = chunks_.find(coord);
+                if (it != chunks_.end()) {
                     it->second.last_touched_frame = frame_counter_;
                     continue;
                 }
@@ -348,11 +365,15 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
             streaming_backlog_.begin(),
             streaming_backlog_.end(),
             [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
-                const float lhs_score = chunk_priority_score(lhs, observer_position_, observer_forward_);
-                const float rhs_score = chunk_priority_score(rhs, observer_position_, observer_forward_);
+                const int lhs_dx = lhs.x - origin.x;
+                const int lhs_dz = lhs.z - origin.z;
+                const int rhs_dx = rhs.x - origin.x;
+                const int rhs_dz = rhs.z - origin.z;
 
-                if (lhs_score != rhs_score) {
-                    return lhs_score < rhs_score;
+                const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+                const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+                if (lhs_dist != rhs_dist) {
+                    return lhs_dist < rhs_dist;
                 }
 
                 if (lhs.x != rhs.x) {
@@ -362,12 +383,6 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
                 return lhs.z < rhs.z;
             }
         );
-    } else {
-        for (auto& [coord, record] : chunks_) {
-            if (desired_chunk(origin, coord)) {
-                record.last_touched_frame = frame_counter_;
-            }
-        }
     }
 
     const std::size_t request_budget = std::min(
@@ -421,7 +436,32 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
             job_queue_.begin(),
             job_queue_.end(),
             [&](const ChunkJob& lhs, const ChunkJob& rhs) {
-                return job_priority_score_locked(lhs) < job_priority_score_locked(rhs);
+                const int lhs_dx = lhs.coord.x - origin.x;
+                const int lhs_dz = lhs.coord.z - origin.z;
+                const int rhs_dx = rhs.coord.x - origin.x;
+                const int rhs_dz = rhs.coord.z - origin.z;
+
+                const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+                const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+                if (lhs_ring != rhs_ring) {
+                    return lhs_ring < rhs_ring;
+                }
+
+                const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+                const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+                if (lhs_dist != rhs_dist) {
+                    return lhs_dist < rhs_dist;
+                }
+
+                if (lhs.type != rhs.type) {
+                    return static_cast<int>(lhs.type) < static_cast<int>(rhs.type);
+                }
+
+                if (lhs.coord.x != rhs.coord.x) {
+                    return lhs.coord.x < rhs.coord.x;
+                }
+
+                return lhs.coord.z < rhs.coord.z;
             }
         );
     }
@@ -461,6 +501,44 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     refresh_visible_chunks();
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
+int WorldStreamer::continuous_uploaded_radius(Vec3 position, int max_radius) const {
+    const ChunkCoord center = world_to_chunk(position);
+    const int clamped_radius = std::clamp(max_radius, 0, chunk_radius_);
+
+    std::lock_guard lock(mutex_);
+
+    int continuous_radius = -1;
+    for (int ring = 0; ring <= clamped_radius; ++ring) {
+        bool ring_ready = true;
+
+        for (int dz = -ring; dz <= ring && ring_ready; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                    continue;
+                }
+
+                const ChunkCoord coord {center.x + dx, center.z + dz};
+                const auto it = chunks_.find(coord);
+                if (it == chunks_.end() || !it->second.uploaded_to_gpu) {
+                    ring_ready = false;
+                    break;
+                }
+            }
+        }
+
+        if (!ring_ready) {
+            break;
+        }
+
+        continuous_radius = ring;
+    }
+
+    return continuous_radius;
+}
+
+bool WorldStreamer::all_chunks_uploaded_in_radius(Vec3 position, int radius) const {
+    return continuous_uploaded_radius(position, radius) >= radius;
+}
 void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t max_requests) {
     if (max_requests == 0) {
         return;
@@ -480,18 +558,55 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
     streaming_backlog_origin_ = center;
 
     const int preload_radius = std::clamp(radius, 0, chunk_radius_);
-    std::vector<ChunkCoord> ordered_chunks;
-    ordered_chunks.reserve(static_cast<std::size_t>((preload_radius * 2 + 1) * (preload_radius * 2 + 1)));
 
+    int active_ring = -1;
     for (int ring = 0; ring <= preload_radius; ++ring) {
-        for (int dz = -ring; dz <= ring; ++dz) {
+        bool ring_ready = true;
+
+        for (int dz = -ring; dz <= ring && ring_ready; ++dz) {
             for (int dx = -ring; dx <= ring; ++dx) {
                 if (std::max(std::abs(dx), std::abs(dz)) != ring) {
                     continue;
                 }
 
-                ordered_chunks.push_back({center.x + dx, center.z + dz});
+                const ChunkCoord coord {center.x + dx, center.z + dz};
+                const auto it = chunks_.find(coord);
+                if (it == chunks_.end() || !it->second.uploaded_to_gpu) {
+                    ring_ready = false;
+                    break;
+                }
             }
+        }
+
+        if (!ring_ready) {
+            active_ring = ring;
+            break;
+        }
+    }
+
+    if (active_ring < 0) {
+        refresh_visible_chunks();
+        flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
+        return;
+    }
+
+    std::vector<ChunkCoord> ordered_chunks;
+    ordered_chunks.reserve(static_cast<std::size_t>(active_ring == 0 ? 1 : active_ring * 8));
+
+    for (int dz = -active_ring; dz <= active_ring; ++dz) {
+        for (int dx = -active_ring; dx <= active_ring; ++dx) {
+            if (std::max(std::abs(dx), std::abs(dz)) != active_ring) {
+                continue;
+            }
+
+            const ChunkCoord coord {center.x + dx, center.z + dz};
+            auto it = chunks_.find(coord);
+            if (it != chunks_.end()) {
+                it->second.last_touched_frame = frame_counter_;
+                continue;
+            }
+
+            ordered_chunks.push_back(coord);
         }
     }
 
@@ -504,16 +619,8 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
             const int rhs_dx = rhs.x - center.x;
             const int rhs_dz = rhs.z - center.z;
 
-            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
-            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
-
-            if (lhs_ring != rhs_ring) {
-                return lhs_ring < rhs_ring;
-            }
-
             const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
             const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
-
             if (lhs_dist != rhs_dist) {
                 return lhs_dist < rhs_dist;
             }
@@ -529,12 +636,6 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
     std::size_t requested = 0;
 
     for (const ChunkCoord& coord : ordered_chunks) {
-        auto it = chunks_.find(coord);
-        if (it != chunks_.end()) {
-            it->second.last_touched_frame = frame_counter_;
-            continue;
-        }
-
         if (requested >= max_requests) {
             break;
         }
@@ -811,14 +912,46 @@ std::span<const ActiveChunk> WorldStreamer::visible_chunks() const {
 
 void WorldStreamer::refresh_visible_chunks() {
     visible_chunks_.clear();
+
+    int continuous_radius = -1;
+    for (int ring = 0; ring <= chunk_radius_; ++ring) {
+        bool ring_ready = true;
+
+        for (int dz = -ring; dz <= ring && ring_ready; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                    continue;
+                }
+
+                const ChunkCoord coord {observer_chunk_.x + dx, observer_chunk_.z + dz};
+                const auto it = chunks_.find(coord);
+                if (it == chunks_.end() || !it->second.uploaded_to_gpu) {
+                    ring_ready = false;
+                    break;
+                }
+            }
+        }
+
+        if (!ring_ready) {
+            break;
+        }
+
+        continuous_radius = ring;
+    }
+
     for (const auto& [coord, record] : chunks_) {
-        if (record.uploaded_to_gpu && desired_chunk(observer_chunk_, coord)) {
+        if (!record.uploaded_to_gpu || !desired_chunk(observer_chunk_, coord)) {
+            continue;
+        }
+
+        const int dx = coord.x - observer_chunk_.x;
+        const int dz = coord.z - observer_chunk_.z;
+        const int ring = std::max(std::abs(dx), std::abs(dz));
+        if (ring <= continuous_radius) {
             visible_chunks_.push_back({coord});
         }
     }
 
-
-    //
     std::sort(
         visible_chunks_.begin(),
         visible_chunks_.end(),
@@ -850,9 +983,6 @@ void WorldStreamer::refresh_visible_chunks() {
         }
     );
 }
-
-
-
 std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads() {
     std::vector<PendingChunkUpload> uploads;
     uploads.reserve(pending_uploads_.size());

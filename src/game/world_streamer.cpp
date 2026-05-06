@@ -43,6 +43,10 @@ std::size_t streaming_backlog_requests_per_frame() {
     return world_runtime_tuning().streaming_backlog_requests_per_frame;
 }
 
+int contiguous_generation_ring_window() {
+    return std::max(1, world_runtime_tuning().contiguous_generation_ring_window);
+}
+
 float completed_result_apply_budget_ms() {
     return world_runtime_tuning().completed_result_apply_budget_ms;
 }
@@ -316,7 +320,7 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
     streaming_backlog_.clear();
     streaming_backlog_cursor_ = 0;
 
-    int active_ring = -1;
+    int first_incomplete_ring = -1;
     for (int ring = 0; ring <= chunk_radius_; ++ring) {
         bool ring_ready = true;
 
@@ -336,28 +340,33 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
         }
 
         if (!ring_ready) {
-            active_ring = ring;
+            first_incomplete_ring = ring;
             break;
         }
     }
 
-    if (active_ring >= 0) {
-        streaming_backlog_.reserve(static_cast<std::size_t>(active_ring == 0 ? 1 : active_ring * 8));
+    if (first_incomplete_ring >= 0) {
+        const int max_schedule_ring = std::min(
+            chunk_radius_,
+            first_incomplete_ring + contiguous_generation_ring_window() - 1
+        );
 
-        for (int dz = -active_ring; dz <= active_ring; ++dz) {
-            for (int dx = -active_ring; dx <= active_ring; ++dx) {
-                if (std::max(std::abs(dx), std::abs(dz)) != active_ring) {
-                    continue;
+        for (int ring = first_incomplete_ring; ring <= max_schedule_ring; ++ring) {
+            for (int dz = -ring; dz <= ring; ++dz) {
+                for (int dx = -ring; dx <= ring; ++dx) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                        continue;
+                    }
+
+                    const ChunkCoord coord {origin.x + dx, origin.z + dz};
+                    auto it = chunks_.find(coord);
+                    if (it != chunks_.end()) {
+                        it->second.last_touched_frame = frame_counter_;
+                        continue;
+                    }
+
+                    streaming_backlog_.push_back(coord);
                 }
-
-                const ChunkCoord coord {origin.x + dx, origin.z + dz};
-                auto it = chunks_.find(coord);
-                if (it != chunks_.end()) {
-                    it->second.last_touched_frame = frame_counter_;
-                    continue;
-                }
-
-                streaming_backlog_.push_back(coord);
             }
         }
 
@@ -369,6 +378,12 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward, float dt_second
                 const int lhs_dz = lhs.z - origin.z;
                 const int rhs_dx = rhs.x - origin.x;
                 const int rhs_dz = rhs.z - origin.z;
+
+                const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+                const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+                if (lhs_ring != rhs_ring) {
+                    return lhs_ring < rhs_ring;
+                }
 
                 const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
                 const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
@@ -559,7 +574,7 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
 
     const int preload_radius = std::clamp(radius, 0, chunk_radius_);
 
-    int active_ring = -1;
+    int first_incomplete_ring = -1;
     for (int ring = 0; ring <= preload_radius; ++ring) {
         bool ring_ready = true;
 
@@ -579,34 +594,40 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
         }
 
         if (!ring_ready) {
-            active_ring = ring;
+            first_incomplete_ring = ring;
             break;
         }
     }
 
-    if (active_ring < 0) {
+    if (first_incomplete_ring < 0) {
         refresh_visible_chunks();
         flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
         return;
     }
 
+    const int max_schedule_ring = std::min(
+        preload_radius,
+        first_incomplete_ring + contiguous_generation_ring_window() - 1
+    );
+
     std::vector<ChunkCoord> ordered_chunks;
-    ordered_chunks.reserve(static_cast<std::size_t>(active_ring == 0 ? 1 : active_ring * 8));
 
-    for (int dz = -active_ring; dz <= active_ring; ++dz) {
-        for (int dx = -active_ring; dx <= active_ring; ++dx) {
-            if (std::max(std::abs(dx), std::abs(dz)) != active_ring) {
-                continue;
+    for (int ring = first_incomplete_ring; ring <= max_schedule_ring; ++ring) {
+        for (int dz = -ring; dz <= ring; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring) {
+                    continue;
+                }
+
+                const ChunkCoord coord {center.x + dx, center.z + dz};
+                auto it = chunks_.find(coord);
+                if (it != chunks_.end()) {
+                    it->second.last_touched_frame = frame_counter_;
+                    continue;
+                }
+
+                ordered_chunks.push_back(coord);
             }
-
-            const ChunkCoord coord {center.x + dx, center.z + dz};
-            auto it = chunks_.find(coord);
-            if (it != chunks_.end()) {
-                it->second.last_touched_frame = frame_counter_;
-                continue;
-            }
-
-            ordered_chunks.push_back(coord);
         }
     }
 
@@ -618,6 +639,12 @@ void WorldStreamer::request_spawn_preload(Vec3 position, int radius, std::size_t
             const int lhs_dz = lhs.z - center.z;
             const int rhs_dx = rhs.x - center.x;
             const int rhs_dz = rhs.z - center.z;
+
+            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+            if (lhs_ring != rhs_ring) {
+                return lhs_ring < rhs_ring;
+            }
 
             const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
             const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
@@ -963,14 +990,12 @@ void WorldStreamer::refresh_visible_chunks() {
 
             const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
             const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
-
             if (lhs_ring != rhs_ring) {
                 return lhs_ring < rhs_ring;
             }
 
             const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
             const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
-
             if (lhs_dist != rhs_dist) {
                 return lhs_dist < rhs_dist;
             }
@@ -1052,21 +1077,34 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
     Vec3 observer_position,
     Vec3 observer_forward
 ) {
-    if (byte_budget == 0 || max_count == 0 || pending_uploads_.empty()) {
-        return {};
+    (void)observer_forward;
+
+    std::vector<PendingChunkUpload> selected;
+    if (max_count == 0 || pending_uploads_.empty()) {
+        return selected;
     }
 
-    const Vec3 planar_forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
+    const ChunkCoord origin = world_to_chunk(observer_position);
 
-    std::sort(
+    std::stable_sort(
         pending_uploads_.begin(),
         pending_uploads_.end(),
         [&](const PendingChunkUpload& lhs, const PendingChunkUpload& rhs) {
-            const float lhs_priority = chunk_priority_score(lhs.coord, observer_position, planar_forward);
-            const float rhs_priority = chunk_priority_score(rhs.coord, observer_position, planar_forward);
+            const int lhs_dx = lhs.coord.x - origin.x;
+            const int lhs_dz = lhs.coord.z - origin.z;
+            const int rhs_dx = rhs.coord.x - origin.x;
+            const int rhs_dz = rhs.coord.z - origin.z;
 
-            if (lhs_priority != rhs_priority) {
-                return lhs_priority < rhs_priority;
+            const int lhs_ring = std::max(std::abs(lhs_dx), std::abs(lhs_dz));
+            const int rhs_ring = std::max(std::abs(rhs_dx), std::abs(rhs_dz));
+            if (lhs_ring != rhs_ring) {
+                return lhs_ring < rhs_ring;
+            }
+
+            const int lhs_dist = lhs_dx * lhs_dx + lhs_dz * lhs_dz;
+            const int rhs_dist = rhs_dx * rhs_dx + rhs_dz * rhs_dz;
+            if (lhs_dist != rhs_dist) {
+                return lhs_dist < rhs_dist;
             }
 
             if (lhs.coord.x != rhs.coord.x) {
@@ -1077,48 +1115,21 @@ std::vector<PendingChunkUpload> WorldStreamer::drain_pending_uploads_by_budget(
         }
     );
 
+    std::size_t used_bytes = 0;
 
-    std::vector<PendingChunkUpload> uploads;
-    uploads.reserve(max_count);
-
-    std::size_t selected_bytes = 0;
-    std::size_t selected_count = 0;
-
-    for (; selected_count < pending_uploads_.size(); ++selected_count) {
-        PendingChunkUpload& pending = pending_uploads_[selected_count];
-
-        auto chunk_it = chunks_.find(pending.coord);
-        if (chunk_it == chunks_.end() ||
-            chunk_it->second.generation_version != pending.version ||
-            chunk_it->second.latest_rebuild_serial != pending.rebuild_serial ||
-            chunk_it->second.latest_upload_token != pending.upload_token) {
-            record_stale_upload_drop(pending.coord);
-            continue;
-        }
-
-        const std::size_t upload_bytes = mesh_byte_count(pending.mesh);
-
-        if (!uploads.empty() && selected_bytes + upload_bytes > byte_budget) {
+    while (!pending_uploads_.empty() && selected.size() < max_count) {
+        const std::size_t upload_bytes = mesh_byte_count(pending_uploads_.front().mesh);
+        if (!selected.empty() && used_bytes + upload_bytes > byte_budget) {
             break;
         }
 
-        selected_bytes += upload_bytes;
-        uploads.push_back(std::move(pending));
-
-        if (uploads.size() >= max_count) {
-            ++selected_count;
-            break;
-        }
+        used_bytes += upload_bytes;
+        selected.push_back(std::move(pending_uploads_.front()));
+        pending_uploads_.erase(pending_uploads_.begin());
     }
 
-    pending_uploads_.erase(
-        pending_uploads_.begin(),
-        pending_uploads_.begin() + static_cast<std::ptrdiff_t>(selected_count)
-    );
-
-    return uploads;
+    return selected;
 }
-
 bool WorldStreamer::confirm_chunk_uploaded(
     ChunkCoord coord,
     std::uint64_t version,

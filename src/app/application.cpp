@@ -319,9 +319,10 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
 
     log_message(
         LogLevel::Info,
-        std::string("Application: contiguous half-distance preload begin [selected_radius=") +
+        std::string("Application: optimized no-gap preload begin [selected_radius=") +
             std::to_string(selected_radius) +
             ", required_radius=" + std::to_string(required_preload_radius) +
+            ", ring_window=" + std::to_string(world_runtime_tuning().contiguous_generation_ring_window) +
             ", min_seconds=" + std::to_string(world_runtime_tuning().world_loading_min_seconds) + "]"
     );
 
@@ -370,7 +371,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
             elapsed_seconds >= world_runtime_tuning().world_loading_min_seconds) {
             log_message(
                 LogLevel::Info,
-                std::string("Application: contiguous half-distance preload done [frame=") +
+                std::string("Application: optimized no-gap preload done [frame=") +
                     std::to_string(frame) +
                     ", elapsed=" + std::to_string(elapsed_seconds) +
                     ", selected_radius=" + std::to_string(selected_radius) +
@@ -385,7 +386,7 @@ bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
             warning_logged = true;
             log_message(
                 LogLevel::Warning,
-                std::string("Application: contiguous preload is taking longer than expected [frame=") +
+                std::string("Application: optimized no-gap preload is taking longer than expected [frame=") +
                     std::to_string(frame) +
                     ", continuous_radius=" + std::to_string(continuous_radius) +
                     ", required_radius=" + std::to_string(required_preload_radius) + "]"

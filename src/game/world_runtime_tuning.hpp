@@ -35,6 +35,7 @@ struct WorldRuntimeTuning {
     std::size_t spawn_preload_upload_max_count {20};
     std::size_t streaming_backlog_requests_per_frame {8};
     std::size_t world_exit_mesh_unload_budget_per_step {128};
+    int contiguous_generation_ring_window {3};
     float preload_required_fraction {0.5f};
     float world_loading_min_seconds {2.0f};
     float world_leaving_min_seconds {2.0f};
@@ -81,6 +82,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         std::size_t {8},
         std::size_t {4},
         std::size_t {64},
+        2,
         0.5f,
         2.0f,
         2.0f,
@@ -126,6 +128,7 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         std::size_t {20},
         std::size_t {8},
         std::size_t {128},
+        3,
         0.5f,
         2.0f,
         2.0f,

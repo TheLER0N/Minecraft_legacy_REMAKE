@@ -1248,6 +1248,12 @@ void Renderer::draw_menu_panorama_message(float time_seconds, bool use_night_pan
 
     update_main_menu_buffers(time_seconds, use_night_panorama, -1);
 
+    menu_logo_vertex_count_ = 0;
+    menu_button_vertex_count_ = 0;
+    menu_button_highlight_vertex_count_ = 0;
+    menu_overlay_vertex_count_ = 0;
+    menu_text_vertex_count_ = 0;
+
     const FrameResources& frame = frames_[current_frame_];
     const MenuTexture& panorama = use_night_panorama ? menu_panorama_night_ : menu_panorama_day_;
 
