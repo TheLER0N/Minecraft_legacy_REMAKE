@@ -36,7 +36,13 @@ std::size_t max_completed_results_per_tick() {
 
 std::size_t max_job_queue_size() {
     return world_runtime_tuning().max_job_queue_size;
-}constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
+}
+
+float completed_result_apply_budget_ms() {
+    return world_runtime_tuning().completed_result_apply_budget_ms;
+}
+
+constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
 
 
 #ifdef __ANDROID__
@@ -241,6 +247,21 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
                 break;
             }
 
+            {
+
+                std::lock_guard lock(mutex_);
+
+                if (job_queue_.size() >= max_job_queue_size()) {
+
+                    requested_this_frame = max_new_chunk_requests_per_frame();
+
+                    break;
+
+                }
+
+            }
+
+
             ChunkRecord record {};
             record.generation_version = next_chunk_version_++;
             record.mesh_version = 0;
@@ -310,7 +331,18 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 void WorldStreamer::tick_generation_jobs() {
     std::lock_guard lock(mutex_);
     std::size_t processed = 0;
+    const auto apply_start = std::chrono::steady_clock::now();
     while (!completed_.empty() && processed < max_completed_results_per_tick()) {
+        if (processed > 0) {
+            const float apply_ms = std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - apply_start
+            ).count();
+
+            if (apply_ms >= completed_result_apply_budget_ms()) {
+                break;
+            }
+        }
+
         JobResult result = std::move(completed_.front());
         completed_.pop();
         ++processed;

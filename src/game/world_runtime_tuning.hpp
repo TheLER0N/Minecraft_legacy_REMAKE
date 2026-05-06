@@ -14,6 +14,7 @@ struct WorldRuntimeTuning {
     std::size_t chunk_upload_byte_budget_per_frame {2ull * 1024ull * 1024ull};
     std::size_t chunk_upload_backlog_budget_per_frame {4ull * 1024ull * 1024ull};
     std::size_t chunk_upload_max_count_per_frame {2};
+    float completed_result_apply_budget_ms {1.5f};
 };
 
 inline WorldRuntimeTuning world_runtime_tuning() {
@@ -34,7 +35,8 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         std::size_t {192},
         512ull * 1024ull,
         1024ull * 1024ull,
-        std::size_t {2}
+        std::size_t {2},
+        1.0f
     };
 #else
     const std::size_t reserved_threads = hardware_threads >= 8 ? 2 : 1;
@@ -54,7 +56,8 @@ inline WorldRuntimeTuning world_runtime_tuning() {
         std::clamp<std::size_t>(worker_count * 96, std::size_t {384}, std::size_t {1536}),
         3ull * 1024ull * 1024ull,
         6ull * 1024ull * 1024ull,
-        std::clamp<std::size_t>(worker_count / 2, std::size_t {2}, std::size_t {6})
+        std::clamp<std::size_t>(worker_count / 2, std::size_t {2}, std::size_t {6}),
+        1.5f
     };
 #endif
 }

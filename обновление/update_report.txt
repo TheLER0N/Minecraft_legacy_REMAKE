@@ -1,0 +1,30 @@
+Patch report
+Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_203539
+Time: 2026-05-06 20:35:39
+
+OK: src/game/world_runtime_tuning.hpp written to stable target state
+OK: runtime tuning include already exists
+OK: fixed '}constexpr' formatting defect
+OK: normalized runtime helper block
+OK: inserted job queue backpressure before new chunk record creation
+OK: inserted completed result apply time budget
+OK: src/game/world_streamer.cpp written
+
+Changed files:
+- src/game/world_runtime_tuning.hpp
+- src/game/world_streamer.cpp
+
+What changed:
+- Repaired stage1 partial patch state.
+- Fixed the '}constexpr' formatting defect.
+- Added completed_result_apply_budget_ms to runtime tuning.
+- Added time-budgeted processing in WorldStreamer::tick_generation_jobs().
+- Added robust job_queue_ backpressure before new chunk requests.
+- Did not reduce graphics quality, render distance, lighting, water, leaves, or mesh detail.
+
+Next step:
+1. Rebuild Debug.
+2. If Debug passes, rebuild Release.
+3. Test movement while generating new chunks.
+4. If compiler fails, send the first error line and 30 lines after it.
