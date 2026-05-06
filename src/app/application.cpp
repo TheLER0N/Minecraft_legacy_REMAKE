@@ -30,7 +30,7 @@ constexpr float kBreakRepeatIntervalSeconds = 0.18f;
 #ifdef __ANDROID__
 constexpr int kInitialChunkRadius = 8;
 #else
-constexpr int kInitialChunkRadius = 10;
+constexpr int kInitialChunkRadius = 16;
 #endif
 
 std::size_t chunk_upload_byte_budget_per_frame() {

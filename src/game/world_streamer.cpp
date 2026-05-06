@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <optional>
@@ -40,6 +41,26 @@ std::size_t max_job_queue_size() {
 
 float completed_result_apply_budget_ms() {
     return world_runtime_tuning().completed_result_apply_budget_ms;
+}
+
+int target_chunk_radius() {
+    return world_runtime_tuning().target_chunk_radius;
+}
+
+float streaming_update_distance_blocks() {
+    return world_runtime_tuning().streaming_update_distance_blocks;
+}
+
+float forward_priority_weight() {
+    return world_runtime_tuning().forward_priority_weight;
+}
+
+float side_priority_weight() {
+    return world_runtime_tuning().side_priority_weight;
+}
+
+float back_priority_penalty() {
+    return world_runtime_tuning().back_priority_penalty;
 }
 
 constexpr std::size_t kMaxDirtyChunkSavesPerTick = 1;
@@ -167,7 +188,7 @@ WorldStreamer::WorldStreamer(WorldSeed seed, const BlockRegistry& block_registry
     , world_save_(world_save)
     , block_registry_(block_registry)
     , generator_(block_registry)
-    , chunk_radius_(std::clamp(chunk_radius, kMinChunkRadius, kMaxChunkRadius)) {
+    , chunk_radius_(std::clamp(std::max(chunk_radius, target_chunk_radius()), kMinChunkRadius, kMaxChunkRadius)) {
     const std::size_t worker_count = world_runtime_tuning().worker_count;
 
     log_message(
@@ -212,9 +233,23 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
 
     observer_chunk_ = origin;
 
-    std::vector<std::vector<ChunkCoord>> missing_by_ring(
-        static_cast<std::size_t>(chunk_radius_ + 1)
-    );
+    const float streaming_distance = streaming_update_distance_blocks();
+    const float move_dx = position.x - last_streaming_update_position_.x;
+    const float move_dz = position.z - last_streaming_update_position_.z;
+    const float move_distance_sq = move_dx * move_dx + move_dz * move_dz;
+    const float required_distance_sq = streaming_distance * streaming_distance;
+
+    if (has_streaming_update_position_ && move_distance_sq < required_distance_sq) {
+        refresh_visible_chunks();
+        flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
+        return;
+    }
+
+    last_streaming_update_position_ = position;
+    has_streaming_update_position_ = true;
+
+    std::vector<ChunkCoord> missing_chunks;
+    missing_chunks.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
 
     for (int dz = -chunk_radius_; dz <= chunk_radius_; ++dz) {
         for (int dx = -chunk_radius_; dx <= chunk_radius_; ++dx) {
@@ -225,57 +260,52 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
                 continue;
             }
 
-            const int ring = std::max(std::abs(dx), std::abs(dz));
-            missing_by_ring[static_cast<std::size_t>(ring)].push_back(coord);
+            missing_chunks.push_back(coord);
         }
     }
 
-    const auto by_priority = [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
-        return chunk_priority_score(lhs, observer_position_, observer_forward_) <
-            chunk_priority_score(rhs, observer_position_, observer_forward_);
-    };
+    std::sort(
+        missing_chunks.begin(),
+        missing_chunks.end(),
+        [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
+            const float lhs_score = chunk_priority_score(lhs, observer_position_, observer_forward_);
+            const float rhs_score = chunk_priority_score(rhs, observer_position_, observer_forward_);
 
-    for (std::vector<ChunkCoord>& ring_chunks : missing_by_ring) {
-        std::sort(ring_chunks.begin(), ring_chunks.end(), by_priority);
-    }
+            if (lhs_score != rhs_score) {
+                return lhs_score < rhs_score;
+            }
+
+            if (lhs.x != rhs.x) {
+                return lhs.x < rhs.x;
+            }
+
+            return lhs.z < rhs.z;
+        }
+    );
 
     std::size_t requested_this_frame = 0;
 
-    for (const std::vector<ChunkCoord>& ring_chunks : missing_by_ring) {
-        for (const ChunkCoord& coord : ring_chunks) {
-            if (requested_this_frame >= max_new_chunk_requests_per_frame()) {
-                break;
-            }
-
-            {
-
-                std::lock_guard lock(mutex_);
-
-                if (job_queue_.size() >= max_job_queue_size()) {
-
-                    requested_this_frame = max_new_chunk_requests_per_frame();
-
-                    break;
-
-                }
-
-            }
-
-
-            ChunkRecord record {};
-            record.generation_version = next_chunk_version_++;
-            record.mesh_version = 0;
-            record.last_touched_frame = frame_counter_;
-            const std::uint64_t version = record.generation_version;
-
-            chunks_.emplace(coord, std::move(record));
-            queue_generate_job(coord, version);
-            ++requested_this_frame;
-        }
-
+    for (const ChunkCoord& coord : missing_chunks) {
         if (requested_this_frame >= max_new_chunk_requests_per_frame()) {
             break;
         }
+
+        {
+            std::lock_guard lock(mutex_);
+            if (job_queue_.size() >= max_job_queue_size()) {
+                break;
+            }
+        }
+
+        ChunkRecord record {};
+        record.generation_version = next_chunk_version_++;
+        record.mesh_version = 0;
+        record.last_touched_frame = frame_counter_;
+        const std::uint64_t version = record.generation_version;
+
+        chunks_.emplace(coord, std::move(record));
+        queue_generate_job(coord, version);
+        ++requested_this_frame;
     }
 
     {
@@ -321,13 +351,9 @@ void WorldStreamer::update_observer(Vec3 position, Vec3 forward) {
         }
     }
 
-
     refresh_visible_chunks();
-
-
     flush_dirty_chunks(kMaxDirtyChunkSavesPerTick);
 }
-
 void WorldStreamer::tick_generation_jobs() {
     std::lock_guard lock(mutex_);
     std::size_t processed = 0;
@@ -1476,35 +1502,34 @@ bool WorldStreamer::desired_chunk(const ChunkCoord& origin, const ChunkCoord& ca
 }
 
 float WorldStreamer::chunk_priority_score(ChunkCoord coord, Vec3 observer_position, Vec3 observer_forward) const {
-    const float center_x = static_cast<float>(coord.x * kChunkWidth) + static_cast<float>(kChunkWidth) * 0.5f;
-    const float center_z = static_cast<float>(coord.z * kChunkDepth) + static_cast<float>(kChunkDepth) * 0.5f;
-
-    const float to_chunk_x = center_x - observer_position.x;
-    const float to_chunk_z = center_z - observer_position.z;
-    const float distance_sq = to_chunk_x * to_chunk_x + to_chunk_z * to_chunk_z;
-    const float distance = std::sqrt(std::max(distance_sq, 0.0001f));
+    const ChunkCoord origin = world_to_chunk(observer_position);
+    const float dx = static_cast<float>(coord.x - origin.x);
+    const float dz = static_cast<float>(coord.z - origin.z);
 
     Vec3 forward = normalize({observer_forward.x, 0.0f, observer_forward.z});
     if (length(forward) <= 0.00001f) {
         forward = {0.0f, 0.0f, -1.0f};
     }
 
-    const float dir_x = to_chunk_x / distance;
-    const float dir_z = to_chunk_z / distance;
-    const float dot = std::clamp(dir_x * forward.x + dir_z * forward.z, -1.0f, 1.0f);
-    const float side = std::abs(dir_x * forward.z - dir_z * forward.x);
+    const float right_x = -forward.z;
+    const float right_z = forward.x;
 
-    const int dx = coord.x - observer_chunk_.x;
-    const int dz = coord.z - observer_chunk_.z;
-    const int ring = std::max(std::abs(dx), std::abs(dz));
+    const float forward_axis = dx * forward.x + dz * forward.z;
+    const float side_axis = dx * right_x + dz * right_z;
+    const float side_abs = std::abs(side_axis);
+    const float dist_sq = dx * dx + dz * dz;
 
-    const float front_priority = (1.0f - dot) * 36.0f;
-    const float side_priority = side * 8.0f;
-    const float behind_penalty = dot < -0.10f ? 160.0f : 0.0f;
+    float score =
+        -forward_axis * forward_priority_weight() +
+        side_abs * side_priority_weight() +
+        dist_sq * 0.02f;
 
-    return static_cast<float>(ring) * 100.0f + distance * 0.50f + front_priority + side_priority + behind_penalty;
+    if (forward_axis < -0.25f) {
+        score += back_priority_penalty() + std::abs(forward_axis) * forward_priority_weight();
+    }
+
+    return score;
 }
-
 float WorldStreamer::job_priority_score_locked(const ChunkJob& job) const {
     float score = chunk_priority_score(job.coord, observer_position_, observer_forward_);
 

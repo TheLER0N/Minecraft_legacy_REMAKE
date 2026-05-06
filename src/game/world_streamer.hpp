@@ -240,6 +240,8 @@ private:
     ChunkCoord observer_chunk_ {};
     Vec3 observer_position_ {};
     Vec3 observer_forward_ {0.0f, 0.0f, -1.0f};
+    Vec3 last_streaming_update_position_ {};
+    bool has_streaming_update_position_ {false};
     std::uint64_t next_chunk_version_ {1};
     std::uint64_t next_light_job_token_ {1};
     std::uint64_t next_rebuild_serial_ {1};
