@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 namespace ml {
@@ -25,7 +26,7 @@ constexpr int kMinChunkRadius = 2;
 #ifdef __ANDROID__
 constexpr int kMaxChunkRadius = 6;
 #else
-constexpr int kMaxChunkRadius = 100;
+constexpr int kMaxChunkRadius = 24;
 #endif
 
 std::size_t max_new_chunk_requests_per_frame() {
@@ -1106,16 +1107,14 @@ void WorldStreamer::refresh_visible_chunks() {
     const Vec3 stream_direction = normalized_horizontal_direction(observer_forward_);
 
     std::vector<ChunkCoord> open;
-    std::vector<ChunkCoord> visited;
-    open.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
-    visited.reserve(static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1)));
+    std::unordered_set<ChunkCoord, ChunkCoordHasher> visited;
 
-    auto contains_coord = [](const std::vector<ChunkCoord>& list, ChunkCoord coord) {
-        return std::find(list.begin(), list.end(), coord) != list.end();
-    };
+    const std::size_t reserve_count = static_cast<std::size_t>((chunk_radius_ * 2 + 1) * (chunk_radius_ * 2 + 1));
+    open.reserve(reserve_count);
+    visited.reserve(reserve_count);
 
     open.push_back(observer_chunk_);
-    visited.push_back(observer_chunk_);
+    visited.insert(observer_chunk_);
 
     constexpr std::array<std::array<int, 2>, 4> neighbors {{
         {{ 1,  0}},
@@ -1139,7 +1138,8 @@ void WorldStreamer::refresh_visible_chunks() {
 
         for (const auto& offset : neighbors) {
             const ChunkCoord next {current.x + offset[0], current.z + offset[1]};
-            if (contains_coord(visited, next)) {
+
+            if (visited.contains(next)) {
                 continue;
             }
 
@@ -1152,7 +1152,7 @@ void WorldStreamer::refresh_visible_chunks() {
                 continue;
             }
 
-            visited.push_back(next);
+            visited.insert(next);
             open.push_back(next);
         }
     }
