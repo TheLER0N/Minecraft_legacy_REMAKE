@@ -205,6 +205,8 @@ bool Application::initialize() {
 }
 
 void Application::start_world() {
+    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+
     if (world_streamer_ == nullptr) {
         try {
             const std::filesystem::path save_root = platform_.save_root_directory() / "default";
@@ -216,14 +218,25 @@ void Application::start_world() {
 
             world_streamer_ = std::make_unique<WorldStreamer>(metadata.world_seed, block_registry_, kInitialChunkRadius, world_save_.get());
             world_streamer_->set_leaves_render_mode(leaves_render_mode_);
+
             const WorldGenerator spawn_generator {block_registry_};
             const int spawn_x = 32;
             const int spawn_z = 80;
             const int surface_y = spawn_generator.surface_height_at(spawn_x, spawn_z, metadata.world_seed);
             const float spawn_y = static_cast<float>(std::max(surface_y, kSeaLevel) + 2);
+
             player_.set_body_position({static_cast<float>(spawn_x), spawn_y, static_cast<float>(spawn_z)});
             camera_.set_pose({static_cast<float>(spawn_x), spawn_y + kPlayerEyeHeight, static_cast<float>(spawn_z)}, -90.0f, -22.0f);
             player_.set_view_from_forward(camera_.forward());
+
+            if (!preload_world_spawn(player_.position(), player_.forward())) {
+                world_streamer_.reset();
+                world_save_.reset();
+                platform_.set_mouse_capture(false);
+                app_state_ = AppState::MainMenu;
+                return;
+            }
+
             log_message(LogLevel::Info, "Application: world streamer created seed=" + std::to_string(metadata.world_seed));
         } catch (const std::exception& exception) {
             log_message(LogLevel::Error, std::string("Application: failed to start world: ") + exception.what());
@@ -241,11 +254,175 @@ void Application::start_world() {
             return;
         }
     }
+
     platform_.set_mouse_capture(true);
     platform_.enter_world_music();
     app_state_ = AppState::InWorld;
 }
 
+void Application::render_black_transition_frames(int frame_count) {
+    const CameraFrameData loading_camera {
+        Mat4::identity(),
+        Mat4::identity(),
+        Mat4::identity(),
+        {},
+        {0.0f, 0.0f, -1.0f},
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f}
+    };
+
+    for (int i = 0; i < frame_count && !platform_.should_close(); ++i) {
+        platform_.pump_events();
+        renderer_.begin_frame(loading_camera);
+        renderer_.end_frame();
+    }
+}
+
+bool Application::preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward) {
+    if (world_streamer_ == nullptr) {
+        return false;
+    }
+
+    const int spawn_block_x = static_cast<int>(std::floor(spawn_position.x));
+    const int spawn_block_z = static_cast<int>(std::floor(spawn_position.z));
+    const int probe_y = std::clamp(
+        static_cast<int>(std::floor(spawn_position.y)) - 1,
+        kWorldMinY,
+        kWorldMaxY
+    );
+
+    constexpr std::array<std::array<int, 2>, 9> preload_probe_offsets {{
+        {{0, 0}},
+        {{1, 0}},
+        {{-1, 0}},
+        {{0, 1}},
+        {{0, -1}},
+        {{1, 1}},
+        {{-1, 1}},
+        {{1, -1}},
+        {{-1, -1}}
+    }};
+
+    const int max_frames = world_runtime_tuning().spawn_preload_max_frames;
+    const std::size_t min_visible_chunks = world_runtime_tuning().spawn_preload_min_visible_chunks;
+    const std::size_t upload_max_count = world_runtime_tuning().spawn_preload_upload_max_count;
+    bool spawn_column_loaded_once = false;
+
+    log_message(
+        LogLevel::Info,
+        std::string("Application: preload spawn chunks begin [min_visible=") +
+            std::to_string(min_visible_chunks) +
+            ", max_frames=" + std::to_string(max_frames) + "]"
+    );
+
+    for (int frame = 0; frame < max_frames && !platform_.should_close(); ++frame) {
+        platform_.pump_events();
+
+        world_streamer_->update_observer(spawn_position, spawn_forward);
+        world_streamer_->tick_generation_jobs();
+
+        for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
+            renderer_.unload_chunk_mesh(coord);
+        }
+
+        auto pending_uploads = world_streamer_->drain_pending_uploads_by_budget(
+            chunk_upload_backlog_budget_per_frame(),
+            upload_max_count,
+            spawn_position,
+            spawn_forward
+        );
+
+        for (PendingChunkUpload& upload : pending_uploads) {
+            const bool upload_ok = renderer_.upload_chunk_mesh(upload.coord, upload.mesh, upload.visibility);
+            if (upload_ok) {
+                world_streamer_->confirm_chunk_uploaded(
+                    upload.coord,
+                    upload.version,
+                    upload.rebuild_serial,
+                    upload.upload_token
+                );
+            }
+        }
+
+        world_streamer_->refresh_visible_chunks();
+
+        int loaded_probe_columns = 0;
+        for (const auto& offset : preload_probe_offsets) {
+            const BlockQueryResult query = world_streamer_->query_block_at_world(
+                spawn_block_x + offset[0],
+                probe_y,
+                spawn_block_z + offset[1]
+            );
+
+            if (query.status == BlockQueryStatus::Loaded) {
+                ++loaded_probe_columns;
+            }
+        }
+
+        const BlockQueryResult spawn_probe = world_streamer_->query_block_at_world(
+            spawn_block_x,
+            probe_y,
+            spawn_block_z
+        );
+
+        spawn_column_loaded_once = spawn_column_loaded_once || spawn_probe.status == BlockQueryStatus::Loaded;
+        const WorldStreamer::StreamingStats stats = world_streamer_->stats();
+
+        if (spawn_column_loaded_once &&
+            loaded_probe_columns >= 5 &&
+            stats.visible_chunks >= min_visible_chunks) {
+            log_message(
+                LogLevel::Info,
+                std::string("Application: preload spawn chunks done [frame=") +
+                    std::to_string(frame) +
+                    ", visible=" + std::to_string(stats.visible_chunks) +
+                    ", probes=" + std::to_string(loaded_probe_columns) + "]"
+            );
+            return true;
+        }
+
+        render_black_transition_frames(1);
+    }
+
+    if (platform_.should_close()) {
+        return false;
+    }
+
+    const WorldStreamer::StreamingStats stats = world_streamer_->stats();
+    log_message(
+        LogLevel::Warning,
+        std::string("Application: preload spawn chunks timeout; continuing [visible=") +
+            std::to_string(stats.visible_chunks) +
+            ", spawn_loaded=" + (spawn_column_loaded_once ? "true" : "false") + "]"
+    );
+
+    return spawn_column_loaded_once;
+}
+
+void Application::unload_world_for_menu() {
+    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+
+    if (world_streamer_ != nullptr) {
+        world_streamer_->flush_all_dirty_chunks();
+
+        for (const ActiveChunk& chunk : world_streamer_->visible_chunks()) {
+            renderer_.unload_chunk_mesh(chunk.coord);
+        }
+
+        for (const ChunkCoord& coord : world_streamer_->drain_pending_unloads()) {
+            renderer_.unload_chunk_mesh(coord);
+        }
+
+        world_streamer_.reset();
+        world_save_.reset();
+    }
+
+    hovered_block_.reset();
+    block_break_.target.reset();
+    block_break_.repeat_seconds = 0.0f;
+
+    render_black_transition_frames(world_runtime_tuning().transition_black_frames);
+}
 Renderer::CaveVisibilityFrame Application::update_cave_visibility_frame(Vec3 observer_position) {
     const int camera_x = static_cast<int>(std::floor(observer_position.x));
     const int camera_y = static_cast<int>(std::floor(observer_position.y));
@@ -492,9 +669,7 @@ int Application::run() {
                 }
             } else if (activated_button == kExitGameButtonIndex) {
                 platform_.play_ui_press_sound();
-                if (world_streamer_ != nullptr) {
-                    world_streamer_->flush_all_dirty_chunks();
-                }
+                unload_world_for_menu();
                 platform_.set_mouse_capture(false);
                 platform_.start_menu_music();
                 app_state_ = AppState::MainMenu;

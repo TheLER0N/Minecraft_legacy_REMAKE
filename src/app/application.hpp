@@ -43,6 +43,9 @@ private:
     };
 
     void start_world();
+    bool preload_world_spawn(Vec3 spawn_position, Vec3 spawn_forward);
+    void render_black_transition_frames(int frame_count);
+    void unload_world_for_menu();
     Renderer::CaveVisibilityFrame update_cave_visibility_frame(Vec3 observer_position);
     int hovered_menu_button(const InputState& input) const;
     std::array<MenuButton, 6> menu_buttons() const;

@@ -1,40 +1,31 @@
 Patch report
 Project root: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2
-Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_211007
-Time: 2026-05-06 21:10:07
+Backup dir: C:\Users\Пользователь\Desktop\old-build\minecraft_legacy_2\обновление\backup_20260506_212749
+Time: 2026-05-06 21:27:49
 
-OK: runtime tuning rewritten
-    - min forward buffer = 3 chunks
-    - max forward buffer = 8 chunks
-    - forward corridor width = 3..7 chunks
-    - speed thresholds = 25/45 blocks per second
-OK: added update_observer(Vec3, Vec3, float) declaration
-OK: added observer speed tracking fields
-OK: src/game/world_streamer.hpp written
-OK: <cmath> include already exists
-OK: normalized runtime helper block with adaptive forward corridor helpers
-OK: constructor target radius enforcement already exists
-OK: replaced WorldStreamer::update_observer overloads
-OK: replaced WorldStreamer::chunk_priority_score
-OK: src/game/world_streamer.cpp written
-OK: application.cpp passes dt into update_observer
-OK: application.cpp desktop kInitialChunkRadius already 16
+OK: src/game/world_runtime_tuning.hpp rewritten
+    - keeps 16 chunk target
+    - keeps adaptive forward corridor settings
+    - adds spawn preload settings
+OK: application.hpp added preload/transition/unload helper declarations
+OK: src/app/application.hpp written
+OK: replaced Application::start_world/preload/unload helper block
+OK: PauseMenu Exit branch now unloads world through unload_world_for_menu()
+OK: src/app/application.cpp written
 
 Changed files:
 - src/game/world_runtime_tuning.hpp
-- src/game/world_streamer.hpp
-- src/game/world_streamer.cpp
+- src/app/application.hpp
 - src/app/application.cpp
 
 What changed:
-- Added adaptive forward corridor instead of one forward chunk.
-- Minimum forward buffer is 3 chunks.
-- Fast movement raises forward buffer up to 8 chunks.
-- Corridor width grows from 3 to 7 chunks.
-- Application now passes frame dt so WorldStreamer can estimate movement speed.
-- Existing radius 16 and 4-block streaming gate remain.
+- Adds transition frames before entering and leaving the world.
+- Adds spawn preload before AppState::InWorld.
+- Forces spawn chunk/near columns to load before player control.
+- Uploads spawn-area chunk meshes before entering the world.
+- PauseMenu Exit now unloads world meshes and resets world_streamer/world_save.
 
 Next step:
 1. Run build_release.bat.
-2. Test walking, fast movement and debug flying.
+2. Start a world and check that the player does not fall before chunks appear.
 3. If build fails, send the first compiler error and 30 lines after it.
